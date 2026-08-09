@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // BrandsService provides operations on the brand associated with the current credentials.
@@ -119,7 +120,7 @@ func orderListQuery(options *OrderListOptions) url.Values {
 		for index, state := range options.ExcludedStates {
 			states[index] = string(state)
 		}
-		query.Set("excluded_states", joinCommaSeparated(states))
+		query.Set("excluded_states", strings.Join(states, ","))
 	}
 	setString(query, "ship_after_max", options.ShipAfterMax)
 	setString(query, "created_at_min", options.CreatedAtMin)
@@ -150,21 +151,4 @@ func setString(query url.Values, name string, value *string) {
 	if value != nil {
 		query.Set(name, *value)
 	}
-}
-
-// joinCommaSeparated joins values for Faire query parameters that accept a comma-separated string.
-func joinCommaSeparated(values []string) string {
-	return joinStrings(values, ",")
-}
-
-// joinStrings joins values without importing strings in each service implementation.
-func joinStrings(values []string, separator string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	result := values[0]
-	for _, value := range values[1:] {
-		result += separator + value
-	}
-	return result
 }
