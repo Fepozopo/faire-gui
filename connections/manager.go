@@ -31,7 +31,7 @@ func NewManager(repository ConnectionRepository, credentialStore CredentialStore
 	return &Manager{repository: repository, credentialStore: credentialStore}, nil
 }
 
-// NewDefaultManager creates a manager using the user's application-config directory and macOS Keychain.
+// NewDefaultManager creates a manager using the user's application-config directory and operating system credential store.
 func NewDefaultManager() (*Manager, error) {
 	path, err := DefaultMetadataPath()
 	if err != nil {
@@ -41,7 +41,7 @@ func NewDefaultManager() (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	credentialStore, err := NewKeychainCredentialStore(DefaultKeychainService)
+	credentialStore, err := NewSystemCredentialStore(DefaultCredentialService)
 	if err != nil {
 		return nil, err
 	}

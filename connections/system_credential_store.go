@@ -10,8 +10,8 @@ import (
 	keyring "github.com/zalando/go-keyring"
 )
 
-// DefaultKeychainService is the macOS Keychain service name used by the application.
-const DefaultKeychainService = "github.com/Fepozopo/faire-gui"
+// DefaultCredentialService identifies this application's entries in the operating system credential store.
+const DefaultCredentialService = "github.com/Fepozopo/faire-gui"
 
 // ErrCredentialNotFound indicates that a connection has no secret credential entry.
 var ErrCredentialNotFound = errors.New("connection credentials not found")
@@ -23,24 +23,25 @@ type CredentialStore interface {
 	Delete(context.Context, string) error
 }
 
-// KeychainCredentialStore stores one serialized credential bundle per connection in macOS Keychain.
-type KeychainCredentialStore struct {
+// SystemCredentialStore stores one serialized credential bundle per connection in the operating system credential store.
+// It uses macOS Keychain on Darwin and Windows Credential Manager on Windows.
+type SystemCredentialStore struct {
 	service string
 }
 
-// NewKeychainCredentialStore creates a macOS Keychain-backed credential store using service.
-func NewKeychainCredentialStore(service string) (*KeychainCredentialStore, error) {
-	if runtime.GOOS != "darwin" {
-		return nil, fmt.Errorf("connections: macOS Keychain is unavailable on %s", runtime.GOOS)
+// NewSystemCredentialStore creates a credential store using service on macOS or Windows.
+func NewSystemCredentialStore(service string) (*SystemCredentialStore, error) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("connections: an operating system credential store is unavailable on %s", runtime.GOOS)
 	}
 	if service == "" {
-		return nil, fmt.Errorf("connections: Keychain service is required")
+		return nil, fmt.Errorf("connections: credential service is required")
 	}
-	return &KeychainCredentialStore{service: service}, nil
+	return &SystemCredentialStore{service: service}, nil
 }
 
-// Load retrieves and decodes credentials for one connection from macOS Keychain.
-func (s *KeychainCredentialStore) Load(ctx context.Context, connectionID string) (Credentials, error) {
+// Load retrieves and decodes credentials for one connection from the operating system credential store.
+func (s *SystemCredentialStore) Load(ctx context.Context, connectionID string) (Credentials, error) {
 	if err := ctx.Err(); err != nil {
 		return Credentials{}, err
 	}
@@ -59,8 +60,8 @@ func (s *KeychainCredentialStore) Load(ctx context.Context, connectionID string)
 	return credentials, nil
 }
 
-// Save serializes credentials and stores them in macOS Keychain for one connection.
-func (s *KeychainCredentialStore) Save(ctx context.Context, connectionID string, credentials Credentials) error {
+// Save serializes credentials and stores them in the operating system credential store for one connection.
+func (s *SystemCredentialStore) Save(ctx context.Context, connectionID string, credentials Credentials) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -74,8 +75,8 @@ func (s *KeychainCredentialStore) Save(ctx context.Context, connectionID string,
 	return nil
 }
 
-// Delete removes credentials for one connection from macOS Keychain.
-func (s *KeychainCredentialStore) Delete(ctx context.Context, connectionID string) error {
+// Delete removes credentials for one connection from the operating system credential store.
+func (s *SystemCredentialStore) Delete(ctx context.Context, connectionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

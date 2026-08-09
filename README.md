@@ -53,14 +53,14 @@ export FAIRE_OAUTH_ACCESS_TOKEN="your-oauth-token"
 
 `FAIRE_BASE_URL` is optional and exists primarily for tests or a future non-production environment. Do not set direct-token and OAuth variables for the same client configuration; the client rejects mixed credentials.
 
-## Saved macOS connections
+## Saved connections
 
-The `connections` package is the preferred production credential layer on macOS. It stores only connection labels, Faire brand IDs, and authentication mode in an owner-only metadata file beneath the user configuration directory. It stores the corresponding direct-token or OAuth credential bundle in macOS Keychain under the `github.com/Fepozopo/faire-gui` service. Tokens and OAuth secrets are never written to the metadata file.
+The `connections` package is the preferred production credential layer on macOS and Windows. It stores only connection labels, Faire brand IDs, and authentication mode in an owner-only metadata file beneath the user configuration directory. It stores the corresponding direct-token or OAuth credential bundle in macOS Keychain or Windows Credential Manager under the `github.com/Fepozopo/faire-gui` service. Tokens and OAuth secrets are never written to the metadata file.
 
 ```go
 manager, err := connections.NewDefaultManager()
 if err != nil {
-    // Handle an unavailable Keychain or configuration directory.
+    // Handle an unavailable credential store or configuration directory.
 }
 
 connection, err := manager.Save(context.Background(), connections.Connection{
