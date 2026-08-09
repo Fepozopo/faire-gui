@@ -53,6 +53,30 @@ export FAIRE_OAUTH_ACCESS_TOKEN="your-oauth-token"
 
 `FAIRE_BASE_URL` is optional and exists primarily for tests or a future non-production environment. Do not set direct-token and OAuth variables for the same client configuration; the client rejects mixed credentials.
 
+## Saved macOS connections
+
+The `connections` package is the preferred production credential layer on macOS. It stores only connection labels, Faire brand IDs, and authentication mode in an owner-only metadata file beneath the user configuration directory. It stores the corresponding direct-token or OAuth credential bundle in macOS Keychain under the `github.com/Fepozopo/faire-gui` service. Tokens and OAuth secrets are never written to the metadata file.
+
+```go
+manager, err := connections.NewDefaultManager()
+if err != nil {
+    // Handle an unavailable Keychain or configuration directory.
+}
+
+connection, err := manager.Save(context.Background(), connections.Connection{
+    Label:              "Brand 21C",
+    AuthenticationMode: faire.AuthenticationModeAccessToken,
+}, connections.Credentials{
+    AccessToken: os.Getenv("API_TOKEN_21C"),
+})
+
+client, selected, err := manager.Client(context.Background(), connection.ID, connections.ClientOptions{})
+_ = client
+_ = selected
+```
+
+For OAuth connections, use `faire.AuthenticationModeOAuth` and supply both `AppCredentials` and `OAuthAccessToken` in `connections.Credentials`. The GUI should list `manager.List(...)` results and build a new client through `manager.Client(...)` when the user changes the selected connection.
+
 ## Usage
 
 ```go
