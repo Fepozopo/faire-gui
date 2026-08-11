@@ -1,6 +1,26 @@
 # faire-gui
 
-A future GoGUI desktop application for managing a Faire brand. The current implementation is the API-only backend foundation; no GUI code has been added yet.
+A GoGPU desktop application for managing a Faire brand. It currently provides a secure, read-only saved-connection selector and brand-profile verification screen, backed by the typed Faire API client.
+
+## Desktop application
+
+The initial desktop screen loads non-secret saved-connection metadata, lets the user select a connection, and displays its read-only Faire brand profile. It creates every selected client through `connections.Manager`, so credentials remain in macOS Keychain or Windows Credential Manager and are never retained in UI state.
+
+Create saved connections through the `connections` package before launching the app; connection creation and editing screens are not implemented yet.
+
+GoGPU requires CGO to be disabled. Run the app with:
+
+```sh
+CGO_ENABLED=0 go run ./cmd/faire-gui
+```
+
+If a machine has graphics-driver trouble, GoGPU can use its software renderer:
+
+```sh
+CGO_ENABLED=0 GOGPU_GRAPHICS_API=software go run ./cmd/faire-gui
+```
+
+The current target platforms are macOS and Windows.
 
 ## Backend structure
 
