@@ -62,6 +62,25 @@ func (m *Manager) List(ctx context.Context) ([]Connection, error) {
 	return m.repository.List(ctx)
 }
 
+// UpdateMetadata updates the non-secret metadata for an existing connection.
+// It preserves the existing authentication mode and does not load, return, or modify credentials.
+func (m *Manager) UpdateMetadata(ctx context.Context, connection Connection) (Connection, error) {
+	existingConnection, err := m.find(ctx, connection.ID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if connection.AuthenticationMode != existingConnection.AuthenticationMode {
+		return Connection{}, fmt.Errorf("connections: authentication mode cannot change when updating metadata")
+	}
+	if err := connection.validate(); err != nil {
+		return Connection{}, err
+	}
+	if err := m.repository.Save(ctx, connection); err != nil {
+		return Connection{}, err
+	}
+	return connection, nil
+}
+
 // Save creates or updates a connection and stores its credentials in the secure credential store.
 func (m *Manager) Save(ctx context.Context, connection Connection, credentials Credentials) (Connection, error) {
 	if connection.ID == "" {

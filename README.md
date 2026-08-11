@@ -1,12 +1,19 @@
 # faire-gui
 
-A GoGPU desktop application for managing a Faire brand. It currently provides a secure, read-only saved-connection selector and brand-profile verification screen, backed by the typed Faire API client.
+A GoGPU desktop application for managing a Faire brand. It provides a secure saved-connection manager, a brand selector, and read-only brand-profile verification backed by the typed Faire API client.
 
 ## Desktop application
 
-The initial desktop screen loads non-secret saved-connection metadata, lets the user select a connection, and displays its read-only Faire brand profile. It creates every selected client through `connections.Manager`, so credentials remain in macOS Keychain or Windows Credential Manager and are never retained in UI state.
+The desktop application has **Brands** and **Connections** tabs. The Brands tab lets the user select a saved connection and displays its read-only Faire brand profile. The Connections tab supports direct-token connections:
 
-Create saved connections through the `connections` package before launching the app; connection creation and editing screens are not implemented yet.
+- create a connection with a label, optional Faire brand ID, and password-masked access-token field;
+- edit only non-secret label and brand-ID metadata;
+- explicitly replace an access token without displaying or loading the prior token into the UI; and
+- delete a connection after a modal confirmation, removing both metadata and its operating-system credential entry.
+
+OAuth connections can have their metadata edited and can be deleted, but OAuth credential creation and reauthorization remain unavailable until the Authorization Code Grant flow is implemented.
+
+Every selected client is created through `connections.Manager`. Credentials remain in macOS Keychain or Windows Credential Manager; the only in-memory GUI credential is the transient value being typed into a password field, which is cleared on each save attempt and never serialized or logged.
 
 GoGPU requires CGO to be disabled. Run the app with:
 
@@ -95,7 +102,7 @@ _ = client
 _ = selected
 ```
 
-For OAuth connections, use `faire.AuthenticationModeOAuth` and supply both `AppCredentials` and `OAuthAccessToken` in `connections.Credentials`. The GUI should list `manager.List(...)` results and build a new client through `manager.Client(...)` when the user changes the selected connection.
+For OAuth connections, use `faire.AuthenticationModeOAuth` and supply both `AppCredentials` and `OAuthAccessToken` in `connections.Credentials`. The desktop UI lists existing OAuth connections and permits metadata edits or deletion, but it does not accept OAuth credentials until an Authorization Code Grant flow exists. The GUI always builds a selected client through `manager.Client(...)`.
 
 ## Usage
 

@@ -100,6 +100,76 @@ func TestManagerOAuthConnectionBuildsOAuthClient(t *testing.T) {
 	}
 }
 
+// TestManagerUpdateMetadataPreservesCredentials verifies metadata edits do not alter the stored credential bundle.
+func TestManagerUpdateMetadataPreservesCredentials(t *testing.T) {
+	manager, metadataPath := newTestManager(t)
+	connection, err := manager.Save(context.Background(), Connection{
+		Label:              "Original Brand",
+		AuthenticationMode: faire.AuthenticationModeAccessToken,
+	}, Credentials{AccessToken: "direct-secret"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	updated, err := manager.UpdateMetadata(context.Background(), Connection{
+		ID:                 connection.ID,
+		Label:              "Renamed Brand",
+		BrandID:            faire.BrandID("brand-123"),
+		AuthenticationMode: faire.AuthenticationModeAccessToken,
+	})
+	if err != nil {
+		t.Fatalf("UpdateMetadata() error = %v", err)
+	}
+	if updated.Label != "Renamed Brand" || updated.BrandID != "brand-123" {
+		t.Fatalf("UpdateMetadata() = %#v", updated)
+	}
+
+	metadata, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(metadata), "direct-secret") {
+		t.Fatalf("metadata unexpectedly contains credentials: %s", metadata)
+	}
+
+	client, _, err := manager.Client(context.Background(), connection.ID, ClientOptions{
+		BaseURL: "https://example.test",
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) *http.Response {
+			if request.Header.Get("X-FAIRE-ACCESS-TOKEN") != "direct-secret" {
+				t.Fatalf("access-token header = %q", request.Header.Get("X-FAIRE-ACCESS-TOKEN"))
+			}
+			return testResponse(request, http.StatusOK, `{}`)
+		})},
+	})
+	if err != nil {
+		t.Fatalf("Client() error = %v", err)
+	}
+	if _, err := client.Brands.Profile(context.Background()); err != nil {
+		t.Fatalf("Profile() error = %v", err)
+	}
+}
+
+// TestManagerUpdateMetadataRejectsAuthenticationModeChanges verifies metadata updates cannot change credential mode.
+func TestManagerUpdateMetadataRejectsAuthenticationModeChanges(t *testing.T) {
+	manager, _ := newTestManager(t)
+	connection, err := manager.Save(context.Background(), Connection{
+		Label:              "Original Brand",
+		AuthenticationMode: faire.AuthenticationModeAccessToken,
+	}, Credentials{AccessToken: "direct-secret"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	_, err = manager.UpdateMetadata(context.Background(), Connection{
+		ID:                 connection.ID,
+		Label:              connection.Label,
+		AuthenticationMode: faire.AuthenticationModeOAuth,
+	})
+	if err == nil {
+		t.Fatal("UpdateMetadata() error = nil, want authentication-mode rejection")
+	}
+}
+
 // TestManagerDeleteRemovesConnectionAndCredentials verifies deleted connections cannot be selected again.
 func TestManagerDeleteRemovesConnectionAndCredentials(t *testing.T) {
 	manager, _ := newTestManager(t)
