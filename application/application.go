@@ -16,6 +16,7 @@ import (
 	uiapp "github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/core/button"
 	"github.com/gogpu/ui/core/dialog"
+	"github.com/gogpu/ui/core/scrollview"
 	"github.com/gogpu/ui/core/tabview"
 	"github.com/gogpu/ui/core/textfield"
 	"github.com/gogpu/ui/desktop"
@@ -133,8 +134,8 @@ func (a *Application) root() widget.Widget {
 	return primitives.Box(tabs).Background(widget.RGBA8(250, 250, 250, 255))
 }
 
-// brandSelector builds the read-only view used to select a saved connection and load its brand profile.
-// It returns a selector widget that contains no credentials.
+// brandSelector builds the read-only, vertically scrollable view used to select a saved connection and load its brand profile.
+// It returns a selector widget that contains no credentials and keeps its status reachable when many connections are saved.
 func (a *Application) brandSelector() widget.Widget {
 	children := []widget.Widget{
 		primitives.Text("Faire").FontSize(32).Bold(),
@@ -156,11 +157,15 @@ func (a *Application) brandSelector() widget.Widget {
 		primitives.Text("").ContentSignal(a.status).FontSize(16),
 	)
 
-	return primitives.VBox(children...).Padding(32).Gap(16)
+	return scrollview.New(
+		primitives.VBox(children...).Padding(32).Gap(16),
+		scrollview.DirectionOpt(scrollview.Vertical),
+		scrollview.ScrollbarOpt(scrollview.ScrollbarAuto),
+	)
 }
 
-// connectionManager builds the direct-token connection-management screen.
-// It returns a widget that permits metadata edits without reading saved credentials into the UI.
+// connectionManager builds the vertically scrollable direct-token connection-management screen.
+// It returns a widget that keeps every connection action reachable without reading saved credentials into the UI.
 func (a *Application) connectionManager() widget.Widget {
 	children := []widget.Widget{
 		primitives.Text("Saved connections").FontSize(28).Bold(),
@@ -177,7 +182,11 @@ func (a *Application) connectionManager() widget.Widget {
 		children = append(children, a.connectionRow(savedConnection))
 	}
 
-	return primitives.VBox(children...).Padding(32).Gap(14)
+	return scrollview.New(
+		primitives.VBox(children...).Padding(32).Gap(14),
+		scrollview.DirectionOpt(scrollview.Vertical),
+		scrollview.ScrollbarOpt(scrollview.ScrollbarAuto),
+	)
 }
 
 // connectionEditor builds the form for the Application's active connection-management operation.

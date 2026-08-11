@@ -8,6 +8,8 @@ import (
 
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
+	"github.com/gogpu/ui/core/scrollview"
+	"github.com/gogpu/ui/widget"
 )
 
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
@@ -68,6 +70,20 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	message := profileLoadErrorMessage(&faire.APIError{StatusCode: http.StatusUnauthorized})
 	if !strings.Contains(message, "credentials") {
 		t.Fatalf("profileLoadErrorMessage() = %q, want credential guidance", message)
+	}
+}
+
+// TestTabBodiesAreVerticallyScrollable verifies that all saved-connection controls remain reachable when tab content overflows.
+func TestTabBodiesAreVerticallyScrollable(t *testing.T) {
+	application := newApplication(context.Background(), nil, nil, "")
+
+	for name, tabBody := range map[string]widget.Widget{
+		"Brands":      application.brandSelector(),
+		"Connections": application.connectionManager(),
+	} {
+		if _, ok := tabBody.(*scrollview.Widget); !ok {
+			t.Errorf("%s tab body = %T, want *scrollview.Widget", name, tabBody)
+		}
 	}
 }
 
