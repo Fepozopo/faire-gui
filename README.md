@@ -8,12 +8,13 @@ The desktop application has **Brands** and **Connections** tabs. The Brands tab 
 
 - create a connection with a label, optional Faire brand ID, and password-masked access-token field;
 - edit only non-secret label and brand-ID metadata;
-- explicitly replace an access token without displaying or loading the prior token into the UI; and
+- explicitly replace an access token without displaying or loading the prior token into the UI;
+- import a direct token from one environment-variable name the user explicitly enters, such as `API_TOKEN_21C`, without scanning the process environment; and
 - delete a connection after a modal confirmation, removing both metadata and its operating-system credential entry.
 
 OAuth connections can have their metadata edited and can be deleted, but OAuth credential creation and reauthorization remain unavailable until the Authorization Code Grant flow is implemented.
 
-Every selected client is created through `connections.Manager`. Credentials remain in macOS Keychain or Windows Credential Manager; the only in-memory GUI credential is the transient value being typed into a password field, which is cleared on each save attempt and never serialized or logged.
+Every selected client is created through `connections.Manager`. Credentials remain in macOS Keychain or Windows Credential Manager; a typed or explicitly imported token exists only transiently while it is saved, is never displayed, serialized, or logged, and the app does not change the source environment variable.
 
 GoGPU requires CGO to be disabled. Run the app with:
 
@@ -51,7 +52,7 @@ Set one brand's token for the active session:
 export FAIRE_ACCESS_TOKEN="your-brand-token"
 ```
 
-The client sends this value only in the `X-FAIRE-ACCESS-TOKEN` header. For a future brand selector, keep each token in a distinct environment variable (for example, `API_TOKEN_21C`) and construct a separate `faire.Client` for the selected value:
+The client sends this value only in the `X-FAIRE-ACCESS-TOKEN` header. The desktop Connections tab can import one explicitly named environment variable (for example, `API_TOKEN_21C`) into the operating-system credential store; it never scans environment variables automatically. You can also construct a separate `faire.Client` for a selected value:
 
 ```go
 client, err := faire.NewClient(faire.Config{

@@ -1,4 +1,4 @@
-// Package application coordinates the Faire desktop user interface and confines entered credentials to transient password fields.
+// Package application coordinates the Faire desktop user interface and confines entered or explicitly imported credentials to transient operations.
 package application
 
 import (
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/Fepozopo/faire-gui/connections"
@@ -39,6 +40,8 @@ const (
 	connectionEditorMetadata
 	// connectionEditorCredentials replaces an existing direct-token credential.
 	connectionEditorCredentials
+	// connectionEditorEnvironmentImport imports one explicitly named direct-token environment variable.
+	connectionEditorEnvironmentImport
 )
 
 // Application owns the desktop interface for selecting and managing saved Faire connections.
@@ -55,6 +58,7 @@ type Application struct {
 	selectedTab      state.Signal[int]
 	editorLabel      state.Signal[string]
 	editorBrandID    state.Signal[string]
+	environmentName  state.Signal[string]
 	editorMode       connectionEditorMode
 	editorConnection connections.Connection
 }
@@ -94,6 +98,7 @@ func newApplication(ctx context.Context, manager *connections.Manager, savedConn
 		selectedTab:      state.NewSignal(0),
 		editorLabel:      state.NewSignal(""),
 		editorBrandID:    state.NewSignal(""),
+		environmentName:  state.NewSignal(""),
 		editorMode:       connectionEditorCreate,
 	}
 }
@@ -183,6 +188,8 @@ func (a *Application) connectionEditor() widget.Widget {
 		return a.metadataEditor()
 	case connectionEditorCredentials:
 		return a.credentialEditor()
+	case connectionEditorEnvironmentImport:
+		return a.environmentImportEditor()
 	default:
 		return a.createConnectionEditor()
 	}
@@ -211,14 +218,57 @@ func (a *Application) createConnectionEditor() widget.Widget {
 			textfield.A11yLabel("Faire brand ID"),
 		),
 		accessToken,
-		button.New(
-			button.TextOpt("Save direct-token connection"),
-			button.OnClick(func() {
-				token := accessToken.Text()
-				accessToken.SetText("")
-				a.saveDirectConnection(token)
-			}),
+		primitives.HBox(
+			button.New(
+				button.TextOpt("Save direct-token connection"),
+				button.OnClick(func() {
+					token := accessToken.Text()
+					accessToken.SetText("")
+					a.saveDirectConnection(token, "Saved")
+				}),
+			),
+			button.New(
+				button.TextOpt("Import from environment variable"),
+				button.OnClick(func() {
+					accessToken.SetText("")
+					a.beginEnvironmentImport()
+				}),
+			),
+		).Gap(12),
+	).Padding(20).Gap(12).Background(widget.RGBA8(238, 245, 255, 255)).Rounded(8)
+}
+
+// environmentImportEditor builds the form for importing a direct token from one explicitly named environment variable.
+// It returns a form that does not enumerate, display, serialize, or modify the process environment.
+func (a *Application) environmentImportEditor() widget.Widget {
+	return primitives.VBox(
+		primitives.Text("Import direct-token connection").FontSize(20).Bold(),
+		primitives.Text("Enter one environment-variable name to import. The app never scans environment variables automatically.").FontSize(14),
+		textfield.New(
+			textfield.Placeholder("Connection label"),
+			textfield.ValueSignal(a.editorLabel),
+			textfield.A11yLabel("Connection label"),
 		),
+		textfield.New(
+			textfield.Placeholder("Faire brand ID (optional)"),
+			textfield.ValueSignal(a.editorBrandID),
+			textfield.A11yLabel("Faire brand ID"),
+		),
+		textfield.New(
+			textfield.Placeholder("Environment variable name, for example API_TOKEN_21C"),
+			textfield.ValueSignal(a.environmentName),
+			textfield.A11yLabel("Environment variable name"),
+		),
+		primitives.HBox(
+			button.New(
+				button.TextOpt("Import direct-token connection"),
+				button.OnClick(a.importEnvironmentConnection),
+			),
+			button.New(
+				button.TextOpt("Cancel"),
+				button.OnClick(a.cancelEditor),
+			),
+		).Gap(12),
 	).Padding(20).Gap(12).Background(widget.RGBA8(238, 245, 255, 255)).Rounded(8)
 }
 
@@ -245,7 +295,7 @@ func (a *Application) metadataEditor() widget.Widget {
 			),
 			button.New(
 				button.TextOpt("Cancel"),
-				button.OnClick(a.resetEditor),
+				button.OnClick(a.cancelEditor),
 			),
 		).Gap(12),
 	).Padding(20).Gap(12).Background(widget.RGBA8(238, 245, 255, 255)).Rounded(8)
@@ -275,7 +325,7 @@ func (a *Application) credentialEditor() widget.Widget {
 			),
 			button.New(
 				button.TextOpt("Cancel"),
-				button.OnClick(a.resetEditor),
+				button.OnClick(a.cancelEditor),
 			),
 		).Gap(12),
 	).Padding(20).Gap(12).Background(widget.RGBA8(238, 245, 255, 255)).Rounded(8)
@@ -375,8 +425,8 @@ func (a *Application) beginCredentialReplacement(connection connections.Connecti
 }
 
 // saveDirectConnection validates and saves a new direct-token connection using the supplied transient token.
-// It clears non-secret form fields and refreshes both tabs after a successful save.
-func (a *Application) saveDirectConnection(accessToken string) {
+// It uses successVerb in non-secret status messages, clears form state, and refreshes both tabs after success.
+func (a *Application) saveDirectConnection(accessToken, successVerb string) {
 	if a.manager == nil {
 		a.managementStatus.Set("Saved connections are unavailable. Restart the app after resolving the credential-store issue.")
 		return
@@ -402,11 +452,47 @@ func (a *Application) saveDirectConnection(accessToken string) {
 		return
 	}
 
-	a.editorLabel.Set("")
-	a.editorBrandID.Set("")
-	a.managementStatus.Set("Saved connection " + connection.Label + ".")
-	a.status.Set("Saved " + connection.Label + ". Select it to load its Faire profile.")
+	a.managementStatus.Set(successVerb + " connection " + connection.Label + ".")
+	a.status.Set(successVerb + " " + connection.Label + ". Select it to load its Faire profile.")
+	a.resetEditor()
 	a.refreshConnections()
+}
+
+// beginEnvironmentImport prepares the form for importing one user-named direct-token environment variable.
+// It clears prior form values and does not read any environment variable until the user confirms the import.
+func (a *Application) beginEnvironmentImport() {
+	a.resetEditor()
+	a.editorMode = connectionEditorEnvironmentImport
+	a.selectedTab.Set(1)
+	a.refreshRoot()
+}
+
+// importEnvironmentConnection imports one explicitly named environment variable as a new direct-token connection.
+// It does not enumerate or modify the environment, and it never displays the imported token.
+func (a *Application) importEnvironmentConnection() {
+	accessToken, err := explicitEnvironmentToken(a.environmentName.Get())
+	if err != nil {
+		a.managementStatus.Set("The named environment variable is missing or empty. Enter one exported direct-token variable and try again.")
+		return
+	}
+
+	a.environmentName.Set("")
+	a.saveDirectConnection(accessToken, "Imported")
+}
+
+// explicitEnvironmentToken reads the value of exactly one explicitly named environment variable.
+// It returns the non-empty value or an error without scanning, logging, changing, or exposing process environment data.
+func explicitEnvironmentToken(environmentName string) (string, error) {
+	environmentName = strings.TrimSpace(environmentName)
+	if environmentName == "" {
+		return "", fmt.Errorf("environment variable name is required")
+	}
+
+	accessToken, found := os.LookupEnv(environmentName)
+	if !found || accessToken == "" {
+		return "", fmt.Errorf("environment variable is missing or empty")
+	}
+	return accessToken, nil
 }
 
 // saveMetadata validates and saves metadata for the connection selected for editing.
@@ -519,6 +605,13 @@ func (a *Application) refreshConnections() {
 	a.refreshRoot()
 }
 
+// cancelEditor returns the visible management screen to direct-token connection creation.
+// It clears editor state and rebuilds the widget tree after a user cancels an operation.
+func (a *Application) cancelEditor() {
+	a.resetEditor()
+	a.refreshRoot()
+}
+
 // resetEditor returns the management screen to direct-token connection creation.
 // It clears only non-secret form metadata because password fields are local to their forms.
 func (a *Application) resetEditor() {
@@ -526,6 +619,7 @@ func (a *Application) resetEditor() {
 	a.editorConnection = connections.Connection{}
 	a.editorLabel.Set("")
 	a.editorBrandID.Set("")
+	a.environmentName.Set("")
 }
 
 // refreshRoot replaces the current widget tree after a connection-management state transition.
@@ -543,8 +637,7 @@ func profileLoadErrorMessage(err error) string {
 		return "Profile loading was canceled."
 	}
 
-	var apiError *faire.APIError
-	if errors.As(err, &apiError) {
+	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
 		switch apiError.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."

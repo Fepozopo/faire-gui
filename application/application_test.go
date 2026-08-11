@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -67,5 +68,51 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	message := profileLoadErrorMessage(&faire.APIError{StatusCode: http.StatusUnauthorized})
 	if !strings.Contains(message, "credentials") {
 		t.Fatalf("profileLoadErrorMessage() = %q, want credential guidance", message)
+	}
+}
+
+// TestCancelEditorReturnsToDirectTokenCreation verifies cancellation resets every connection-editor field.
+func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
+	application := newApplication(context.Background(), nil, nil, "")
+	application.editorMode = connectionEditorEnvironmentImport
+	application.editorConnection = connections.Connection{ID: "connection-id"}
+	application.editorLabel.Set("Imported Brand")
+	application.editorBrandID.Set("brand-id")
+	application.environmentName.Set("API_TOKEN_21C")
+
+	application.cancelEditor()
+
+	if application.editorMode != connectionEditorCreate {
+		t.Fatalf("editorMode = %d, want %d", application.editorMode, connectionEditorCreate)
+	}
+	if application.editorConnection != (connections.Connection{}) {
+		t.Fatalf("editorConnection = %#v, want zero value", application.editorConnection)
+	}
+	if application.editorLabel.Get() != "" || application.editorBrandID.Get() != "" || application.environmentName.Get() != "" {
+		t.Fatalf("editor fields were not cleared: label=%q brandID=%q environment=%q", application.editorLabel.Get(), application.editorBrandID.Get(), application.environmentName.Get())
+	}
+}
+
+// TestExplicitEnvironmentTokenReadsOnlyTheNamedVariable verifies explicit imports trim only the variable name.
+func TestExplicitEnvironmentTokenReadsOnlyTheNamedVariable(t *testing.T) {
+	const environmentName = "FAIRE_GUI_IMPORT_TEST_TOKEN"
+	const accessToken = "test-direct-token"
+	t.Setenv(environmentName, accessToken)
+
+	got, err := explicitEnvironmentToken(" " + environmentName + " ")
+	if err != nil {
+		t.Fatalf("explicitEnvironmentToken() error = %v", err)
+	}
+	if got != accessToken {
+		t.Fatalf("explicitEnvironmentToken() = %q, want %q", got, accessToken)
+	}
+}
+
+// TestExplicitEnvironmentTokenRejectsEmptyVariables verifies imports require a non-empty explicit source.
+func TestExplicitEnvironmentTokenRejectsEmptyVariables(t *testing.T) {
+	t.Setenv("FAIRE_GUI_IMPORT_EMPTY_TEST_TOKEN", "")
+
+	if _, err := explicitEnvironmentToken("FAIRE_GUI_IMPORT_EMPTY_TEST_TOKEN"); err == nil {
+		t.Fatal("explicitEnvironmentToken() error = nil, want missing-or-empty variable error")
 	}
 }
