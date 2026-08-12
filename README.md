@@ -1,6 +1,6 @@
 # faire-gui
 
-A GoGPU desktop application for managing a Faire brand. It provides a secure saved-connection manager, a brand selector, and read-only brand-profile verification backed by the typed Faire API client.
+A Gio desktop application for managing a Faire brand. It provides a secure saved-connection manager, a brand selector, and read-only brand-profile verification backed by the typed Faire API client.
 
 ## Desktop application
 
@@ -16,19 +16,17 @@ OAuth connections can have their metadata edited and can be deleted, but OAuth c
 
 Every selected client is created through `connections.Manager`. Credentials remain in macOS Keychain or Windows Credential Manager; a typed or explicitly imported token exists only transiently while it is saved, is never displayed, serialized, or logged, and the app does not change the source environment variable.
 
-GoGPU requires CGO to be disabled. Run the app with:
+The desktop interface uses [Gio](https://gioui.org/). Run the app with:
 
 ```sh
-CGO_ENABLED=0 go run ./cmd/faire-gui
+go run ./cmd/faire-gui
 ```
 
-If a machine has graphics-driver trouble, GoGPU can use its software renderer:
+Gio owns the native window and graphics backend, so do not use the former GoGPU-specific `CGO_ENABLED=0` or `GOGPU_GRAPHICS_API` settings. The current target platforms are macOS and Windows; validate release builds on each target platform before distributing them.
 
-```sh
-CGO_ENABLED=0 GOGPU_GRAPHICS_API=software go run ./cmd/faire-gui
-```
+### Gio development note
 
-The current target platforms are macOS and Windows.
+Gio redraws the complete interface on every frame while preserving state in `widget.Editor`, `widget.Clickable`, and `widget.List` values owned by `application.DesktopUI`. Background work must not mutate those widgets or rendered fields directly. Instead, publish credential-safe results to the UI result channel and call `window.Invalidate()` so the next frame consumes them.
 
 ## Backend structure
 

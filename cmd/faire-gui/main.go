@@ -1,15 +1,9 @@
 // Command faire-gui starts the Faire desktop application.
 package main
 
-import (
-	"log"
+import "github.com/Fepozopo/faire-gui/application"
 
-	"github.com/Fepozopo/faire-gui/application"
-)
-
-// main starts the desktop application and reports any window-runtime failure.
+// main starts the desktop application on the process main goroutine required by Gio.
 func main() {
-	if err := application.Run(); err != nil {
-		log.Fatal(err)
-	}
+	application.Run()
 }

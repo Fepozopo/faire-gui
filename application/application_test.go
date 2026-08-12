@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"gioui.org/app"
+
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
-	"github.com/gogpu/ui/core/scrollview"
-	"github.com/gogpu/ui/widget"
 )
 
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
@@ -73,39 +73,66 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestTabBodiesAreVerticallyScrollable verifies that all saved-connection controls remain reachable when tab content overflows.
-func TestTabBodiesAreVerticallyScrollable(t *testing.T) {
-	application := newApplication(context.Background(), nil, nil, "")
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls required by the two scrollable screens.
+func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
-	for name, tabBody := range map[string]widget.Widget{
-		"Brands":      application.brandSelector(),
-		"Connections": application.connectionManager(),
-	} {
-		if _, ok := tabBody.(*scrollview.Widget); !ok {
-			t.Errorf("%s tab body = %T, want *scrollview.Widget", name, tabBody)
-		}
+	if ui.brandsList.Axis != 1 || ui.connectionsList.Axis != 1 {
+		t.Fatalf("list axes = (%d, %d), want both vertical", ui.brandsList.Axis, ui.connectionsList.Axis)
+	}
+	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
+		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
 }
 
-// TestCancelEditorReturnsToDirectTokenCreation verifies cancellation resets every connection-editor field.
+// TestCancelEditorReturnsToDirectTokenCreation verifies cancellation resets every persistent Gio editor, including transient token text.
 func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
-	application := newApplication(context.Background(), nil, nil, "")
-	application.editorMode = connectionEditorEnvironmentImport
-	application.editorConnection = connections.Connection{ID: "connection-id"}
-	application.editorLabel.Set("Imported Brand")
-	application.editorBrandID.Set("brand-id")
-	application.environmentName.Set("API_TOKEN_21C")
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.editorMode = connectionEditorEnvironmentImport
+	ui.editing = connections.Connection{ID: "connection-id"}
+	ui.labelEditor.SetText("Imported Brand")
+	ui.brandIDEditor.SetText("brand-id")
+	ui.environmentEditor.SetText("API_TOKEN_21C")
+	ui.accessTokenEditor.SetText("transient-token")
 
-	application.cancelEditor()
+	ui.resetEditor()
 
-	if application.editorMode != connectionEditorCreate {
-		t.Fatalf("editorMode = %d, want %d", application.editorMode, connectionEditorCreate)
+	if ui.editorMode != connectionEditorCreate {
+		t.Fatalf("editorMode = %d, want %d", ui.editorMode, connectionEditorCreate)
 	}
-	if application.editorConnection != (connections.Connection{}) {
-		t.Fatalf("editorConnection = %#v, want zero value", application.editorConnection)
+	if ui.editing != (connections.Connection{}) {
+		t.Fatalf("editing = %#v, want zero value", ui.editing)
 	}
-	if application.editorLabel.Get() != "" || application.editorBrandID.Get() != "" || application.environmentName.Get() != "" {
-		t.Fatalf("editor fields were not cleared: label=%q brandID=%q environment=%q", application.editorLabel.Get(), application.editorBrandID.Get(), application.environmentName.Get())
+	if ui.labelEditor.Text() != "" || ui.brandIDEditor.Text() != "" || ui.environmentEditor.Text() != "" || ui.accessTokenEditor.Text() != "" {
+		t.Fatalf("editor fields were not cleared: label=%q brandID=%q environment=%q token=%q", ui.labelEditor.Text(), ui.brandIDEditor.Text(), ui.environmentEditor.Text(), ui.accessTokenEditor.Text())
+	}
+}
+
+// TestReconcileRowControlsRemovesDeletedConnections verifies stable Gio click state is retained only for active connection rows.
+func TestReconcileRowControlsRemovesDeletedConnections(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, []connections.Connection{{ID: "kept"}}, "")
+	kept := ui.rowControlsFor("kept")
+	ui.rowControlsFor("deleted")
+
+	ui.reconcileRowControls()
+
+	if got := ui.rowControls["kept"]; got != kept {
+		t.Fatalf("kept row controls = %p, want original %p", got, kept)
+	}
+	if _, ok := ui.rowControls["deleted"]; ok {
+		t.Fatal("deleted row controls still exist")
+	}
+}
+
+// TestRequestDeleteRequiresConfirmationState verifies row deletion only opens metadata-only modal state.
+func TestRequestDeleteRequiresConfirmationState(t *testing.T) {
+	connection := connections.Connection{ID: "connection-id", Label: "Brand"}
+	ui := newDesktopUI(context.Background(), func() {}, new(app.Window), nil, nil, "")
+
+	ui.requestDelete(connection)
+
+	if !ui.deleteDialog.open || ui.deleteDialog.connection != connection {
+		t.Fatalf("delete dialog = %#v, want open dialog for %#v", ui.deleteDialog, connection)
 	}
 }
 
