@@ -257,8 +257,8 @@ func (ui *DesktopUI) rowControlsFor(connectionID string) *connectionRowControls 
 	return controls
 }
 
-// beginMetadataEdit prepares the non-secret metadata form for connection.
-// It preserves authentication mode and never reads credentials from the credential store.
+// beginMetadataEdit prepares the non-secret metadata form for connection and scrolls the management list to its form.
+// It preserves authentication mode, never reads credentials from the credential store, and makes the edit feedback visible immediately.
 func (ui *DesktopUI) beginMetadataEdit(connection connections.Connection) {
 	ui.editing = connection
 	ui.labelEditor.SetText(connection.Label)
@@ -266,6 +266,8 @@ func (ui *DesktopUI) beginMetadataEdit(connection connections.Connection) {
 	ui.accessTokenEditor.SetText("")
 	ui.editorMode = connectionEditorMetadata
 	ui.selectedTab = connectionsTab
+	// The editor is at the top of the list, so discard the previous row scroll position before Gio draws the edit form.
+	ui.connectionsList.Position = layout.Position{}
 	ui.window.Invalidate()
 }
 

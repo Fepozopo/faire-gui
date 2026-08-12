@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gioui.org/app"
+	"gioui.org/layout"
 
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
@@ -105,6 +106,24 @@ func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
 	}
 	if ui.labelEditor.Text() != "" || ui.brandIDEditor.Text() != "" || ui.environmentEditor.Text() != "" || ui.accessTokenEditor.Text() != "" {
 		t.Fatalf("editor fields were not cleared: label=%q brandID=%q environment=%q token=%q", ui.labelEditor.Text(), ui.brandIDEditor.Text(), ui.environmentEditor.Text(), ui.accessTokenEditor.Text())
+	}
+}
+
+// TestBeginMetadataEditScrollsToForm verifies an edit request resets a deeply scrolled connection list so the editor is visible.
+func TestBeginMetadataEditScrollsToForm(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, new(app.Window), nil, nil, "")
+	ui.connectionsList.Position.First = 12
+	ui.connectionsList.Position.Offset = -24
+	ui.connectionsList.Position.BeforeEnd = true
+	connection := connections.Connection{ID: "connection-id", Label: "Brand", BrandID: faire.BrandID("brand-id")}
+
+	ui.beginMetadataEdit(connection)
+
+	if ui.connectionsList.Position != (layout.Position{}) {
+		t.Fatalf("connections list position = %#v, want zero position", ui.connectionsList.Position)
+	}
+	if ui.editorMode != connectionEditorMetadata || ui.labelEditor.Text() != "Brand" || ui.brandIDEditor.Text() != "brand-id" {
+		t.Fatalf("metadata editor was not prepared: mode=%d label=%q brandID=%q", ui.editorMode, ui.labelEditor.Text(), ui.brandIDEditor.Text())
 	}
 }
 
