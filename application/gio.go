@@ -205,8 +205,10 @@ func (ui *DesktopUI) drainResults() {
 }
 
 // selectConnection begins loading one saved connection's profile without blocking the Gio frame loop.
-// It publishes only a sanitized message back to the UI and requests a frame after work completes.
+// It returns the Brands list to its status area, publishes only a sanitized message, and requests a frame after work completes.
 func (ui *DesktopUI) selectConnection(connectionID string) {
+	// Profile feedback is displayed at the top of the list, so reset a deep row position before changing the status.
+	ui.brandsList.Position = layout.Position{}
 	if ui.manager == nil {
 		ui.status = "Saved connections are unavailable. Restart the app after resolving the credential-store issue."
 		ui.window.Invalidate()

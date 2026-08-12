@@ -109,6 +109,23 @@ func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
 	}
 }
 
+// TestSelectConnectionScrollsToStatus verifies profile loading resets a deeply scrolled Brands list so its status feedback is visible.
+func TestSelectConnectionScrollsToStatus(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, new(app.Window), nil, nil, "")
+	ui.brandsList.Position.First = 12
+	ui.brandsList.Position.Offset = -24
+	ui.brandsList.Position.BeforeEnd = true
+
+	ui.selectConnection("connection-id")
+
+	if ui.brandsList.Position != (layout.Position{}) {
+		t.Fatalf("brands list position = %#v, want zero position", ui.brandsList.Position)
+	}
+	if ui.status != "Saved connections are unavailable. Restart the app after resolving the credential-store issue." {
+		t.Fatalf("status = %q, want unavailable-connections guidance", ui.status)
+	}
+}
+
 // TestBeginMetadataEditScrollsToForm verifies an edit request resets a deeply scrolled connection list so the editor is visible.
 func TestBeginMetadataEditScrollsToForm(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, new(app.Window), nil, nil, "")
