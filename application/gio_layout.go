@@ -5,6 +5,7 @@ import (
 	"image/color"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -24,34 +25,58 @@ var (
 	selectedTabColor = color.NRGBA{R: 63, G: 81, B: 181, A: 255}
 )
 
-// layoutTabs draws the persistent Brands and Connections selector.
-// The control state lives on DesktopUI so it survives Gio's full redraw on every frame.
+// layoutTabs draws a conventional top tab strip for Brands and Connections.
+// The Clickables remain on DesktopUI so Gio preserves their interaction state across full redraws.
 func (ui *DesktopUI) layoutTabs(gtx layout.Context) layout.Dimensions {
-	labels := [2]string{"Brands", "Connections"}
-	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(material.H2(ui.theme, "Faire").Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutTabButton(gtx, 0, labels[0])
+			return layout.Stack{Alignment: layout.S}.Layout(gtx,
+				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+					// The divider establishes a shared visual baseline beneath both tabs.
+					return bottomRule(gtx, color.NRGBA{R: 210, G: 210, B: 210, A: 255})
 				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutTabButton(gtx, 1, labels[1])
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.layoutTabButton(gtx, brandsTab, "Brands")
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.layoutTabButton(gtx, connectionsTab, "Connections")
+						}),
+					)
 				}),
 			)
 		}),
 	)
 }
 
-// layoutTabButton renders one tab and distinguishes the selected tab without recreating its Clickable.
-// The UI processes clicks at the start of Layout, then this function describes the tab's current visual state.
+// layoutTabButton renders a text tab with an active underline rather than a raised button.
+// It keeps the original persistent Clickable so tab selection continues to work with Gio's event model.
 func (ui *DesktopUI) layoutTabButton(gtx layout.Context, index int, label string) layout.Dimensions {
-	button := material.Button(ui.theme, &ui.tabButtons[index], label)
-	if index == ui.selectedTab {
-		button.Background = selectedTabColor
-	}
-	return button.Layout(gtx)
+	return ui.tabButtons[index].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.S}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(4), Bottom: unit.Dp(12), Left: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					style := material.Label(ui.theme, unit.Sp(16), label)
+					if index == ui.selectedTab {
+						style.Color = selectedTabColor
+					} else {
+						style.Color = mutedTextColor
+					}
+					return style.Layout(gtx)
+				})
+			}),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				if index == ui.selectedTab {
+					return bottomRule(gtx, selectedTabColor)
+				}
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+		)
+	})
 }
 
 // layoutBrands renders a vertically scrollable selector of saved connections and the current safe profile status.
@@ -426,5 +451,16 @@ func roundedPanel(gtx layout.Context, background color.NRGBA, child layout.Widge
 // fill paints the full available layout area with a solid color.
 func fill(gtx layout.Context, background color.NRGBA) layout.Dimensions {
 	paint.FillShape(gtx.Ops, background, clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Op())
+	return layout.Dimensions{Size: gtx.Constraints.Min}
+}
+
+// bottomRule paints a two-device-independent-pixel line along the bottom of its available area.
+// The tab strip uses it once for the shared divider and once for the selected-tab indicator.
+func bottomRule(gtx layout.Context, lineColor color.NRGBA) layout.Dimensions {
+	lineHeight := gtx.Dp(unit.Dp(2))
+	lineHeight = min(lineHeight, gtx.Constraints.Min.Y)
+	offset := op.Offset(image.Pt(0, gtx.Constraints.Min.Y-lineHeight)).Push(gtx.Ops)
+	paint.FillShape(gtx.Ops, lineColor, clip.Rect(image.Rect(0, 0, gtx.Constraints.Min.X, lineHeight)).Op())
+	offset.Pop()
 	return layout.Dimensions{Size: gtx.Constraints.Min}
 }
