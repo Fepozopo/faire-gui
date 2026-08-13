@@ -17,67 +17,12 @@ import (
 )
 
 var (
-	cardBackground   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	formBackground   = color.NRGBA{R: 238, G: 245, B: 255, A: 255}
-	mutedTextColor   = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
-	dangerColor      = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
-	modalScrimColor  = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
-	selectedTabColor = color.NRGBA{R: 63, G: 81, B: 181, A: 255}
+	cardBackground  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	formBackground  = color.NRGBA{R: 238, G: 245, B: 255, A: 255}
+	mutedTextColor  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	dangerColor     = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
+	modalScrimColor = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
 )
-
-// layoutTabs draws a conventional top tab strip for Brands and Connections.
-// The Clickables remain on DesktopUI so Gio preserves their interaction state across full redraws.
-func (ui *DesktopUI) layoutTabs(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(material.H2(ui.theme, "Faire").Layout),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Stack{Alignment: layout.S}.Layout(gtx,
-				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-					// The divider establishes a shared visual baseline beneath both tabs.
-					return bottomRule(gtx, color.NRGBA{R: 210, G: 210, B: 210, A: 255})
-				}),
-				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.layoutTabButton(gtx, brandsTab, "Brands")
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.layoutTabButton(gtx, connectionsTab, "Connections")
-						}),
-					)
-				}),
-			)
-		}),
-	)
-}
-
-// layoutTabButton renders a text tab with an active underline rather than a raised button.
-// It keeps the original persistent Clickable so tab selection continues to work with Gio's event model.
-func (ui *DesktopUI) layoutTabButton(gtx layout.Context, index int, label string) layout.Dimensions {
-	return ui.tabButtons[index].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Stack{Alignment: layout.S}.Layout(gtx,
-			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(4), Bottom: unit.Dp(12), Left: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					style := material.Label(ui.theme, unit.Sp(16), label)
-					if index == ui.selectedTab {
-						style.Color = selectedTabColor
-					} else {
-						style.Color = mutedTextColor
-					}
-					return style.Layout(gtx)
-				})
-			}),
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				if index == ui.selectedTab {
-					return bottomRule(gtx, selectedTabColor)
-				}
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			}),
-		)
-	})
-}
 
 // layoutBrands renders a vertically scrollable selector of saved connections and the current safe profile status.
 // Each row uses stable controls keyed by connection ID so scrolling does not change pointer interaction identity.

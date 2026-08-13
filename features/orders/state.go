@@ -1,6 +1,8 @@
 package orders
 
 import (
+	"slices"
+
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
@@ -100,10 +102,5 @@ func (s *State) SetIncludedStates(states []faire.OrderState) {
 
 // isKnownState reports whether state is a state the Faire API supports for orders.
 func isKnownState(state faire.OrderState) bool {
-	for _, knownState := range KnownStates() {
-		if state == knownState {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(KnownStates(), state)
 }

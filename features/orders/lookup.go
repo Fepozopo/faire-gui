@@ -17,8 +17,8 @@ var ErrInvalidDisplayID = errors.New("invalid Faire order display ID")
 // becoming a request identifier while supporting display-ID lengths beyond a single example.
 func OrderIDFromDisplayID(displayID string) (faire.OrderID, error) {
 	normalized := strings.TrimSpace(displayID)
-	if strings.HasPrefix(normalized, "#") {
-		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "#"))
+	if withoutHash, found := strings.CutPrefix(normalized, "#"); found {
+		normalized = strings.TrimSpace(withoutHash)
 	}
 	if len(normalized) == 0 || len(normalized) > 128 {
 		return "", ErrInvalidDisplayID
