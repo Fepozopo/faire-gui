@@ -70,17 +70,17 @@ func TestNewStateUsesCreationTimeSort(t *testing.T) {
 	}
 }
 
-// TestNewStateIncludesNewAndProcessingOrders verifies the initial Orders screen avoids loading terminal states by default.
-func TestNewStateIncludesNewAndProcessingOrders(t *testing.T) {
+// TestNewStateIncludesOnlyNewOrders verifies the initial Orders screen loads only new orders by default.
+func TestNewStateIncludesOnlyNewOrders(t *testing.T) {
 	state := NewState()
 	wantIncluded := map[faire.OrderState]struct{}{
-		faire.OrderStateNew:        {},
-		faire.OrderStateProcessing: {},
+		faire.OrderStateNew: {},
 	}
 	if !reflect.DeepEqual(state.IncludedStates, wantIncluded) {
 		t.Fatalf("NewState().IncludedStates = %#v, want %#v", state.IncludedStates, wantIncluded)
 	}
 	wantExcluded := []faire.OrderState{
+		faire.OrderStateProcessing,
 		faire.OrderStatePreTransit,
 		faire.OrderStateInTransit,
 		faire.OrderStateDelivered,

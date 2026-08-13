@@ -56,15 +56,14 @@ type State struct {
 	CacheKey       string
 }
 
-// NewState returns an orders state that initially includes New and Processing orders
-// and uses Faire's supported creation-time ordering. Its initialized maps allow
+// NewState returns an orders state that initially includes only New orders and
+// uses Faire's supported creation-time ordering. Its initialized maps allow
 // selection and filter updates without special handling by callers.
 func NewState() State {
 	return State{
 		StatusTab: StatusTabAll,
 		IncludedStates: map[faire.OrderState]struct{}{
-			faire.OrderStateNew:        {},
-			faire.OrderStateProcessing: {},
+			faire.OrderStateNew: {},
 		},
 		SelectedIDs: make(map[faire.OrderID]struct{}),
 		Query: ServerQuery{

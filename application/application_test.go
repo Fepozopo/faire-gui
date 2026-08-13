@@ -11,6 +11,7 @@ import (
 
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
+	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
@@ -83,6 +84,30 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
+	}
+}
+
+// TestShutdownReleasesOrdersCache verifies window teardown dereferences all cached and visible Orders rows and cancels in-flight work.
+func TestShutdownReleasesOrdersCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ui := newDesktopUI(ctx, cancel, nil, nil, nil, "")
+	ui.ordersCache["query"] = ordersCacheEntry{Rows: []orders.Row{{DisplayID: "ABCD123456"}}, Cursor: "next-page"}
+	ui.ordersState.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
+	ui.ordersState.Cursor = "next-page"
+
+	ui.shutdown()
+	ui.shutdown()
+
+	if ui.ordersCache != nil {
+		t.Fatalf("ordersCache = %#v, want nil", ui.ordersCache)
+	}
+	if ui.ordersState.Rows != nil || ui.ordersState.Cursor != "" {
+		t.Fatalf("orders state = %#v, want rows and cursor cleared", ui.ordersState)
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("shutdown() did not cancel the application context")
 	}
 }
 

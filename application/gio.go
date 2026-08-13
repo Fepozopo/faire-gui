@@ -121,7 +121,7 @@ type profileLoadResult struct {
 }
 
 // Run starts the Faire Gio desktop application.
-// It creates the window before app.Main takes control of the process main goroutine, as required by Gio on macOS.
+// It creates the window before app.Main takes control of the process main goroutine, and cancels outstanding work once the application exits.
 func Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, savedConnections, startupStatus := loadSavedConnections(ctx)
@@ -181,13 +181,14 @@ func (ui *DesktopUI) configureEditors() {
 }
 
 // runWindow handles Gio window events, drains safe background results, and submits complete frames.
-// It cancels in-flight profile work when Gio reports that the desktop window has been destroyed.
+// It releases cached Orders rows and cancels in-flight work when Gio reports that the desktop window has been destroyed.
 func (ui *DesktopUI) runWindow() error {
+	defer ui.shutdown()
+
 	var ops op.Ops
 	for {
 		switch event := ui.window.Event().(type) {
 		case app.DestroyEvent:
-			ui.cancel()
 			return event.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, event)
@@ -197,6 +198,15 @@ func (ui *DesktopUI) runWindow() error {
 			event.Frame(gtx.Ops)
 		}
 	}
+}
+
+// shutdown cancels in-flight work and releases the session-only Orders cache and visible rows.
+// It is safe to call more than once because context cancellation and assigning nil slices or maps are idempotent.
+func (ui *DesktopUI) shutdown() {
+	ui.cancel()
+	ui.ordersCache = nil
+	ui.ordersState.Rows = nil
+	ui.ordersState.Cursor = ""
 }
 
 // Layout processes current-frame interaction and emits the complete desktop UI.
