@@ -70,6 +70,29 @@ func TestNewStateUsesCreationTimeSort(t *testing.T) {
 	}
 }
 
+// TestNewStateIncludesNewAndProcessingOrders verifies the initial Orders screen avoids loading terminal states by default.
+func TestNewStateIncludesNewAndProcessingOrders(t *testing.T) {
+	state := NewState()
+	wantIncluded := map[faire.OrderState]struct{}{
+		faire.OrderStateNew:        {},
+		faire.OrderStateProcessing: {},
+	}
+	if !reflect.DeepEqual(state.IncludedStates, wantIncluded) {
+		t.Fatalf("NewState().IncludedStates = %#v, want %#v", state.IncludedStates, wantIncluded)
+	}
+	wantExcluded := []faire.OrderState{
+		faire.OrderStatePreTransit,
+		faire.OrderStateInTransit,
+		faire.OrderStateDelivered,
+		faire.OrderStateCanceled,
+		faire.OrderStateBackordered,
+		faire.OrderStatePendingRetailerConfirmation,
+	}
+	if got := state.BuildOptions().ExcludedStates; !reflect.DeepEqual(got, wantExcluded) {
+		t.Fatalf("NewState().BuildOptions().ExcludedStates = %#v, want %#v", got, wantExcluded)
+	}
+}
+
 // TestStateSetIncludedStatesDropsUnknownStates verifies a stale tab cannot affect the API query.
 func TestStateSetIncludedStatesDropsUnknownStates(t *testing.T) {
 	state := NewState()

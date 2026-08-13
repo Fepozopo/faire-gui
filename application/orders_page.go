@@ -141,7 +141,7 @@ func (ui *DesktopUI) layoutOrderSearchAndFilters(gtx layout.Context) layout.Dime
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Dp(unit.Dp(260))
 			gtx.Constraints.Max.X = gtx.Dp(unit.Dp(260))
-			return inputField(gtx, ui.theme, &ui.orderSearchEditor, "Order number, e.g. #ANMQ69YVJB")
+			return inputField(gtx, ui.theme, &ui.orderSearchEditor, "Order number")
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(material.Button(ui.theme, &ui.searchOrdersButton, "Search").Layout),

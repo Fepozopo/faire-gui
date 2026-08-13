@@ -54,14 +54,17 @@ type State struct {
 	CacheKey       string
 }
 
-// NewState returns an orders state that includes every known order state and uses
-// Faire's supported creation-time ordering. Its initialized maps allow selection
-// and filter updates without special handling by callers.
+// NewState returns an orders state that initially includes New and Processing orders
+// and uses Faire's supported creation-time ordering. Its initialized maps allow
+// selection and filter updates without special handling by callers.
 func NewState() State {
 	return State{
-		StatusTab:      StatusTabAll,
-		IncludedStates: allIncludedStates(),
-		SelectedIDs:    make(map[faire.OrderID]struct{}),
+		StatusTab: StatusTabAll,
+		IncludedStates: map[faire.OrderState]struct{}{
+			faire.OrderStateNew:        {},
+			faire.OrderStateProcessing: {},
+		},
+		SelectedIDs: make(map[faire.OrderID]struct{}),
 		Query: ServerQuery{
 			SortBy: faire.OrderSortByCreatedAt,
 		},
@@ -93,17 +96,6 @@ func (s *State) SetIncludedStates(states []faire.OrderState) {
 			s.IncludedStates[state] = struct{}{}
 		}
 	}
-}
-
-// allIncludedStates creates a fresh map because filter state must not be shared
-// between independent UI instances.
-func allIncludedStates() map[faire.OrderState]struct{} {
-	states := KnownStates()
-	included := make(map[faire.OrderState]struct{}, len(states))
-	for _, state := range states {
-		included[state] = struct{}{}
-	}
-	return included
 }
 
 // isKnownState reports whether state is a state the Faire API supports for orders.
