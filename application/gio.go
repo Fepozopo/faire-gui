@@ -76,7 +76,6 @@ type DesktopUI struct {
 	refreshOrdersButton             widget.Clickable
 	loadMoreOrdersButton            widget.Clickable
 	clearOrderSearchButton          widget.Clickable
-	orderDateSortButton             widget.Clickable
 	stateFilterButton               widget.Clickable
 	applyStatesButton               widget.Clickable
 	cancelStatesButton              widget.Clickable

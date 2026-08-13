@@ -62,6 +62,14 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	}
 }
 
+// TestNewStateUsesCreationTimeSort verifies the initial list query consistently uses the selected server sort field.
+func TestNewStateUsesCreationTimeSort(t *testing.T) {
+	state := NewState()
+	if state.Query.SortBy != faire.OrderSortByCreatedAt {
+		t.Fatalf("NewState().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByCreatedAt)
+	}
+}
+
 // TestStateSetIncludedStatesDropsUnknownStates verifies a stale tab cannot affect the API query.
 func TestStateSetIncludedStatesDropsUnknownStates(t *testing.T) {
 	state := NewState()

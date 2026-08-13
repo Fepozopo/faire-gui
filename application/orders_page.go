@@ -80,17 +80,7 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.startOrdersLoad(true, false)
 		ui.invalidate()
 	}
-	if ui.orderDateSortButton.Clicked(gtx) {
-		if ui.ordersState.Query.SortBy == faire.OrderSortByCreatedAt {
-			ui.ordersState.Query.SortBy = faire.OrderSortByUpdatedAt
-		} else {
-			ui.ordersState.Query.SortBy = faire.OrderSortByCreatedAt
-		}
-		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.ordersSearchActive = false
-		ui.startOrdersLoad(false, false)
-		ui.invalidate()
-	}
+
 	if ui.stateFilterButton.Clicked(gtx) {
 		ui.pendingStates = copyIncludedStates(ui.ordersState.IncludedStates)
 		ui.statesDialogOpen = true
@@ -288,17 +278,7 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 				}
 				return ui.orderCheckbox(gtx, selected)
 			}
-			if header && index == 5 {
-				return ui.orderDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := value + " ↕"
-					if ui.ordersState.Query.SortBy == faire.OrderSortByCreatedAt {
-						label = value + " ↑"
-					}
-					style := material.Label(ui.theme, unit.Sp(14), label)
-					style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
-					return style.Layout(gtx)
-				})
-			}
+
 			style := material.Body1(ui.theme, value)
 			style.MaxLines = 2
 			if header {

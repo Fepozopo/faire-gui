@@ -55,7 +55,7 @@ type State struct {
 }
 
 // NewState returns an orders state that includes every known order state and uses
-// the API's supported update-time ordering. Its initialized maps allow selection
+// Faire's supported creation-time ordering. Its initialized maps allow selection
 // and filter updates without special handling by callers.
 func NewState() State {
 	return State{
@@ -63,7 +63,7 @@ func NewState() State {
 		IncludedStates: allIncludedStates(),
 		SelectedIDs:    make(map[faire.OrderID]struct{}),
 		Query: ServerQuery{
-			SortBy: faire.OrderSortByUpdatedAt,
+			SortBy: faire.OrderSortByCreatedAt,
 		},
 	}
 }

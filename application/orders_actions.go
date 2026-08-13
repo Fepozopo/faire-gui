@@ -147,7 +147,7 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 	}
 	orderID, err := orders.OrderIDFromDisplayID(ui.orderSearchEditor.Text())
 	if err != nil {
-		ui.ordersState.Status = "Enter a 10-character order number, for example #ANMQ69YVJB."
+		ui.ordersState.Status = "Enter a 10-character order number."
 		return
 	}
 	ui.ordersSearchActive = true
