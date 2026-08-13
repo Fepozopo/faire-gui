@@ -142,15 +142,15 @@ func (ui *DesktopUI) layoutConnectionPicker(gtx layout.Context) layout.Dimension
 				gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(330))
 				return ui.connectionPickerList.Layout(gtx, len(ui.connections), func(gtx layout.Context, index int) layout.Dimensions {
 					connection := ui.connections[index]
-					controls := ui.rowControlsFor(connection.ID)
-					if controls.selectProfile.Clicked(gtx) {
+					control := ui.connectionPickerControlFor(connection.ID)
+					if control.Clicked(gtx) {
 						ui.setActiveConnection(connection)
 					}
 					label := connection.Label
 					if connection.ID == ui.activeConnectionID {
 						label += " (active)"
 					}
-					return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, material.Button(ui.theme, &controls.selectProfile, label).Layout)
+					return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, material.Button(ui.theme, control, label).Layout)
 				})
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
@@ -163,6 +163,17 @@ func (ui *DesktopUI) layoutConnectionPicker(gtx layout.Context) layout.Dimension
 			}),
 		)
 	})
+}
+
+// connectionPickerControlFor returns picker-specific click state for a saved connection.
+// It must not share the Brand Profile control because modal input must win over the page underneath it.
+func (ui *DesktopUI) connectionPickerControlFor(connectionID string) *widget.Clickable {
+	if control, found := ui.connectionPickerControls[connectionID]; found {
+		return control
+	}
+	control := new(widget.Clickable)
+	ui.connectionPickerControls[connectionID] = control
+	return control
 }
 
 // layoutStatesDialog applies a multi-select state filter by expressing unselected known states as API exclusions.

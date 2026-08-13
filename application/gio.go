@@ -92,12 +92,13 @@ type DesktopUI struct {
 	cancelDelete                    widget.Clickable
 	modalBlocker                    widget.Clickable
 
-	rowControls      map[string]*connectionRowControls
-	orderRowControls map[faire.OrderID]*widget.Clickable
-	stateControls    map[faire.OrderState]*widget.Clickable
-	deleteDialog     deleteDialogState
-	results          chan profileLoadResult
-	orderResults     chan orderLoadResult
+	rowControls              map[string]*connectionRowControls
+	connectionPickerControls map[string]*widget.Clickable
+	orderRowControls         map[faire.OrderID]*widget.Clickable
+	stateControls            map[faire.OrderState]*widget.Clickable
+	deleteDialog             deleteDialogState
+	results                  chan profileLoadResult
+	orderResults             chan orderLoadResult
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -141,22 +142,23 @@ func Run() {
 // The returned UI keeps entered token text only in its masked editor until an action immediately clears it.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
 	ui := &DesktopUI{
-		ctx:              ctx,
-		cancel:           cancel,
-		window:           window,
-		theme:            material.NewTheme(),
-		manager:          manager,
-		connections:      savedConnections,
-		status:           startupStatus,
-		managementStatus: "Create a direct-token connection, or select an existing connection to manage it.",
-		ordersState:      orders.NewState(),
-		ordersCache:      make(map[string]ordersCacheEntry),
-		pendingStates:    make(map[faire.OrderState]struct{}),
-		rowControls:      make(map[string]*connectionRowControls),
-		orderRowControls: make(map[faire.OrderID]*widget.Clickable),
-		stateControls:    make(map[faire.OrderState]*widget.Clickable),
-		results:          make(chan profileLoadResult, 1),
-		orderResults:     make(chan orderLoadResult, 2),
+		ctx:                      ctx,
+		cancel:                   cancel,
+		window:                   window,
+		theme:                    material.NewTheme(),
+		manager:                  manager,
+		connections:              savedConnections,
+		status:                   startupStatus,
+		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
+		ordersState:              orders.NewState(),
+		ordersCache:              make(map[string]ordersCacheEntry),
+		pendingStates:            make(map[faire.OrderState]struct{}),
+		rowControls:              make(map[string]*connectionRowControls),
+		connectionPickerControls: make(map[string]*widget.Clickable),
+		orderRowControls:         make(map[faire.OrderID]*widget.Clickable),
+		stateControls:            make(map[faire.OrderState]*widget.Clickable),
+		results:                  make(chan profileLoadResult, 1),
+		orderResults:             make(chan orderLoadResult, 2),
 	}
 	ui.configureEditors()
 	ui.brandsList.Axis = layout.Vertical

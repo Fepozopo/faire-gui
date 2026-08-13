@@ -1,2 +1,3 @@
 .env
+.gocache/
 faire_api.json
