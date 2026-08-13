@@ -221,7 +221,7 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		ui.invalidate()
 	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, []string{"□", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission", "Source"}, true)
+		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
@@ -237,15 +237,16 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 		ui.invalidate()
 	}
 	return layout.Inset{Right: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if ui.ordersState.IsSelected(row.ID) {
-				paint.Fill(gtx.Ops, color.NRGBA{R: 243, G: 243, B: 243, A: 255})
-			}
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		}, func(gtx layout.Context) layout.Dimensions {
-			return control.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutOrderColumns(gtx, []string{"□", "#" + row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false)
+		return control.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if ui.ordersState.IsSelected(row.ID) {
+					// Clip the highlight to this row; an unbounded paint operation would tint following rows too.
+					paint.FillShape(gtx.Ops, color.NRGBA{R: 243, G: 243, B: 243, A: 255}, clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Op())
+				}
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13), Left: unit.Dp(10), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return ui.layoutOrderColumns(gtx, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
 				})
 			})
 		})
@@ -271,21 +272,21 @@ func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrderColumns lays out a bounded desktop table row, truncating long values through Gio constraints.
-func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, header bool) layout.Dimensions {
-	widths := []unit.Dp{28, 120, 118, 150, 96, 100, 100, 112, 104}
+func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, header, selected bool) layout.Dimensions {
+	// Wide fixed columns preserve readable separation on the desktop-only Orders screen.
+	widths := []unit.Dp{44, 150, 140, 210, 120, 125, 125, 145, 130}
 	children := make([]layout.FlexChild, 0, len(values))
 	for index, value := range values {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Dp(widths[index])
 			gtx.Constraints.Max.X = gtx.Dp(widths[index])
-			if header && index == 0 {
-				return ui.headerSelectVisibleOrdersButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := "□"
-					if ui.allVisibleOrdersSelected() {
-						label = "✓"
-					}
-					return material.Body1(ui.theme, label).Layout(gtx)
-				})
+			if index == 0 {
+				if header {
+					return ui.headerSelectVisibleOrdersButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return ui.orderCheckbox(gtx, selected)
+					})
+				}
+				return ui.orderCheckbox(gtx, selected)
 			}
 			if header && index == 5 {
 				return ui.orderDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -308,6 +309,32 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 		}))
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// orderCheckbox draws a larger, clipped checkbox indicator for the table header and rows.
+// The caller owns click handling so row selection remains available across the complete row surface.
+func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(20))
+	bounds := image.Rect(0, 0, size, size)
+	return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 95, G: 95, B: 95, A: 255}, clip.Rect(bounds).Op())
+			background := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+			if selected {
+				background = color.NRGBA{R: 48, G: 48, B: 48, A: 255}
+			}
+			paint.FillShape(gtx.Ops, background, clip.Rect(image.Rect(2, 2, size-2, size-2)).Op())
+			return layout.Dimensions{Size: image.Pt(size, size)}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			if !selected {
+				return layout.Dimensions{Size: image.Pt(size, size)}
+			}
+			style := material.Label(ui.theme, unit.Sp(16), "✓")
+			style.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+			return style.Layout(gtx)
+		}),
+	)
 }
 
 // refreshOrdersControl renders a refresh action that is disabled by behavior while an API operation is in flight.

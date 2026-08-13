@@ -80,6 +80,8 @@ type DesktopUI struct {
 	stateFilterButton               widget.Clickable
 	applyStatesButton               widget.Clickable
 	cancelStatesButton              widget.Clickable
+	selectAllStatesButton           widget.Clickable
+	selectNoStatesButton            widget.Clickable
 	selectVisibleOrdersButton       widget.Clickable
 	headerSelectVisibleOrdersButton widget.Clickable
 	searchOrdersButton              widget.Clickable

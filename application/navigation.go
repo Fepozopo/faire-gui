@@ -28,8 +28,6 @@ func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(16), Bottom: unit.Dp(24), Left: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(ui.layoutConnectionSwitcher),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(32)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.layoutNavigationItem(gtx, ordersTab, "Orders") }),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ui.layoutNavigationItem(gtx, brandsTab, "Brand profile")
@@ -97,11 +95,14 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 
 // layoutUnavailableNavigation shows planned routes without misleading users into believing the pages work already.
 func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dimensions {
-	labels := []string{"Products", "Customers", "Marketing", "Analytics", "My shop", "Faire Direct", "Settings"}
+	labels := []string{"Orders", "Products", "Customers", "Marketing", "Analytics", "My shop", "Faire Direct", "Settings"}
 	children := make([]layout.FlexChild, 0, len(labels)*2)
-	for _, label := range labels {
-		label := label
+	for index, label := range labels {
+		index, label := index, label
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if index == 0 {
+				return ui.layoutNavigationItem(gtx, ordersTab, label)
+			}
 			style := material.Body1(ui.theme, label)
 			style.Color = color.NRGBA{R: 130, G: 130, B: 130, A: 255}
 			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, style.Layout)
@@ -170,6 +171,17 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 		ui.statesDialogOpen = false
 		ui.invalidate()
 	}
+	if ui.selectAllStatesButton.Clicked(gtx) {
+		ui.pendingStates = make(map[faire.OrderState]struct{}, len(ordersKnownStates()))
+		for _, state := range ordersKnownStates() {
+			ui.pendingStates[state] = struct{}{}
+		}
+		ui.invalidate()
+	}
+	if ui.selectNoStatesButton.Clicked(gtx) {
+		ui.pendingStates = make(map[faire.OrderState]struct{})
+		ui.invalidate()
+	}
 	if ui.applyStatesButton.Clicked(gtx) {
 		ui.ordersState.SetIncludedStates(mapKeys(ui.pendingStates))
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
@@ -181,6 +193,14 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 	return modalPanel(gtx, ui, "Filter states", func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
 			layout.Rigid(bodyText(ui.theme, "Choose one or more states. Faire receives the remaining known states as exclusions.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Rigid(material.Button(ui.theme, &ui.selectAllStatesButton, "Select all").Layout),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(material.Button(ui.theme, &ui.selectNoStatesButton, "Select none").Layout),
+				)
+			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		}
 		for _, state := range ordersKnownStates() {

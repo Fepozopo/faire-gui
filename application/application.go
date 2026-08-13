@@ -15,8 +15,8 @@ import (
 
 const (
 	windowTitle  = "Faire GUI"
-	windowWidth  = 960
-	windowHeight = 640
+	windowWidth  = 1440
+	windowHeight = 820
 )
 
 // connectionEditorMode identifies the connection-management form currently visible to the user.
