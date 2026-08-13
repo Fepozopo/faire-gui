@@ -111,7 +111,6 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, func() []layout.FlexChild {
 		children := make([]layout.FlexChild, 0, len(tabs))
 		for index, tab := range tabs {
-			index, tab := index, tab
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Right: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					button := &ui.orderStatusTabs[index]
@@ -235,7 +234,8 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 				}
 				return layout.Dimensions{Size: gtx.Constraints.Min}
 			}, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13), Left: unit.Dp(10), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				// Rows share the header's outer inset, so only vertical padding belongs here.
+				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return ui.layoutOrderColumns(gtx, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
 				})
 			})
