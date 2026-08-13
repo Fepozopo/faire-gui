@@ -15,15 +15,20 @@ import (
 
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
+	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
 const (
+	// brandsTab displays non-secret profile verification for the active connection.
 	brandsTab = iota
+	// connectionsTab displays saved connection management.
 	connectionsTab
+	// ordersTab displays the read-only Orders workflow.
+	ordersTab
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, except profile-loading work, which returns only safe text through results.
+// Its methods run on Gio's frame goroutine, while profile and order requests publish only safe results through channels.
 type DesktopUI struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -33,9 +38,19 @@ type DesktopUI struct {
 	manager     *connections.Manager
 	connections []connections.Connection
 
-	selectedTab int
-	editorMode  connectionEditorMode
-	editing     connections.Connection
+	activeConnectionID    string
+	activeConnectionLabel string
+	selectedTab           int
+	connectionPickerOpen  bool
+	statesDialogOpen      bool
+
+	ordersState        orders.State
+	ordersCache        map[string]ordersCacheEntry
+	ordersRequestID    uint64
+	ordersSearchActive bool
+	pendingStates      map[faire.OrderState]struct{}
+	editorMode         connectionEditorMode
+	editing            connections.Connection
 
 	status           string
 	managementStatus string
@@ -45,19 +60,42 @@ type DesktopUI struct {
 	environmentEditor widget.Editor
 	accessTokenEditor widget.Editor
 
-	brandsList      widget.List
-	connectionsList widget.List
-	tabButtons      [2]widget.Clickable
-	saveButton      widget.Clickable
-	importButton    widget.Clickable
-	cancelButton    widget.Clickable
-	confirmDelete   widget.Clickable
-	cancelDelete    widget.Clickable
-	modalBlocker    widget.Clickable
+	brandsList                      widget.List
+	connectionsList                 widget.List
+	ordersList                      widget.List
+	connectionPickerList            widget.List
+	orderSearchEditor               widget.Editor
+	orderDateEditor                 widget.Editor
+	shipDateEditor                  widget.Editor
+	tabButtons                      [3]widget.Clickable
+	orderStatusTabs                 [5]widget.Clickable
+	activeConnectionButton          widget.Clickable
+	closeConnectionPicker           widget.Clickable
+	addConnectionButton             widget.Clickable
+	applyOrderFiltersButton         widget.Clickable
+	refreshOrdersButton             widget.Clickable
+	loadMoreOrdersButton            widget.Clickable
+	clearOrderSearchButton          widget.Clickable
+	orderDateSortButton             widget.Clickable
+	stateFilterButton               widget.Clickable
+	applyStatesButton               widget.Clickable
+	cancelStatesButton              widget.Clickable
+	selectVisibleOrdersButton       widget.Clickable
+	headerSelectVisibleOrdersButton widget.Clickable
+	searchOrdersButton              widget.Clickable
+	saveButton                      widget.Clickable
+	importButton                    widget.Clickable
+	cancelButton                    widget.Clickable
+	confirmDelete                   widget.Clickable
+	cancelDelete                    widget.Clickable
+	modalBlocker                    widget.Clickable
 
-	rowControls  map[string]*connectionRowControls
-	deleteDialog deleteDialogState
-	results      chan profileLoadResult
+	rowControls      map[string]*connectionRowControls
+	orderRowControls map[faire.OrderID]*widget.Clickable
+	stateControls    map[faire.OrderState]*widget.Clickable
+	deleteDialog     deleteDialogState
+	results          chan profileLoadResult
+	orderResults     chan orderLoadResult
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -109,12 +147,23 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		connections:      savedConnections,
 		status:           startupStatus,
 		managementStatus: "Create a direct-token connection, or select an existing connection to manage it.",
+		ordersState:      orders.NewState(),
+		ordersCache:      make(map[string]ordersCacheEntry),
+		pendingStates:    make(map[faire.OrderState]struct{}),
 		rowControls:      make(map[string]*connectionRowControls),
+		orderRowControls: make(map[faire.OrderID]*widget.Clickable),
+		stateControls:    make(map[faire.OrderState]*widget.Clickable),
 		results:          make(chan profileLoadResult, 1),
+		orderResults:     make(chan orderLoadResult, 2),
 	}
 	ui.configureEditors()
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
+	ui.ordersList.Axis = layout.Vertical
+	ui.connectionPickerList.Axis = layout.Vertical
+	ui.orderSearchEditor.SingleLine = true
+	ui.orderDateEditor.SingleLine = true
+	ui.shipDateEditor.SingleLine = true
 	return ui
 }
 
@@ -140,6 +189,7 @@ func (ui *DesktopUI) runWindow() error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, event)
 			ui.drainResults()
+			ui.drainOrderResults()
 			ui.Layout(gtx)
 			event.Frame(gtx.Ops)
 		}
@@ -155,24 +205,24 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 			return fill(gtx, color.NRGBA{R: 250, G: 250, B: 250, A: 255})
 		}),
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(20), Right: unit.Dp(24), Bottom: unit.Dp(24), Left: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(ui.layoutTabs),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						if ui.selectedTab == connectionsTab {
-							return ui.layoutConnections(gtx)
-						}
-						return ui.layoutBrands(gtx)
-					}),
-				)
-			})
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(ui.layoutSidebar),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(32), Bottom: unit.Dp(28), Left: unit.Dp(32)}.Layout(gtx, ui.layoutActivePage)
+				}),
+			)
 		}),
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-			if !ui.deleteDialog.open {
+			switch {
+			case ui.deleteDialog.open:
+				return ui.layoutDeleteModal(gtx)
+			case ui.connectionPickerOpen:
+				return ui.layoutConnectionPicker(gtx)
+			case ui.statesDialogOpen:
+				return ui.layoutStatesDialog(gtx)
+			default:
 				return layout.Dimensions{}
 			}
-			return ui.layoutDeleteModal(gtx)
 		}),
 	)
 }
@@ -180,13 +230,16 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.deleteDialog.open {
+	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {
 		if ui.tabButtons[index].Clicked(gtx) {
 			ui.selectedTab = index
-			ui.window.Invalidate()
+			if index == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
+				ui.startOrdersLoad(false, false)
+			}
+			ui.invalidate()
 		}
 	}
 }
@@ -438,6 +491,14 @@ func (ui *DesktopUI) deleteConnection() {
 	}
 	ui.managementStatus = "Deleted connection " + connection.Label + "."
 	ui.status = "Deleted " + connection.Label + "."
+	if ui.activeConnectionID == connection.ID {
+		// A deleted connection cannot remain active because later requests must never resolve a removed credential entry.
+		ui.activeConnectionID = ""
+		ui.activeConnectionLabel = ""
+		ui.ordersState = orders.NewState()
+		ui.ordersSearchActive = false
+		ui.orderSearchEditor.SetText("")
+	}
 	ui.refreshConnections()
 }
 
