@@ -133,6 +133,27 @@ func TestBlockedOrderExportOpensDialog(t *testing.T) {
 	}
 }
 
+// TestCompletedOrderExportOpensDialog verifies successful exports prominently identify their saved filename.
+func TestCompletedOrderExportOpensDialog(t *testing.T) {
+	t.Parallel()
+
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.exportRequestID = 1
+	ui.ordersExporting = true
+	ui.orderExportResults <- orderExportResult{
+		RequestID: 1,
+		Status:    "Exported 1 orders to Downloads as faire-new-orders-20260321142530.csv.",
+		Filename:  "faire-new-orders-20260321142530.csv",
+		Completed: true,
+	}
+
+	ui.drainOrderExportResults()
+
+	if !ui.csvExportCompletedDialogOpen || ui.csvExportCompletedFilename != "faire-new-orders-20260321142530.csv" {
+		t.Fatalf("completed dialog = {open:%t filename:%q}, want saved export filename", ui.csvExportCompletedDialogOpen, ui.csvExportCompletedFilename)
+	}
+}
+
 // TestExportSalesSourceUsesProfileBrandID verifies exports ignore optional saved metadata and map the authenticated brand profile instead.
 func TestExportSalesSourceUsesProfileBrandID(t *testing.T) {
 	t.Parallel()
@@ -202,8 +223,13 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeOrdersCSV() error = %v", err)
 	}
-	if !strings.HasPrefix(filename, "faire-new-orders-") || filepath.Ext(filename) != ".csv" {
+	const filenamePrefix = "faire-new-orders-"
+	if !strings.HasPrefix(filename, filenamePrefix) || filepath.Ext(filename) != ".csv" {
 		t.Fatalf("filename = %q, want timestamped new-order CSV", filename)
+	}
+	timestamp := strings.TrimSuffix(strings.TrimPrefix(filename, filenamePrefix), ".csv")
+	if len(timestamp) != len("20060102150405") || strings.ContainsAny(timestamp, "TZ.") {
+		t.Fatalf("filename timestamp = %q, want YYYYMMDDHHMMSS", timestamp)
 	}
 	contents, err := os.ReadFile(filepath.Join(directory, filename))
 	if err != nil {

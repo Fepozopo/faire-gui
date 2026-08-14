@@ -38,13 +38,15 @@ type DesktopUI struct {
 	manager     *connections.Manager
 	connections []connections.Connection
 
-	activeConnectionID         string
-	activeConnectionLabel      string
-	selectedTab                int
-	connectionPickerOpen       bool
-	statesDialogOpen           bool
-	exportMenuOpen             bool
-	csvExportBlockedDialogOpen bool
+	activeConnectionID           string
+	activeConnectionLabel        string
+	selectedTab                  int
+	connectionPickerOpen         bool
+	statesDialogOpen             bool
+	exportMenuOpen               bool
+	csvExportBlockedDialogOpen   bool
+	csvExportCompletedDialogOpen bool
+	csvExportCompletedFilename   string
 
 	ordersState        orders.State
 	ordersCache        map[string]ordersCacheEntry
@@ -92,6 +94,7 @@ type DesktopUI struct {
 	exportSelectedOrdersButton      widget.Clickable
 	closeExportMenuButton           widget.Clickable
 	closeCSVExportBlockedButton     widget.Clickable
+	closeCSVExportCompletedButton   widget.Clickable
 	searchOrdersButton              widget.Clickable
 	saveButton                      widget.Clickable
 	importButton                    widget.Clickable
@@ -249,6 +252,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutOrderExportMenu(gtx)
 			case ui.csvExportBlockedDialogOpen:
 				return ui.layoutCSVExportBlockedDialog(gtx)
+			case ui.csvExportCompletedDialogOpen:
+				return ui.layoutCSVExportCompletedDialog(gtx)
 			default:
 				return layout.Dimensions{}
 			}
@@ -259,7 +264,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen {
+	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

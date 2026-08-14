@@ -46,11 +46,13 @@ const (
 	orderExportSelected orderExportKind = "selected"
 )
 
-// orderExportResult carries a credential-safe export completion status and blocking state to the frame loop.
+// orderExportResult carries credential-safe export completion, blocking, and filename state to the frame loop.
 type orderExportResult struct {
 	RequestID uint64
 	Status    string
+	Filename  string
 	Blocked   bool
+	Completed bool
 }
 
 // ordersLoadErrorMessage converts an Orders request failure to a user-safe status.
@@ -311,7 +313,7 @@ func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind or
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Could not save the order export to Downloads. Check folder permissions and try again."})
 		return
 	}
-	ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Exported " + itoa(len(source)) + " orders to Downloads as " + filename + "."})
+	ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Exported " + itoa(len(source)) + " orders to Downloads as " + filename + ".", Filename: filename, Completed: true})
 }
 
 // exportSalesSource derives the CSV source from the authenticated connection's current Faire brand profile.
@@ -404,7 +406,7 @@ func writeOrdersCSV(directory string, kind orderExportKind, saleSource orders.Sa
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
 	}
-	filename := "faire-" + string(kind) + "-orders-" + time.Now().UTC().Format("20060102T150405.000000000Z") + ".csv"
+	filename := "faire-" + string(kind) + "-orders-" + time.Now().Local().Format("20060102150405") + ".csv"
 	finalPath := filepath.Join(directory, filename)
 	temporaryFile, err := os.CreateTemp(directory, ".faire-orders-*.csv")
 	if err != nil {
@@ -468,6 +470,10 @@ func (ui *DesktopUI) drainOrderExportResults() {
 			ui.ordersState.Status = result.Status
 			if result.Blocked {
 				ui.csvExportBlockedDialogOpen = true
+			}
+			if result.Completed {
+				ui.csvExportCompletedFilename = result.Filename
+				ui.csvExportCompletedDialogOpen = true
 			}
 		default:
 			return

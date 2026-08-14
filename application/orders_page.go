@@ -226,6 +226,22 @@ func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dim
 	})
 }
 
+// layoutCSVExportCompletedDialog confirms the export location after its CSV file is safely written.
+func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.Dimensions {
+	if ui.closeCSVExportCompletedButton.Clicked(gtx) {
+		ui.csvExportCompletedDialogOpen = false
+		ui.csvExportCompletedFilename = ""
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "CSV export complete", func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, "Saved in Downloads as "+ui.csvExportCompletedFilename+".", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.closeCSVExportCompletedButton, "Close").Layout),
+		)
+	})
+}
+
 // layoutOrdersTable creates the order header, scrollable rows, and Load more action.
 func (ui *DesktopUI) layoutOrdersTable(gtx layout.Context) layout.Dimensions {
 	if ui.activeConnectionID == "" || (!ui.ordersState.Loaded && !ui.ordersState.Loading) {
