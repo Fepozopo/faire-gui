@@ -38,12 +38,13 @@ type DesktopUI struct {
 	manager     *connections.Manager
 	connections []connections.Connection
 
-	activeConnectionID    string
-	activeConnectionLabel string
-	selectedTab           int
-	connectionPickerOpen  bool
-	statesDialogOpen      bool
-	exportMenuOpen        bool
+	activeConnectionID         string
+	activeConnectionLabel      string
+	selectedTab                int
+	connectionPickerOpen       bool
+	statesDialogOpen           bool
+	exportMenuOpen             bool
+	csvExportBlockedDialogOpen bool
 
 	ordersState        orders.State
 	ordersCache        map[string]ordersCacheEntry
@@ -90,6 +91,7 @@ type DesktopUI struct {
 	exportBackorderedOrdersButton   widget.Clickable
 	exportSelectedOrdersButton      widget.Clickable
 	closeExportMenuButton           widget.Clickable
+	closeCSVExportBlockedButton     widget.Clickable
 	searchOrdersButton              widget.Clickable
 	saveButton                      widget.Clickable
 	importButton                    widget.Clickable
@@ -245,6 +247,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutStatesDialog(gtx)
 			case ui.exportMenuOpen:
 				return ui.layoutOrderExportMenu(gtx)
+			case ui.csvExportBlockedDialogOpen:
+				return ui.layoutCSVExportBlockedDialog(gtx)
 			default:
 				return layout.Dimensions{}
 			}
@@ -255,7 +259,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen {
+	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

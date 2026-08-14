@@ -110,6 +110,29 @@ func TestSelectedOrdersLabelReportsCurrentSelectionCount(t *testing.T) {
 	}
 }
 
+// TestBlockedOrderExportOpensDialog verifies an unmapped brand's export failure is presented prominently.
+func TestBlockedOrderExportOpensDialog(t *testing.T) {
+	t.Parallel()
+
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.exportRequestID = 1
+	ui.ordersExporting = true
+	ui.orderExportResults <- orderExportResult{
+		RequestID: 1,
+		Status:    "CSV export is not configured for this connection's brand.",
+		Blocked:   true,
+	}
+
+	ui.drainOrderExportResults()
+
+	if !ui.csvExportBlockedDialogOpen {
+		t.Fatal("csvExportBlockedDialogOpen = false, want true")
+	}
+	if ui.ordersExporting || ui.ordersState.Status != "CSV export is not configured for this connection's brand." {
+		t.Fatalf("export state = {exporting:%t status:%q}, want completed blocking status", ui.ordersExporting, ui.ordersState.Status)
+	}
+}
+
 // TestSelectedOrderIDsSortsExportSelection verifies selected-order exports have a deterministic request order.
 func TestSelectedOrderIDsSortsExportSelection(t *testing.T) {
 	t.Parallel()

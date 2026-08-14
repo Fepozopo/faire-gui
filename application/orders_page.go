@@ -211,6 +211,21 @@ func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions
 	})
 }
 
+// layoutCSVExportBlockedDialog explains why the current connection cannot produce a CSV export.
+func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dimensions {
+	if ui.closeCSVExportBlockedButton.Clicked(gtx) {
+		ui.csvExportBlockedDialogOpen = false
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "CSV export blocked", func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, "CSV export is not configured for this connection's brand.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.closeCSVExportBlockedButton, "Close").Layout),
+		)
+	})
+}
+
 // layoutOrdersTable creates the order header, scrollable rows, and Load more action.
 func (ui *DesktopUI) layoutOrdersTable(gtx layout.Context) layout.Dimensions {
 	if ui.activeConnectionID == "" || (!ui.ordersState.Loaded && !ui.ordersState.Loading) {

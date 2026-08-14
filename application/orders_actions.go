@@ -46,10 +46,11 @@ const (
 	orderExportSelected orderExportKind = "selected"
 )
 
-// orderExportResult carries a credential-safe export completion status to the frame loop.
+// orderExportResult carries a credential-safe export completion status and blocking state to the frame loop.
 type orderExportResult struct {
 	RequestID uint64
 	Status    string
+	Blocked   bool
 }
 
 // ordersLoadErrorMessage converts an Orders request failure to a user-safe status.
@@ -282,7 +283,7 @@ func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind or
 	}
 	saleSource, configured := orders.SalesSourceForBrand(connection.BrandID)
 	if !configured {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's brand."})
+		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's brand.", Blocked: true})
 		return
 	}
 	var source []faire.Order
@@ -451,6 +452,9 @@ func (ui *DesktopUI) drainOrderExportResults() {
 			}
 			ui.ordersExporting = false
 			ui.ordersState.Status = result.Status
+			if result.Blocked {
+				ui.csvExportBlockedDialogOpen = true
+			}
 		default:
 			return
 		}
