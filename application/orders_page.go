@@ -3,7 +3,7 @@ package application
 import (
 	"image"
 	"image/color"
-	"strings"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -63,8 +63,20 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.invalidate()
 	}
 	if ui.applyOrderFiltersButton.Clicked(gtx) {
-		ui.ordersState.Query.OrderDateMin = strings.TrimSpace(ui.orderDateEditor.Text())
-		ui.ordersState.Query.ShipDateMax = strings.TrimSpace(ui.shipDateEditor.Text())
+		orderDate, err := orders.NormalizeDateFilter(ui.orderDateEditor.Text(), false, time.Local)
+		if err != nil {
+			ui.ordersState.Status = "Enter the order date as month/day/year, for example 3/21/2026."
+			ui.invalidate()
+			return
+		}
+		shipDate, err := orders.NormalizeDateFilter(ui.shipDateEditor.Text(), true, time.Local)
+		if err != nil {
+			ui.ordersState.Status = "Enter the ship date as month/day/year, for example 3/21/2026."
+			ui.invalidate()
+			return
+		}
+		ui.ordersState.Query.OrderDateMin = orderDate
+		ui.ordersState.Query.ShipDateMax = shipDate
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
 		ui.ordersSearchActive = false
 		ui.startOrdersLoad(false, false)
@@ -144,11 +156,11 @@ func (ui *DesktopUI) layoutOrderSearchAndFilters(gtx layout.Context) layout.Dime
 		layout.Rigid(material.Button(ui.theme, &ui.clearOrderSearchButton, "Clear").Layout),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.orderDateEditor, "Order date from (RFC 3339)")
+			return ui.dateFilterField(gtx, &ui.orderDateEditor, "Order date from (M/D/YYYY)")
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.shipDateEditor, "Ship date through (RFC 3339)")
+			return ui.dateFilterField(gtx, &ui.shipDateEditor, "Ship date through (M/D/YYYY)")
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(material.Button(ui.theme, &ui.applyOrderFiltersButton, "Apply filters").Layout),

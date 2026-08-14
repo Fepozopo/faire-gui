@@ -31,9 +31,8 @@ const (
 )
 
 // ServerQuery holds the supported server-side order-list filters and sort choice.
-// OrderDateMin and ShipDateMax must be API-compatible timestamp strings when they
-// are supplied; invalid values are left to the API to reject because the feature
-// does not impose a timezone or timestamp format of its own.
+// OrderDateMin and ShipDateMax contain RFC 3339 timestamps produced from the user's
+// local month/day/year input by NormalizeDateFilter before the UI sends them to Faire.
 type ServerQuery struct {
 	OrderDateMin string
 	ShipDateMax  string
