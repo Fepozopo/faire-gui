@@ -11,6 +11,26 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
+// SalesSource identifies the sales-source value required by the downstream CSV consumer.
+type SalesSource string
+
+// salesSourceByBrandID maps approved Faire brand IDs to their required CSV sales-source values.
+var salesSourceByBrandID = map[faire.BrandID]SalesSource{
+	"b_wpz8vfrdu5": "21",
+	"b_56pfaass":   "ASC",
+	"b_22rl4c1962": "BJP",
+	"b_9yilp4yy":   "BSC",
+	"b_53p4jwgf6g": "GTG",
+	"b_amtnu83oc0": "OAT",
+	"b_ukhf47wscj": "SM",
+}
+
+// SalesSourceForBrand returns the configured CSV sales source for brandID.
+func SalesSourceForBrand(brandID faire.BrandID) (SalesSource, bool) {
+	source, found := salesSourceByBrandID[brandID]
+	return source, found
+}
+
 // CSVHeader defines the stable column order for every exported order CSV file.
 var CSVHeader = []string{
 	"id", "display_id", "created_at", "ship_after",
@@ -22,23 +42,23 @@ var CSVHeader = []string{
 	"item_sku", "item_price_cents", "item_quantity", "sale_source", "sales_rep_name", "notes",
 }
 
-// WriteCSV writes orders as a CSV with CSVHeader's column order. Each item becomes
-// one row so item-specific SKU, price, and quantity values remain associated with
-// their order. Orders without items produce one row with blank item fields.
-func WriteCSV(writer io.Writer, source []faire.Order) error {
+// WriteCSV writes orders as a CSV with CSVHeader's column order and saleSource in every row.
+// Each item becomes one row so item-specific SKU, price, and quantity values remain associated
+// with their order. Orders without items produce one row with blank item fields.
+func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order) error {
 	csvWriter := csv.NewWriter(writer)
 	if err := csvWriter.Write(CSVHeader); err != nil {
 		return err
 	}
 	for _, order := range source {
 		if len(order.Items) == 0 {
-			if err := csvWriter.Write(csvRow(order, nil)); err != nil {
+			if err := csvWriter.Write(csvRow(order, nil, saleSource)); err != nil {
 				return err
 			}
 			continue
 		}
 		for index := range order.Items {
-			if err := csvWriter.Write(csvRow(order, &order.Items[index])); err != nil {
+			if err := csvWriter.Write(csvRow(order, &order.Items[index], saleSource)); err != nil {
 				return err
 			}
 		}
@@ -47,9 +67,9 @@ func WriteCSV(writer io.Writer, source []faire.Order) error {
 	return csvWriter.Error()
 }
 
-// csvRow returns the CSV values for one order and, when present, one order item.
-// It normalizes dates, money, percentages, and source values to the established CSV contract.
-func csvRow(order faire.Order, item *faire.OrderItem) []string {
+// csvRow returns the CSV values for one order, one order item when present, and the configured brand sales source.
+// It normalizes dates and money values to the established CSV contract.
+func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []string {
 	return []string{
 		stringValue(order.ID),
 		stringValue(order.DisplayID),
@@ -74,7 +94,7 @@ func csvRow(order faire.Order, item *faire.OrderItem) []string {
 		itemSKU(item),
 		itemPrice(item),
 		itemQuantity(item),
-		strings.ToUpper(stringValue(order.Source)),
+		string(saleSource),
 		stringValue(order.SalesRepName),
 		stringValue(order.Notes),
 	}

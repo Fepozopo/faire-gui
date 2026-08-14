@@ -275,9 +275,14 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind) {
 
 // exportOrders retrieves the requested full orders and writes their CSV file entirely outside the frame loop.
 func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID) {
-	client, _, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
+	client, connection, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
+		return
+	}
+	saleSource, configured := orders.SalesSourceForBrand(connection.BrandID)
+	if !configured {
+		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's brand."})
 		return
 	}
 	var source []faire.Order
@@ -295,7 +300,7 @@ func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind or
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
-	filename, err := writeOrdersCSVToDownloads(kind, source)
+	filename, err := writeOrdersCSVToDownloads(kind, saleSource, source)
 	if err != nil {
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Could not save the order export to Downloads. Check folder permissions and try again."})
 		return
@@ -371,16 +376,16 @@ func selectedOrderIDs(selected map[faire.OrderID]struct{}) []faire.OrderID {
 }
 
 // writeOrdersCSVToDownloads atomically writes a private CSV file in the current user's Downloads directory.
-func writeOrdersCSVToDownloads(kind orderExportKind, source []faire.Order) (string, error) {
+func writeOrdersCSVToDownloads(kind orderExportKind, saleSource orders.SalesSource, source []faire.Order) (string, error) {
 	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return writeOrdersCSV(filepath.Join(homeDirectory, "Downloads"), kind, source)
+	return writeOrdersCSV(filepath.Join(homeDirectory, "Downloads"), kind, saleSource, source)
 }
 
 // writeOrdersCSV atomically writes a private CSV file in directory and returns its generated filename.
-func writeOrdersCSV(directory string, kind orderExportKind, source []faire.Order) (string, error) {
+func writeOrdersCSV(directory string, kind orderExportKind, saleSource orders.SalesSource, source []faire.Order) (string, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
 	}
@@ -395,7 +400,7 @@ func writeOrdersCSV(directory string, kind orderExportKind, source []faire.Order
 		// Removing the temporary file is harmless after a successful rename and prevents partial PII exports on failures.
 		_ = os.Remove(temporaryPath)
 	}()
-	if err := orders.WriteCSV(temporaryFile, source); err != nil {
+	if err := orders.WriteCSV(temporaryFile, saleSource, source); err != nil {
 		_ = temporaryFile.Close()
 		return "", err
 	}

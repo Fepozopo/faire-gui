@@ -34,7 +34,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 			{SKU: faire.Ptr("SKU-2"), Price: &faire.Money{AmountMinor: faire.Ptr(int64(3400))}, Quantity: faire.Ptr(int64(1))},
 		},
 	}
-	if err := WriteCSV(&output, []faire.Order{order}); err != nil {
+	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{order}); err != nil {
 		t.Fatalf("WriteCSV() error = %v", err)
 	}
 
@@ -48,11 +48,33 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
-	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "FAIRE_MARKETPLACE", "Sam", "Leave at loading bay"}; !reflect.DeepEqual(got, want) {
+	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("first item row = %#v, want %#v", got, want)
 	}
 	if got := rows[2][21]; got != "34.00" {
 		t.Fatalf("second item price = %q, want formatted Money fallback", got)
+	}
+}
+
+// TestSalesSourceForBrandReturnsOnlyConfiguredBrandMappings verifies every supported brand produces its required source.
+func TestSalesSourceForBrandReturnsOnlyConfiguredBrandMappings(t *testing.T) {
+	t.Parallel()
+
+	for brandID, want := range map[faire.BrandID]SalesSource{
+		"b_wpz8vfrdu5": "21",
+		"b_56pfaass":   "ASC",
+		"b_22rl4c1962": "BJP",
+		"b_9yilp4yy":   "BSC",
+		"b_53p4jwgf6g": "GTG",
+		"b_amtnu83oc0": "OAT",
+		"b_ukhf47wscj": "SM",
+	} {
+		if got, found := SalesSourceForBrand(brandID); !found || got != want {
+			t.Errorf("SalesSourceForBrand(%q) = (%q, %t), want (%q, true)", brandID, got, found, want)
+		}
+	}
+	if got, found := SalesSourceForBrand("b_unmapped"); found || got != "" {
+		t.Fatalf("SalesSourceForBrand() = (%q, %t), want an unmapped result", got, found)
 	}
 }
 
@@ -83,7 +105,7 @@ func TestWriteCSVWritesBlankItemFieldsForOrdersWithoutItems(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	if err := WriteCSV(&output, []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}); err != nil {
+	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}); err != nil {
 		t.Fatalf("WriteCSV() error = %v", err)
 	}
 

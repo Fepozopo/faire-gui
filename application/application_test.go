@@ -162,7 +162,7 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	filename, err := writeOrdersCSV(directory, orderExportNew, []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}})
+	filename, err := writeOrdersCSV(directory, orderExportNew, orders.SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}})
 	if err != nil {
 		t.Fatalf("writeOrdersCSV() error = %v", err)
 	}
