@@ -119,7 +119,7 @@ func TestBlockedOrderExportOpensDialog(t *testing.T) {
 	ui.ordersExporting = true
 	ui.orderExportResults <- orderExportResult{
 		RequestID: 1,
-		Status:    "CSV export is not configured for this connection's brand.",
+		Status:    "CSV export is not configured for this connection's Faire brand.",
 		Blocked:   true,
 	}
 
@@ -128,8 +128,21 @@ func TestBlockedOrderExportOpensDialog(t *testing.T) {
 	if !ui.csvExportBlockedDialogOpen {
 		t.Fatal("csvExportBlockedDialogOpen = false, want true")
 	}
-	if ui.ordersExporting || ui.ordersState.Status != "CSV export is not configured for this connection's brand." {
+	if ui.ordersExporting || ui.ordersState.Status != "CSV export is not configured for this connection's Faire brand." {
 		t.Fatalf("export state = {exporting:%t status:%q}, want completed blocking status", ui.ordersExporting, ui.ordersState.Status)
+	}
+}
+
+// TestExportSalesSourceUsesProfileBrandID verifies exports ignore optional saved metadata and map the authenticated brand profile instead.
+func TestExportSalesSourceUsesProfileBrandID(t *testing.T) {
+	t.Parallel()
+
+	source, found := exportSalesSource(&faire.BrandProfile{BrandID: faire.Ptr(faire.BrandID("b_56pfaass"))})
+	if !found || source != orders.SalesSource("ASC") {
+		t.Fatalf("exportSalesSource() = (%q, %t), want (ASC, true)", source, found)
+	}
+	if source, found := exportSalesSource(&faire.BrandProfile{}); found || source != "" {
+		t.Fatalf("exportSalesSource() = (%q, %t), want an unmapped result", source, found)
 	}
 }
 

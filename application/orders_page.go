@@ -219,7 +219,7 @@ func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dim
 	}
 	return modalPanel(gtx, ui, "CSV export blocked", func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(bodyText(ui.theme, "CSV export is not configured for this connection's brand.", mutedTextColor)),
+			layout.Rigid(bodyText(ui.theme, "CSV export is not configured for this connection's Faire brand.", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(material.Button(ui.theme, &ui.closeCSVExportBlockedButton, "Close").Layout),
 		)

@@ -274,16 +274,21 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind) {
 	go ui.exportOrders(requestID, connectionID, kind, selectedIDs)
 }
 
-// exportOrders retrieves the requested full orders and writes their CSV file entirely outside the frame loop.
+// exportOrders reads the authenticated Faire brand profile, retrieves the requested full orders, and writes their CSV file outside the frame loop.
 func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID) {
-	client, connection, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
+	client, _, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
-	saleSource, configured := orders.SalesSourceForBrand(connection.BrandID)
+	profile, err := client.Brands.Profile(ui.ctx)
+	if err != nil {
+		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
+		return
+	}
+	saleSource, configured := exportSalesSource(profile)
 	if !configured {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's brand.", Blocked: true})
+		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's Faire brand.", Blocked: true})
 		return
 	}
 	var source []faire.Order
@@ -307,6 +312,15 @@ func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind or
 		return
 	}
 	ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Exported " + itoa(len(source)) + " orders to Downloads as " + filename + "."})
+}
+
+// exportSalesSource derives the CSV source from the authenticated connection's current Faire brand profile.
+// A missing profile ID cannot be safely mapped and blocks the export instead of using editable saved metadata.
+func exportSalesSource(profile *faire.BrandProfile) (orders.SalesSource, bool) {
+	if profile == nil || profile.BrandID == nil {
+		return "", false
+	}
+	return orders.SalesSourceForBrand(*profile.BrandID)
 }
 
 // exportOrdersForState follows every cursor page and returns only orders in state, guarding against an unexpected API filter response.
