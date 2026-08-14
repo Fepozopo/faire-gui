@@ -3,6 +3,10 @@ package application
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -103,6 +107,74 @@ func TestSelectedOrdersLabelReportsCurrentSelectionCount(t *testing.T) {
 	}
 	if got := ui.selectedOrdersLabel(); got != "3 selected" {
 		t.Fatalf("selectedOrdersLabel() = %q, want %q", got, "3 selected")
+	}
+}
+
+// TestSelectedOrderIDsSortsExportSelection verifies selected-order exports have a deterministic request order.
+func TestSelectedOrderIDsSortsExportSelection(t *testing.T) {
+	t.Parallel()
+
+	got := selectedOrderIDs(map[faire.OrderID]struct{}{
+		"order-3": {},
+		"":        {},
+		"order-1": {},
+	})
+	want := []faire.OrderID{"order-1", "order-3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selectedOrderIDs() = %#v, want %#v", got, want)
+	}
+}
+
+// TestExportOrdersForStateFollowsAllPages verifies state exports request each cursor page and discard unexpected states.
+func TestExportOrdersForStateFollowsAllPages(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.URL.Path != "/orders" {
+			t.Fatalf("path = %q, want /orders", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Query().Get("cursor") == "" {
+			_, _ = writer.Write([]byte(`{"orders":[{"id":"order-1","state":"NEW"}],"cursor":"page-2"}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"orders":[{"id":"order-2","state":"NEW"},{"id":"order-3","state":"BACKORDERED"}]}`))
+	}))
+	defer server.Close()
+	client, err := faire.NewClient(faire.Config{BaseURL: server.URL, AccessToken: "test-token"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	source, err := exportOrdersForState(context.Background(), client.Orders, faire.OrderStateNew)
+	if err != nil {
+		t.Fatalf("exportOrdersForState() error = %v", err)
+	}
+	if requests != 2 || len(source) != 2 || *source[0].ID != "order-1" || *source[1].ID != "order-2" {
+		t.Fatalf("exported source = %#v after %d requests, want both New orders", source, requests)
+	}
+}
+
+// TestWriteOrdersCSVCreatesPrivateCSV verifies exports are written atomically to the requested directory.
+func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	filename, err := writeOrdersCSV(directory, orderExportNew, []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}})
+	if err != nil {
+		t.Fatalf("writeOrdersCSV() error = %v", err)
+	}
+	if !strings.HasPrefix(filename, "faire-new-orders-") || filepath.Ext(filename) != ".csv" {
+		t.Fatalf("filename = %q, want timestamped new-order CSV", filename)
+	}
+	contents, err := os.ReadFile(filepath.Join(directory, filename))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.HasPrefix(string(contents), "id,display_id,created_at") {
+		t.Fatalf("CSV = %q, want CSV header", contents)
 	}
 }
 

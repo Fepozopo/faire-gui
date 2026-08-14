@@ -86,12 +86,8 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.statesDialogOpen = true
 		ui.invalidate()
 	}
-	if ui.selectVisibleOrdersButton.Clicked(gtx) {
-		if ui.allVisibleOrdersSelected() {
-			ui.ordersState.ClearSelection()
-		} else {
-			ui.ordersState.SelectVisible(ui.ordersState.Rows)
-		}
+	if ui.exportMenuButton.Clicked(gtx) {
+		ui.exportMenuOpen = true
 		ui.invalidate()
 	}
 }
@@ -168,22 +164,51 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the selected-order count and selection affordance without exposing unimplemented bulk actions.
+// layoutOrderActionBar renders the selected-order count and opens the CSV export menu.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
-	selection := "Select visible"
-	if ui.allVisibleOrdersSelected() && len(ui.ordersState.Rows) > 0 {
-		selection = "Clear selection"
-	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
-		layout.Rigid(material.Button(ui.theme, &ui.selectVisibleOrdersButton, selection).Layout),
+		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
 	)
 }
 
 // selectedOrdersLabel returns the current bulk-selection count for the Orders action bar.
 func (ui *DesktopUI) selectedOrdersLabel() string {
 	return itoa(len(ui.ordersState.SelectedIDs)) + " selected"
+}
+
+// layoutOrderExportMenu presents the supported full-order CSV export actions in an input-blocking modal.
+func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions {
+	if ui.closeExportMenuButton.Clicked(gtx) {
+		ui.exportMenuOpen = false
+		ui.invalidate()
+	}
+	if ui.exportNewOrdersButton.Clicked(gtx) {
+		ui.startOrderExport(orderExportNew)
+		ui.invalidate()
+	}
+	if ui.exportBackorderedOrdersButton.Clicked(gtx) {
+		ui.startOrderExport(orderExportBackordered)
+		ui.invalidate()
+	}
+	if ui.exportSelectedOrdersButton.Clicked(gtx) {
+		ui.startOrderExport(orderExportSelected)
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "Export orders", func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, "Exports are saved as CSV files in Downloads.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.exportNewOrdersButton, "Export New Orders").Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.exportBackorderedOrdersButton, "Export Backordered Orders").Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.exportSelectedOrdersButton, "Export Selected Orders").Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.closeExportMenuButton, "Cancel").Layout),
+		)
+	})
 }
 
 // layoutOrdersTable creates the order header, scrollable rows, and Load more action.

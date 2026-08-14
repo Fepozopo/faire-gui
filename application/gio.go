@@ -43,11 +43,14 @@ type DesktopUI struct {
 	selectedTab           int
 	connectionPickerOpen  bool
 	statesDialogOpen      bool
+	exportMenuOpen        bool
 
 	ordersState        orders.State
 	ordersCache        map[string]ordersCacheEntry
 	ordersRequestID    uint64
+	exportRequestID    uint64
 	ordersSearchActive bool
+	ordersExporting    bool
 	pendingStates      map[faire.OrderState]struct{}
 	editorMode         connectionEditorMode
 	editing            connections.Connection
@@ -81,8 +84,12 @@ type DesktopUI struct {
 	cancelStatesButton              widget.Clickable
 	selectAllStatesButton           widget.Clickable
 	selectNoStatesButton            widget.Clickable
-	selectVisibleOrdersButton       widget.Clickable
 	headerSelectVisibleOrdersButton widget.Clickable
+	exportMenuButton                widget.Clickable
+	exportNewOrdersButton           widget.Clickable
+	exportBackorderedOrdersButton   widget.Clickable
+	exportSelectedOrdersButton      widget.Clickable
+	closeExportMenuButton           widget.Clickable
 	searchOrdersButton              widget.Clickable
 	saveButton                      widget.Clickable
 	importButton                    widget.Clickable
@@ -98,6 +105,7 @@ type DesktopUI struct {
 	deleteDialog             deleteDialogState
 	results                  chan profileLoadResult
 	orderResults             chan orderLoadResult
+	orderExportResults       chan orderExportResult
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -158,6 +166,7 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		stateControls:            make(map[faire.OrderState]*widget.Clickable),
 		results:                  make(chan profileLoadResult, 1),
 		orderResults:             make(chan orderLoadResult, 2),
+		orderExportResults:       make(chan orderExportResult, 1),
 	}
 	ui.configureEditors()
 	ui.brandsList.Axis = layout.Vertical
@@ -194,6 +203,7 @@ func (ui *DesktopUI) runWindow() error {
 			gtx := app.NewContext(&ops, event)
 			ui.drainResults()
 			ui.drainOrderResults()
+			ui.drainOrderExportResults()
 			ui.Layout(gtx)
 			event.Frame(gtx.Ops)
 		}
@@ -233,6 +243,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutConnectionPicker(gtx)
 			case ui.statesDialogOpen:
 				return ui.layoutStatesDialog(gtx)
+			case ui.exportMenuOpen:
+				return ui.layoutOrderExportMenu(gtx)
 			default:
 				return layout.Dimensions{}
 			}
@@ -243,7 +255,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen {
+	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen {
 		return
 	}
 	for index := range ui.tabButtons {

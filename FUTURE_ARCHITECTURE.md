@@ -10,7 +10,7 @@ The initial connection-management application now has a read-only Orders vertica
 - a session-only active saved Faire connection;
 - asynchronous, paginated, cached Orders loading;
 - status tabs, a state-filter dialog, supported date filters, direct order-number lookup, and creation-time sorting;
-- selectable table rows in preparation for future bulk actions; and
+- selectable table rows and CSV exports for New, Backordered, or selected orders; and
 - contextual loading, empty, and credential-safe error feedback.
 
 The attached Orders-page reference still suggests later capabilities:
@@ -88,6 +88,7 @@ The following is the target structure as the application grows. Existing files c
 │   │   ├── lookup.go
 │   │   ├── presenter.go
 │   │   ├── selection.go
+│   │   ├── export.go
 │   │   └── *_test.go
 │   ├── products/
 │   │   ├── state.go
@@ -179,8 +180,8 @@ This package is the desktop composition root. It wires together the manager, API
 | `connection_actions.go` | Future extraction for create, metadata update, delete, token replacement, explicit import, active-connection selection, and refresh actions that currently remain in `gio.go`.                                                                         |
 | `connection_page.go`    | Future extraction for the Connections screen and connection forms.                                                                                                                                                                                     |
 | `brands_page.go`        | Future extraction for the Brand profile verification screen and active-connection summary.                                                                                                                                                             |
-| `orders_page.go`        | Renders the implemented read-only Orders route: status tabs, direct lookup and supported filters, row selection, table/list rows, empty/loading/error states, and pagination controls. It delegates query and presentation logic to `features/orders`. |
-| `orders_actions.go`     | Loads Orders asynchronously through `Manager.Client` for the active connection. It provides stale-result protection, an in-memory safe-row cache, pagination, direct lookup, and sanitized error results. It does not implement mutations.             |
+| `orders_page.go`        | Renders the implemented read-only Orders route: status tabs, direct lookup and supported filters, row selection, CSV-export menu, table/list rows, empty/loading/error states, and pagination controls. It delegates query and presentation logic to `features/orders`. |
+| `orders_actions.go`     | Loads Orders asynchronously through `Manager.Client` for the active connection. It provides stale-result protection, an in-memory safe-row cache, pagination, direct lookup, full-order CSV exports, and sanitized error results. It does not implement mutations. |
 | `products_page.go`      | Future product catalog page rendering: search, filters, product table/grid, details and editing entry points.                                                                                                                                          |
 | `inventory_page.go`     | Future inventory page rendering: stock table, search/filter state, and inventory-update forms.                                                                                                                                                         |
 | `customers_page.go`     | Future retailer/customer rendering: list, profiles, search, and detail screen entry points.                                                                                                                                                            |
@@ -199,8 +200,9 @@ A feature package contains **UI-framework-independent feature logic**. It may im
 | `query.go`     | Converts selected state/date filters, creation-time or update-time sorting, and a cursor into supported Faire order-list request options.                                                            |
 | `lookup.go`    | Normalizes an entered display ID and converts it to Faire's internal `OrderID` format before a direct lookup.                                                                                        |
 | `presenter.go` | Converts typed Faire order responses into UI-ready, non-secret `Row` values: order number, status, customer label, totals, dates, commission label, and source. Formats dates/currency consistently. |
-| `selection.go` | Adds/removes selected order IDs and selects or clears the visible rows. Keeps future bulk-action selection behavior unit-testable without Gio.                                                       |
-| `*_test.go`    | Covers query construction, lookup normalization, row presentation, optional API fields, date/currency formatting, and selection behavior without Gio.                                                |
+| `selection.go` | Adds/removes selected order IDs and selects or clears the visible rows. Keeps bulk-action selection behavior unit-testable without Gio.                                                              |
+| `export.go`    | Defines the stable order CSV header and writes full typed orders as one row per item without retaining raw API data in UI state.                                                                       |
+| `*_test.go`    | Covers query construction, lookup normalization, row presentation, CSV output, optional API fields, date/currency formatting, and selection behavior without Gio.                                    |
 
 #### `features/products/`
 
@@ -365,7 +367,7 @@ The implemented behavior includes:
 - high-level All, New, Processing, Fulfilled, and Canceled tabs plus a state-filter dialog for all supported states;
 - direct lookup by normalized display ID;
 - supported creation-date and ship-date filters;
-- safe, typed order rows and selectable IDs for future bulk actions;
+- safe, typed order rows and selectable IDs for CSV export or future bulk actions;
 - loading, empty, credential-safe error, pagination, and cache-status feedback;
 - in-memory safe-row caching per connection and query; and
 - request IDs that prevent a stale list or lookup result from replacing newer UI state.
@@ -379,7 +381,7 @@ The implemented behavior includes:
 3. status tabs;
 4. direct order-number lookup and supported date/state filters;
 5. a scrollable desktop table with stable column widths;
-6. whole-row and select-visible selection controls; and
+6. whole-row and header-checkbox selection controls, plus a CSV export menu for New, Backordered, and selected orders; and
 7. a Load more control when Faire returns a cursor.
 
 No mutation is implemented. Do not add “Create order,” shipment edits, packing-slip generation, or bulk operations merely because they appear in the visual reference. Each requires a confirmed Faire API operation, validation rules, authorization behavior, confirmation and refresh behavior, and dedicated tests.
