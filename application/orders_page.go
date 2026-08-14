@@ -93,7 +93,8 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	}
 }
 
-// layoutOrderTabs draws the screenshot-inspired high-level status tabs. Selecting one maps to a supported state filter.
+// layoutOrderTabs draws high-level status presets followed by an advanced state picker.
+// Selecting either control updates the supported API state filter.
 func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 	tabs := []struct {
 		label string
@@ -106,7 +107,7 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 		{label: "Canceled", state: faire.Ptr(faire.OrderStateCanceled)},
 	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, func() []layout.FlexChild {
-		children := make([]layout.FlexChild, 0, len(tabs))
+		children := make([]layout.FlexChild, 0, len(tabs)+2)
 		for index, tab := range tabs {
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Right: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -127,6 +128,11 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 				})
 			}))
 		}
+		// Keep the advanced picker visually separate so the preset tabs remain easy to scan.
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+			layout.Rigid(material.Button(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel()).Layout),
+		)
 		return children
 	}()...)
 }
@@ -153,12 +159,13 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the CSV export control immediately before the selected-order count.
+// layoutOrderActionBar renders the selected-order context before its CSV export action.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
+		// The wider gap distinguishes the selection context from the action it informs.
+		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 	)
 }
@@ -368,17 +375,11 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 	)
 }
 
-// refreshOrdersControl renders States next to Refresh and the visible API date-filter label below it.
+// refreshOrdersControl renders Refresh and the visible API date-filter label below it.
 // Refresh is disabled by behavior while an API operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(material.Button(ui.theme, &ui.refreshOrdersButton, "Refresh").Layout),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(material.Button(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel()).Layout),
-			)
-		}),
+		layout.Rigid(material.Button(ui.theme, &ui.refreshOrdersButton, "Refresh").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (applies on Refresh)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
