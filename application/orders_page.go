@@ -168,17 +168,22 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the table-selection affordance without exposing unimplemented bulk actions.
+// layoutOrderActionBar renders the selected-order count and selection affordance without exposing unimplemented bulk actions.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	selection := "Select visible"
 	if ui.allVisibleOrdersSelected() && len(ui.ordersState.Rows) > 0 {
 		selection = "Clear selection"
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(bodyText(ui.theme, "Select orders to prepare for future actions", mutedTextColor)),
+		layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 		layout.Rigid(material.Button(ui.theme, &ui.selectVisibleOrdersButton, selection).Layout),
 	)
+}
+
+// selectedOrdersLabel returns the current bulk-selection count for the Orders action bar.
+func (ui *DesktopUI) selectedOrdersLabel() string {
+	return itoa(len(ui.ordersState.SelectedIDs)) + " selected"
 }
 
 // layoutOrdersTable creates the order header, scrollable rows, and Load more action.

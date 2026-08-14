@@ -87,6 +87,25 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 }
 
+// TestSelectedOrdersLabelReportsCurrentSelectionCount verifies the Orders action bar reflects the active selection.
+func TestSelectedOrdersLabelReportsCurrentSelectionCount(t *testing.T) {
+	t.Parallel()
+
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	if got := ui.selectedOrdersLabel(); got != "0 selected" {
+		t.Fatalf("selectedOrdersLabel() = %q, want %q", got, "0 selected")
+	}
+
+	ui.ordersState.SelectedIDs = map[faire.OrderID]struct{}{
+		"order-1": {},
+		"order-2": {},
+		"order-3": {},
+	}
+	if got := ui.selectedOrdersLabel(); got != "3 selected" {
+		t.Fatalf("selectedOrdersLabel() = %q, want %q", got, "3 selected")
+	}
+}
+
 // TestShutdownReleasesOrdersCache verifies window teardown dereferences all cached and visible Orders rows and cancels in-flight work.
 func TestShutdownReleasesOrdersCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
