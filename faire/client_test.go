@@ -111,6 +111,7 @@ func TestOrdersListBuildsQuery(t *testing.T) {
 			"excluded_states": {"PROCESSING,CANCELED"},
 			"limit":           {"25"},
 			"sort_by":         {"UPDATED_AT"},
+			"created_at_min":  {"2025-03-21T00:00:00Z"},
 		}
 		if request.URL.Query().Encode() != want.Encode() {
 			t.Fatalf("query = %q, want %q", request.URL.Query().Encode(), want.Encode())
@@ -123,6 +124,7 @@ func TestOrdersListBuildsQuery(t *testing.T) {
 		ExcludedStates: []OrderState{OrderStateProcessing, OrderStateCanceled},
 		SortBy:         Ptr(OrderSortByUpdatedAt),
 		Cursor:         Ptr("next"),
+		CreatedAtMin:   Ptr("2025-03-21T00:00:00Z"),
 	})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)

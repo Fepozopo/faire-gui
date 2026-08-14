@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -71,14 +72,12 @@ type DesktopUI struct {
 	ordersList                      widget.List
 	connectionPickerList            widget.List
 	orderSearchEditor               widget.Editor
-	orderDateEditor                 widget.Editor
-	shipDateEditor                  widget.Editor
+	createdAtMinEditor              widget.Editor
 	tabButtons                      [3]widget.Clickable
 	orderStatusTabs                 [5]widget.Clickable
 	activeConnectionButton          widget.Clickable
 	closeConnectionPicker           widget.Clickable
 	addConnectionButton             widget.Clickable
-	applyOrderFiltersButton         widget.Clickable
 	refreshOrdersButton             widget.Clickable
 	loadMoreOrdersButton            widget.Clickable
 	clearOrderSearchButton          widget.Clickable
@@ -162,7 +161,6 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		connections:              savedConnections,
 		status:                   startupStatus,
 		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
-		ordersState:              orders.NewState(),
 		ordersCache:              make(map[string]ordersCacheEntry),
 		pendingStates:            make(map[faire.OrderState]struct{}),
 		rowControls:              make(map[string]*connectionRowControls),
@@ -174,13 +172,13 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		orderExportResults:       make(chan orderExportResult, 1),
 	}
 	ui.configureEditors()
+	ui.resetOrdersState()
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
 	ui.ordersList.Axis = layout.Vertical
 	ui.connectionPickerList.Axis = layout.Vertical
 	ui.orderSearchEditor.SingleLine = true
-	ui.orderDateEditor.SingleLine = true
-	ui.shipDateEditor.SingleLine = true
+	ui.createdAtMinEditor.SingleLine = true
 	return ui
 }
 
@@ -192,6 +190,15 @@ func (ui *DesktopUI) configureEditors() {
 	ui.environmentEditor.SingleLine = true
 	ui.accessTokenEditor.SingleLine = true
 	ui.accessTokenEditor.Mask = '•'
+}
+
+// resetOrdersState creates a fresh default order query and synchronizes its
+// one-year created-order lookback with the visible date editor.
+func (ui *DesktopUI) resetOrdersState() {
+	now := time.Now()
+	createdAtMinimumInput, _ := orders.DefaultCreatedAtMinimum(now, time.Local)
+	ui.ordersState = orders.NewStateAt(now, time.Local)
+	ui.createdAtMinEditor.SetText(createdAtMinimumInput)
 }
 
 // runWindow handles Gio window events, drains safe background results, and submits complete frames.
@@ -529,7 +536,7 @@ func (ui *DesktopUI) deleteConnection() {
 		// A deleted connection cannot remain active because later requests must never resolve a removed credential entry.
 		ui.activeConnectionID = ""
 		ui.activeConnectionLabel = ""
-		ui.ordersState = orders.NewState()
+		ui.resetOrdersState()
 		ui.ordersSearchActive = false
 		ui.orderSearchEditor.SetText("")
 	}

@@ -79,7 +79,7 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls required by the two scrollable screens.
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, including the default created-at filter, required by the desktop screens.
 func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
@@ -88,6 +88,9 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
+	}
+	if !ui.createdAtMinEditor.SingleLine || ui.createdAtMinEditor.Text() == "" || ui.ordersState.Query.CreatedAtMin == "" {
+		t.Fatalf("created-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.createdAtMinEditor.SingleLine, ui.createdAtMinEditor.Text(), ui.ordersState.Query.CreatedAtMin)
 	}
 }
 

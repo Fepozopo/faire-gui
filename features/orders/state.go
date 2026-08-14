@@ -2,6 +2,7 @@ package orders
 
 import (
 	"slices"
+	"time"
 
 	"github.com/Fepozopo/faire-gui/faire"
 )
@@ -30,12 +31,11 @@ const (
 	StatusTabPendingRetailerConfirmation StatusTab = "PENDING_RETAILER_CONFIRMATION"
 )
 
-// ServerQuery holds the supported server-side order-list filters and sort choice.
-// OrderDateMin and ShipDateMax contain RFC 3339 timestamps produced from the user's
-// local month/day/year input by NormalizeDateFilter before the UI sends them to Faire.
+// ServerQuery holds the supported server-side order-list filter and sort choice.
+// CreatedAtMin contains an RFC 3339 timestamp produced from the user's local
+// month/day/year input by NormalizeDateFilter before the UI sends it to Faire.
 type ServerQuery struct {
-	OrderDateMin string
-	ShipDateMax  string
+	CreatedAtMin string
 	SortBy       faire.OrderSortBy
 }
 
@@ -55,10 +55,19 @@ type State struct {
 	CacheKey       string
 }
 
-// NewState returns an orders state that initially includes only New orders and
-// uses Faire's supported creation-time ordering. Its initialized maps allow
-// selection and filter updates without special handling by callers.
+// NewState returns an orders state that initially includes only New orders,
+// starts at the one-year created-order lookback, and uses Faire's supported
+// creation-time ordering. Its initialized maps allow selection and filter updates
+// without special handling by callers.
 func NewState() State {
+	return NewStateAt(time.Now(), time.Local)
+}
+
+// NewStateAt returns a new orders state using now and location for its default
+// one-year created-order lookback. It exists so callers can initialize the UI and
+// tests can deterministically verify the date boundary.
+func NewStateAt(now time.Time, location *time.Location) State {
+	_, createdAtMin := DefaultCreatedAtMinimum(now, location)
 	return State{
 		StatusTab: StatusTabAll,
 		IncludedStates: map[faire.OrderState]struct{}{
@@ -66,7 +75,8 @@ func NewState() State {
 		},
 		SelectedIDs: make(map[faire.OrderID]struct{}),
 		Query: ServerQuery{
-			SortBy: faire.OrderSortByCreatedAt,
+			CreatedAtMin: createdAtMin,
+			SortBy:       faire.OrderSortByCreatedAt,
 		},
 	}
 }

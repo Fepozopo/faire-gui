@@ -49,7 +49,8 @@ func (ui *DesktopUI) ordersConnectionText() string {
 	return "Active connection: " + ui.activeConnectionLabel
 }
 
-// handleOrdersControls processes controls before rendering so visible rows and filters update in the same frame.
+// handleOrdersControls processes controls before rendering so visible rows update in the same frame.
+// Refresh validates the Created At Minimum value, replaces the server query, and re-fetches from Faire.
 func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	if ui.searchOrdersButton.Clicked(gtx) {
 		ui.loadOrderByDisplayID()
@@ -62,27 +63,15 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.startOrdersLoad(false, false)
 		ui.invalidate()
 	}
-	if ui.applyOrderFiltersButton.Clicked(gtx) {
-		orderDate, err := orders.NormalizeDateFilter(ui.orderDateEditor.Text(), false, time.Local)
-		if err != nil {
-			ui.ordersState.Status = "Enter the order date as month/day/year, for example 3/21/2026."
-			ui.invalidate()
-			return
-		}
-		shipDate, err := orders.NormalizeDateFilter(ui.shipDateEditor.Text(), true, time.Local)
-		if err != nil {
-			ui.ordersState.Status = "Enter the ship date as month/day/year, for example 3/21/2026."
-			ui.invalidate()
-			return
-		}
-		ui.ordersState.Query.OrderDateMin = orderDate
-		ui.ordersState.Query.ShipDateMax = shipDate
-		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.ordersSearchActive = false
-		ui.startOrdersLoad(false, false)
-		ui.invalidate()
-	}
 	if ui.refreshOrdersButton.Clicked(gtx) {
+		createdAtMin, err := orders.NormalizeDateFilter(ui.createdAtMinEditor.Text(), false, time.Local)
+		if err != nil {
+			ui.ordersState.Status = "Enter the created-at minimum as month/day/year, for example 3/21/2026."
+			ui.invalidate()
+			return
+		}
+		// Refresh deliberately bypasses the cache so the edited date always reaches Faire in a new request.
+		ui.ordersState.Query.CreatedAtMin = createdAtMin
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
 		ui.startOrdersLoad(false, true)
@@ -154,18 +143,6 @@ func (ui *DesktopUI) layoutOrderSearchAndFilters(gtx layout.Context) layout.Dime
 		layout.Rigid(material.Button(ui.theme, &ui.searchOrdersButton, "Search").Layout),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(material.Button(ui.theme, &ui.clearOrderSearchButton, "Clear").Layout),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.orderDateEditor, "Order date from (M/D/YYYY)")
-		}),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.shipDateEditor, "Ship date through (M/D/YYYY)")
-		}),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(material.Button(ui.theme, &ui.applyOrderFiltersButton, "Apply filters").Layout),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(material.Button(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel()).Layout),
 	)
 }
 
@@ -176,12 +153,13 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the selected-order count and opens the CSV export menu.
+// layoutOrderActionBar renders the CSV export control immediately before the selected-order count.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
-		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
 	)
 }
 
@@ -390,9 +368,24 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 	)
 }
 
-// refreshOrdersControl renders a refresh action that is disabled by behavior while an API operation is in flight.
+// refreshOrdersControl renders States next to Refresh and the visible API date-filter label below it.
+// Refresh is disabled by behavior while an API operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
-	return material.Button(ui.theme, &ui.refreshOrdersButton, "Refresh").Layout(gtx)
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(material.Button(ui.theme, &ui.refreshOrdersButton, "Refresh").Layout),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(material.Button(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel()).Layout),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (applies on Refresh)").Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.dateFilterField(gtx, &ui.createdAtMinEditor, "M/D/YYYY")
+		}),
+	)
 }
 
 // orderControlFor returns the persistent clickable for a row ID, avoiding lost click state during list redraws.

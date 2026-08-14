@@ -4,11 +4,10 @@ import "github.com/Fepozopo/faire-gui/faire"
 
 // BuildOrderListOptions translates feature state into the subset of Faire's
 // order-list controls supported by this feature. It intentionally omits unrelated
-// API controls such as page, update timestamps, and original-order IDs.
+// API controls such as page and original-order IDs.
 func BuildOrderListOptions(query ServerQuery, includedStates map[faire.OrderState]struct{}, cursor string) faire.OrderListOptions {
 	options := faire.OrderListOptions{
-		CreatedAtMin:   optionalString(query.OrderDateMin),
-		ShipAfterMax:   optionalString(query.ShipDateMax),
+		CreatedAtMin:   optionalString(query.CreatedAtMin),
 		ExcludedStates: ExcludedStates(includedStates),
 		Cursor:         optionalString(cursor),
 	}

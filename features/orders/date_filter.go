@@ -6,6 +6,20 @@ import (
 	"time"
 )
 
+const dateInputLayout = "1/2/2006"
+
+// DefaultCreatedAtMinimum returns the one-year lookback as a date-field value and
+// its equivalent RFC 3339 start-of-day timestamp in location. A nil location uses
+// the local timezone, matching date filters submitted from the desktop UI.
+func DefaultCreatedAtMinimum(now time.Time, location *time.Location) (string, string) {
+	if location == nil {
+		location = time.Local
+	}
+	date := now.In(location).AddDate(-1, 0, 0)
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, location)
+	return date.Format(dateInputLayout), startOfDay.Format(time.RFC3339)
+}
+
 // NormalizeDateFilter converts a user-entered month/day/year date to an RFC 3339 timestamp in location.
 // When endOfDay is false, the result is the start of the entered day; when true, it is the final second
 // of that day. An empty value remains empty so the corresponding Faire filter is omitted.
@@ -17,7 +31,7 @@ func NormalizeDateFilter(value string, endOfDay bool, location *time.Location) (
 	if location == nil {
 		return "", fmt.Errorf("orders: date-filter location is required")
 	}
-	date, err := time.ParseInLocation("1/2/2006", value, location)
+	date, err := time.ParseInLocation(dateInputLayout, value, location)
 	if err != nil {
 		return "", fmt.Errorf("orders: date must use month/day/year: %w", err)
 	}

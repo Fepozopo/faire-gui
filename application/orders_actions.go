@@ -82,7 +82,7 @@ func ordersCacheKey(connectionID string, state orders.State) string {
 	for index, excludedState := range excluded {
 		values[index] = string(excludedState)
 	}
-	return strings.Join([]string{connectionID, state.Query.OrderDateMin, state.Query.ShipDateMax, string(state.Query.SortBy), strings.Join(values, ",")}, "|")
+	return strings.Join([]string{connectionID, state.Query.CreatedAtMin, string(state.Query.SortBy), strings.Join(values, ",")}, "|")
 }
 
 // setActiveConnection changes the session-only active connection, clears Orders view state, and rejects prior export completions.
@@ -94,7 +94,7 @@ func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
 	// A completion from the prior connection must not overwrite this connection's Orders status.
 	ui.exportRequestID++
 	ui.ordersExporting = false
-	ui.ordersState = orders.NewState()
+	ui.resetOrdersState()
 	ui.ordersSearchActive = false
 	ui.orderSearchEditor.SetText("")
 	ui.ordersList.Position.First = 0

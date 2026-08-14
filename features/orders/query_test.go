@@ -3,6 +3,7 @@ package orders
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Fepozopo/faire-gui/faire"
 )
@@ -29,16 +30,12 @@ func TestExcludedStates(t *testing.T) {
 // TestBuildOrderListOptions verifies that only feature-supported list controls are sent.
 func TestBuildOrderListOptions(t *testing.T) {
 	query := ServerQuery{
-		OrderDateMin: "2026-01-02T03:04:05Z",
-		ShipDateMax:  "2026-02-03T04:05:06Z",
+		CreatedAtMin: "2026-01-02T03:04:05Z",
 		SortBy:       faire.OrderSortByCreatedAt,
 	}
 	options := BuildOrderListOptions(query, map[faire.OrderState]struct{}{faire.OrderStateNew: {}}, "next-page")
-	if options.CreatedAtMin == nil || *options.CreatedAtMin != query.OrderDateMin {
+	if options.CreatedAtMin == nil || *options.CreatedAtMin != query.CreatedAtMin {
 		t.Fatalf("CreatedAtMin = %#v", options.CreatedAtMin)
-	}
-	if options.ShipAfterMax == nil || *options.ShipAfterMax != query.ShipDateMax {
-		t.Fatalf("ShipAfterMax = %#v", options.ShipAfterMax)
 	}
 	if options.SortBy == nil || *options.SortBy != faire.OrderSortByCreatedAt {
 		t.Fatalf("SortBy = %#v", options.SortBy)
@@ -46,7 +43,7 @@ func TestBuildOrderListOptions(t *testing.T) {
 	if options.Cursor == nil || *options.Cursor != "next-page" {
 		t.Fatalf("Cursor = %#v", options.Cursor)
 	}
-	if options.Limit != nil || options.Page != nil || options.UpdatedAtMin != nil || options.OriginalOrderID != nil {
+	if options.Limit != nil || options.Page != nil || options.UpdatedAtMin != nil || options.ShipAfterMax != nil || options.OriginalOrderID != nil {
 		t.Fatalf("unsupported options were set: %#v", options)
 	}
 }
@@ -57,16 +54,20 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	if options.SortBy != nil {
 		t.Fatalf("SortBy = %q, want nil", *options.SortBy)
 	}
-	if options.Cursor != nil || options.CreatedAtMin != nil || options.ShipAfterMax != nil {
+	if options.Cursor != nil || options.CreatedAtMin != nil {
 		t.Fatalf("unexpected optional controls: %#v", options)
 	}
 }
 
-// TestNewStateUsesCreationTimeSort verifies the initial list query consistently uses the selected server sort field.
-func TestNewStateUsesCreationTimeSort(t *testing.T) {
-	state := NewState()
+// TestNewStateAtUsesCreationTimeSortAndOneYearLookback verifies the initial query uses the selected server sort and default date boundary.
+func TestNewStateAtUsesCreationTimeSortAndOneYearLookback(t *testing.T) {
+	location := time.FixedZone("UTC-05", -5*60*60)
+	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
 	if state.Query.SortBy != faire.OrderSortByCreatedAt {
-		t.Fatalf("NewState().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByCreatedAt)
+		t.Fatalf("NewStateAt().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByCreatedAt)
+	}
+	if state.Query.CreatedAtMin != "2025-03-21T00:00:00-05:00" {
+		t.Fatalf("NewStateAt().Query.CreatedAtMin = %q, want one-year lookback", state.Query.CreatedAtMin)
 	}
 }
 
