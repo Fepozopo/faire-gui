@@ -105,7 +105,6 @@ type DesktopUI struct {
 	settingsBrandProfile            widget.Clickable
 	settingsConnections             widget.Clickable
 	checkForUpdates                 widget.Clickable
-	closeSettingsMenu               widget.Clickable
 	updateLater                     widget.Clickable
 	installUpdate                   widget.Clickable
 	closeUpdateCheckStatus          widget.Clickable
@@ -249,7 +248,7 @@ func (ui *DesktopUI) shutdown() {
 	ui.ordersState.Cursor = ""
 }
 
-// Layout processes current-frame interaction and emits the complete desktop UI, including update and Settings dialogs.
+// Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.
 // In Gio, this function is called for every requested frame; persistent fields on DesktopUI preserve interaction state.
 func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 	ui.handleTabClicks(gtx)
@@ -271,8 +270,6 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutUpdateModal(gtx)
 			case ui.updateCheckDialog.open:
 				return ui.layoutUpdateCheckStatusModal(gtx)
-			case ui.settingsMenuOpen:
-				return ui.layoutSettingsMenu(gtx)
 			case ui.deleteDialog.open:
 				return ui.layoutDeleteModal(gtx)
 			case ui.connectionPickerOpen:
@@ -295,7 +292,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.settingsMenuOpen || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

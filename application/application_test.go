@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"image/color"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -82,12 +83,15 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, default Brand profile page, and created-at filter required by the desktop screens.
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, collapsed Settings group, default Brand profile page, and created-at filter required by the desktop screens.
 func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
 	if ui.selectedTab != brandsTab {
 		t.Fatalf("selected tab = %d, want Brand profile tab %d at launch", ui.selectedTab, brandsTab)
+	}
+	if ui.settingsMenuOpen {
+		t.Fatal("Settings submenu is open at launch, want a collapsed group")
 	}
 	if ui.brandsList.Axis != 1 || ui.connectionsList.Axis != 1 {
 		t.Fatalf("list axes = (%d, %d), want both vertical", ui.brandsList.Axis, ui.connectionsList.Axis)
@@ -97,6 +101,19 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 	if !ui.createdAtMinEditor.SingleLine || ui.createdAtMinEditor.Text() == "" || ui.ordersState.Query.CreatedAtMin == "" {
 		t.Fatalf("created-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.createdAtMinEditor.SingleLine, ui.createdAtMinEditor.Text(), ui.ordersState.Query.CreatedAtMin)
+	}
+}
+
+// TestNavigationHighlightUsesSettingsSurface verifies selected and hovered sidebar entries share Settings' light-gray surface.
+func TestNavigationHighlightUsesSettingsSurface(t *testing.T) {
+	t.Parallel()
+
+	want := color.NRGBA{R: 240, G: 240, B: 240, A: 255}
+	if got := navigationHighlight(true); got != want {
+		t.Fatalf("navigationHighlight(true) = %#v, want %#v", got, want)
+	}
+	if got := navigationHighlight(false); got != (color.NRGBA{}) {
+		t.Fatalf("navigationHighlight(false) = %#v, want transparent", got)
 	}
 }
 

@@ -32,6 +32,7 @@ func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(ui.layoutUnavailableNavigation),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 				layout.Rigid(ui.layoutSettingsNavigation),
+				layout.Rigid(ui.layoutSettingsSubmenu),
 			)
 		})
 	})
@@ -60,7 +61,7 @@ func (ui *DesktopUI) layoutConnectionSwitcher(gtx layout.Context) layout.Dimensi
 	})
 }
 
-// layoutNavigationItem draws one functional route button with a neutral selected surface.
+// layoutNavigationItem draws one functional route button with the shared surface for selected or hovered states.
 func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label string) layout.Dimensions {
 	button := &ui.tabButtons[route]
 	if button.Clicked(gtx) {
@@ -71,11 +72,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 		ui.invalidate()
 	}
 	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		background := color.NRGBA{}
-		if ui.selectedTab == route {
-			background = color.NRGBA{R: 240, G: 240, B: 240, A: 255}
-		}
-		return roundedPanel(gtx, background, func(gtx layout.Context) layout.Dimensions {
+		return roundedPanel(gtx, navigationHighlight(ui.selectedTab == route || button.Hovered()), func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				style := material.Body1(ui.theme, label)
 				if ui.selectedTab == route {
@@ -105,52 +102,75 @@ func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dime
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-// layoutSettingsNavigation opens the Settings submenu from the persistent left navigation.
-// It keeps Brand profile and Connections reachable from their existing routes while grouping account-related actions together.
+// layoutSettingsNavigation toggles the inline Settings submenu from the persistent left navigation.
+// Its shared highlight surface and chevron make expanded and hovered states visible without obscuring the active page.
 func (ui *DesktopUI) layoutSettingsNavigation(gtx layout.Context) layout.Dimensions {
 	if ui.settingsButton.Clicked(gtx) {
-		ui.settingsMenuOpen = true
+		ui.settingsMenuOpen = !ui.settingsMenuOpen
 		ui.invalidate()
 	}
+	chevron := "⌄"
+	if ui.settingsMenuOpen {
+		chevron = "⌃"
+	}
 	return ui.settingsButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return roundedPanel(gtx, color.NRGBA{}, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, material.Body1(ui.theme, "Settings").Layout)
+		return roundedPanel(gtx, navigationHighlight(ui.settingsMenuOpen || ui.settingsButton.Hovered()), func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, material.Body1(ui.theme, "Settings").Layout),
+					layout.Rigid(material.Body1(ui.theme, chevron).Layout),
+				)
+			})
 		})
 	})
 }
 
-// layoutSettingsMenu presents settings destinations and the user-initiated update check.
-// Selecting a destination closes the menu before the existing page renders, while an update check opens a status modal until its background request completes.
-func (ui *DesktopUI) layoutSettingsMenu(gtx layout.Context) layout.Dimensions {
+// layoutSettingsSubmenu renders the Settings destinations directly beneath the expanded Settings header.
+// Brand profile and Connections select their existing pages; Check for updates starts the existing asynchronous checker without collapsing the group.
+func (ui *DesktopUI) layoutSettingsSubmenu(gtx layout.Context) layout.Dimensions {
+	if !ui.settingsMenuOpen {
+		return layout.Dimensions{}
+	}
 	if ui.settingsBrandProfile.Clicked(gtx) {
-		ui.settingsMenuOpen = false
 		ui.selectedTab = brandsTab
 		ui.invalidate()
 	}
 	if ui.settingsConnections.Clicked(gtx) {
-		ui.settingsMenuOpen = false
 		ui.selectedTab = connectionsTab
 		ui.invalidate()
 	}
 	if ui.checkForUpdates.Clicked(gtx) {
-		ui.settingsMenuOpen = false
 		ui.startManualUpdateCheck()
 	}
-	if ui.closeSettingsMenu.Clicked(gtx) {
-		ui.settingsMenuOpen = false
-		ui.invalidate()
-	}
-	return modalPanel(gtx, ui, "Settings", func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(primaryButton(ui.theme, &ui.settingsBrandProfile, "Brand profile")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.settingsConnections, "Connections")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.checkForUpdates, "Check for updates")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.closeSettingsMenu, "Close")),
-		)
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.layoutSettingsSubmenuItem(gtx, &ui.settingsBrandProfile, "Brand profile")
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.layoutSettingsSubmenuItem(gtx, &ui.settingsConnections, "Connections")
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.layoutSettingsSubmenuItem(gtx, &ui.checkForUpdates, "Check for updates")
+		}),
+	)
+}
+
+// layoutSettingsSubmenuItem renders one indented Settings destination with the shared hover surface while preserving its clickable state.
+func (ui *DesktopUI) layoutSettingsSubmenuItem(gtx layout.Context, button *widget.Clickable, label string) layout.Dimensions {
+	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return roundedPanel(gtx, navigationHighlight(button.Hovered()), func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(32)}.Layout(gtx, material.Body1(ui.theme, label).Layout)
+		})
 	})
+}
+
+// navigationHighlight returns the common light-gray surface for active or hovered sidebar navigation items.
+// An inactive item remains transparent so the white sidebar background continues to show through.
+func navigationHighlight(active bool) color.NRGBA {
+	if active {
+		return color.NRGBA{R: 240, G: 240, B: 240, A: 255}
+	}
+	return color.NRGBA{}
 }
 
 // layoutActivePage lays out the currently selected functional route inside the shared sidebar shell.
