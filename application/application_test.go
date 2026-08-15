@@ -83,12 +83,15 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, collapsed Settings group, default Brand profile page, and created-at filter required by the desktop screens.
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, collapsed Settings group, default Orders page without an active connection, and created-at filter required by the desktop screens.
 func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
-	if ui.selectedTab != brandsTab {
-		t.Fatalf("selected tab = %d, want Brand profile tab %d at launch", ui.selectedTab, brandsTab)
+	if ui.selectedTab != ordersTab {
+		t.Fatalf("selected tab = %d, want Orders tab %d at launch", ui.selectedTab, ordersTab)
+	}
+	if ui.activeConnectionID != "" || ui.activeConnectionLabel != "" {
+		t.Fatalf("active connection = (%q, %q), want no active connection at launch", ui.activeConnectionID, ui.activeConnectionLabel)
 	}
 	if ui.settingsMenuOpen {
 		t.Fatal("Settings submenu is open at launch, want a collapsed group")

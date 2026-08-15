@@ -163,7 +163,7 @@ func Run() {
 }
 
 // newDesktopUI constructs a DesktopUI from loaded non-secret metadata, result channels, and persistent Gio controls.
-// The returned UI keeps entered token text only in its masked editor until an action immediately clears it.
+// The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
 	ui := &DesktopUI{
 		ctx:                      ctx,
@@ -174,6 +174,7 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		connections:              savedConnections,
 		status:                   startupStatus,
 		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
+		selectedTab:              ordersTab,
 		ordersCache:              make(map[string]ordersCacheEntry),
 		pendingStates:            make(map[faire.OrderState]struct{}),
 		rowControls:              make(map[string]*connectionRowControls),
