@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
+	"github.com/Fepozopo/faire-gui/updater"
 )
 
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
@@ -91,6 +93,41 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 	if !ui.createdAtMinEditor.SingleLine || ui.createdAtMinEditor.Text() == "" || ui.ordersState.Query.CreatedAtMin == "" {
 		t.Fatalf("created-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.createdAtMinEditor.SingleLine, ui.createdAtMinEditor.Text(), ui.ordersState.Query.CreatedAtMin)
+	}
+}
+
+// TestUpdateCheckOpensCompatibleReleasePrompt verifies a safe update result opens the startup prompt on the Gio frame goroutine.
+func TestUpdateCheckOpensCompatibleReleasePrompt(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	availableVersion, err := updater.ParseVersion("0.2.0")
+	if err != nil {
+		t.Fatalf("ParseVersion() error = %v", err)
+	}
+	ui.updateResults <- updateCheckResult{
+		available: true,
+		update: updater.Update{
+			Version: availableVersion,
+			Asset:   updater.Asset{Name: "faire-gui_darwin_arm64", URL: "https://example.invalid/asset", Size: 1},
+		},
+	}
+
+	ui.drainUpdateResults()
+
+	if !ui.updateDialog.open || ui.updateDialog.update.Version.String() != "0.2.0" {
+		t.Fatalf("update dialog = %#v, want an open prompt for 0.2.0", ui.updateDialog)
+	}
+}
+
+// TestUpdateInstallFailureKeepsPromptOpen verifies users can retry after an installation failure without losing the selected update.
+func TestUpdateInstallFailureKeepsPromptOpen(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.updateDialog = updateDialogState{open: true, installing: true}
+	ui.updateInstallResults <- updateInstallResult{err: errors.New("disk full")}
+
+	ui.drainUpdateInstallResults()
+
+	if !ui.updateDialog.open || ui.updateDialog.installing || !strings.Contains(ui.updateDialog.status, "could not be installed") {
+		t.Fatalf("update dialog = %#v, want open retryable failure state", ui.updateDialog)
 	}
 }
 

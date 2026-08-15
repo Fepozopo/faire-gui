@@ -29,7 +29,7 @@ const (
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, while profile and order requests publish only safe results through channels.
+// Its methods run on Gio's frame goroutine, while profile, order, and update requests publish only safe results through channels.
 type DesktopUI struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,6 +100,8 @@ type DesktopUI struct {
 	cancelButton                    widget.Clickable
 	confirmDelete                   widget.Clickable
 	cancelDelete                    widget.Clickable
+	updateLater                     widget.Clickable
+	installUpdate                   widget.Clickable
 	modalBlocker                    widget.Clickable
 
 	rowControls              map[string]*connectionRowControls
@@ -107,9 +109,12 @@ type DesktopUI struct {
 	orderRowControls         map[faire.OrderID]*widget.Clickable
 	stateControls            map[faire.OrderState]*widget.Clickable
 	deleteDialog             deleteDialogState
+	updateDialog             updateDialogState
 	results                  chan profileLoadResult
 	orderResults             chan orderLoadResult
 	orderExportResults       chan orderExportResult
+	updateResults            chan updateCheckResult
+	updateInstallResults     chan updateInstallResult
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -132,7 +137,7 @@ type profileLoadResult struct {
 	status string
 }
 
-// Run starts the Faire Gio desktop application.
+// Run starts the Faire Gio desktop application and checks GitHub Releases for a compatible update.
 // It creates the window before app.Main takes control of the process main goroutine, and cancels outstanding work once the application exits.
 func Run() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -140,6 +145,7 @@ func Run() {
 	window := new(app.Window)
 	window.Option(app.Title(windowTitle), app.Size(unit.Dp(windowWidth), unit.Dp(windowHeight)))
 	ui := newDesktopUI(ctx, cancel, window, manager, savedConnections, startupStatus)
+	ui.startUpdateCheck()
 
 	go func() {
 		// Gio requires app.Main on the process main goroutine, so the event loop stays in a worker goroutine.
@@ -149,7 +155,7 @@ func Run() {
 	cancel()
 }
 
-// newDesktopUI constructs a DesktopUI from loaded non-secret metadata and configures its persistent Gio controls.
+// newDesktopUI constructs a DesktopUI from loaded non-secret metadata, result channels, and persistent Gio controls.
 // The returned UI keeps entered token text only in its masked editor until an action immediately clears it.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
 	ui := &DesktopUI{
@@ -170,6 +176,8 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		results:                  make(chan profileLoadResult, 1),
 		orderResults:             make(chan orderLoadResult, 2),
 		orderExportResults:       make(chan orderExportResult, 1),
+		updateResults:            make(chan updateCheckResult, 1),
+		updateInstallResults:     make(chan updateInstallResult, 1),
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()
@@ -202,7 +210,7 @@ func (ui *DesktopUI) resetOrdersState() {
 }
 
 // runWindow handles Gio window events, drains safe background results, and submits complete frames.
-// It releases cached Orders rows and cancels in-flight work when Gio reports that the desktop window has been destroyed.
+// It releases cached Orders rows and cancels profile, order, and update work when Gio reports that the desktop window has been destroyed.
 func (ui *DesktopUI) runWindow() error {
 	defer ui.shutdown()
 
@@ -216,6 +224,8 @@ func (ui *DesktopUI) runWindow() error {
 			ui.drainResults()
 			ui.drainOrderResults()
 			ui.drainOrderExportResults()
+			ui.drainUpdateResults()
+			ui.drainUpdateInstallResults()
 			ui.Layout(gtx)
 			event.Frame(gtx.Ops)
 		}
@@ -231,7 +241,7 @@ func (ui *DesktopUI) shutdown() {
 	ui.ordersState.Cursor = ""
 }
 
-// Layout processes current-frame interaction and emits the complete desktop UI.
+// Layout processes current-frame interaction and emits the complete desktop UI, including any update prompt.
 // In Gio, this function is called for every requested frame; persistent fields on DesktopUI preserve interaction state.
 func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 	ui.handleTabClicks(gtx)
@@ -249,6 +259,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 		}),
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			switch {
+			case ui.updateDialog.open:
+				return ui.layoutUpdateModal(gtx)
 			case ui.deleteDialog.open:
 				return ui.layoutDeleteModal(gtx)
 			case ui.connectionPickerOpen:
@@ -269,9 +281,9 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 }
 
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
-// Processing clicks before rendering ensures each click affects the same frame that consumes it.
+// Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

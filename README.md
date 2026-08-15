@@ -28,6 +28,26 @@ Gio owns the native window and graphics backend, so do not use the former GoGPU-
 
 Gio redraws the complete interface on every frame while preserving state in `widget.Editor`, `widget.Clickable`, and `widget.List` values owned by `application.DesktopUI`. Background work must not mutate those widgets or rendered fields directly. Instead, publish credential-safe results to the UI result channel and call `window.Invalidate()` so the next frame consumes them.
 
+### Releases and automatic updates
+
+`version.go` is the single source of truth for the application’s [Semantic Versioning 2.0.0](https://semver.org/) version. Before publishing a release, update `Version` to the intended `MAJOR.MINOR.PATCH` value and create the corresponding GitHub Release tag (for example, `v1.2.3`). The updater accepts a tag with or without the leading `v`.
+
+Build the three release assets locally:
+
+```sh
+make all
+```
+
+Upload these **unarchived executables** to that GitHub Release with these exact names:
+
+| Target        | Required release asset        |
+| ------------- | ----------------------------- |
+| Darwin ARM64  | `faire-gui_darwin_arm64`      |
+| Windows ARM64 | `faire-gui_windows_arm64.exe` |
+| Windows AMD64 | `faire-gui_windows_amd64.exe` |
+
+On startup, the desktop app asks GitHub for the latest stable release, compares its semantic version to the embedded `Version`, and only prompts if the release is newer and includes the asset matching the active platform. Choosing **Update and restart** downloads the executable beside the running application. On Darwin it atomically replaces and execs the process; on Windows a short-lived helper waits for the process to exit, replaces the locked `.exe`, and restarts it. Draft and pre-release GitHub Releases are not selected by GitHub’s `latest` endpoint.
+
 ## Backend structure
 
 - `faire/` — typed Faire External API v2 client.
