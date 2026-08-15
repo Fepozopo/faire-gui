@@ -31,14 +31,27 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(layout.Spacer{Height: unit.Dp(5)}.Layout),
 		layout.Rigid(bodyText(ui.theme, ui.ordersConnectionText(), mutedTextColor)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-		layout.Rigid(ui.layoutOrderTabs),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
-		layout.Rigid(ui.layoutOrderSearchAndFilters),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(ui.layoutOrderActionBar),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-		layout.Flexed(1, ui.layoutOrdersTable),
+		layout.Flexed(1, ui.layoutOrdersWorkspace),
 	)
+}
+
+// layoutOrdersWorkspace groups the tabs, controls, selection bar, and table in one bordered Orders surface.
+// Its flexible table region consumes the remaining height so the panel remains framed while rows scroll.
+func (ui *DesktopUI) layoutOrdersWorkspace(gtx layout.Context) layout.Dimensions {
+	return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(6), Right: unit.Dp(20), Left: unit.Dp(20)}.Layout(gtx, ui.layoutOrderTabs)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return topRule(gtx, panelBorderColor) }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(20), Bottom: unit.Dp(14), Left: unit.Dp(20)}.Layout(gtx, ui.layoutOrderSearchAndFilters)
+			}),
+			layout.Rigid(ui.layoutOrderActionBar),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return topRule(gtx, panelBorderColor) }),
+			layout.Flexed(1, ui.layoutOrdersTable),
+		)
+	})
 }
 
 // ordersConnectionText returns a non-secret prompt or active connection label for the Orders heading.
@@ -131,7 +144,7 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 		// Keep the advanced picker visually separate so the preset tabs remain easy to scan.
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel()).Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.stateFilterButton, ui.statesButtonLabel())),
 		)
 		return children
 	}()...)
@@ -146,9 +159,9 @@ func (ui *DesktopUI) layoutOrderSearchAndFilters(gtx layout.Context) layout.Dime
 			return inputField(gtx, ui.theme, &ui.orderSearchEditor, "Order number")
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(material.Button(ui.theme, &ui.searchOrdersButton, "Search").Layout),
+		layout.Rigid(primaryButton(ui.theme, &ui.searchOrdersButton, "Search")),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(material.Button(ui.theme, &ui.clearOrderSearchButton, "Clear").Layout),
+		layout.Rigid(primaryButton(ui.theme, &ui.clearOrderSearchButton, "Clear")),
 	)
 }
 
@@ -159,14 +172,23 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the selected-order context before its CSV export action.
+// layoutOrderActionBar renders the selected-order context and primary CSV export action on a muted toolbar.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
-		// The wider gap distinguishes the selection context from the action it informs.
-		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-		layout.Rigid(material.Button(ui.theme, &ui.exportMenuButton, "Export").Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+	return layout.Background{}.Layout(gtx,
+		func(gtx layout.Context) layout.Dimensions {
+			return fill(gtx, selectionBarColor)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(20), Bottom: unit.Dp(10), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
+					// The wider gap distinguishes the selection context from the action it informs.
+					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.exportMenuButton, "Export")),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+				)
+			})
+		},
 	)
 }
 
@@ -197,13 +219,13 @@ func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(bodyText(ui.theme, "Exports are saved as CSV files in Downloads.", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.exportNewOrdersButton, "Export New Orders").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.exportNewOrdersButton, "Export New Orders")),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.exportBackorderedOrdersButton, "Export Backordered Orders").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.exportBackorderedOrdersButton, "Export Backordered Orders")),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.exportSelectedOrdersButton, "Export Selected Orders").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.exportSelectedOrdersButton, "Export Selected Orders")),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.closeExportMenuButton, "Cancel").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.closeExportMenuButton, "Cancel")),
 		)
 	})
 }
@@ -218,7 +240,7 @@ func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dim
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(bodyText(ui.theme, "CSV export is not configured for this connection's Faire brand.", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.closeCSVExportBlockedButton, "Close").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.closeCSVExportBlockedButton, "Close")),
 		)
 	})
 }
@@ -234,27 +256,24 @@ func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.D
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(bodyText(ui.theme, "Saved in Downloads as "+ui.csvExportCompletedFilename+".", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.closeCSVExportCompletedButton, "Close").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.closeCSVExportCompletedButton, "Close")),
 		)
 	})
 }
 
-// layoutOrdersTable creates the order header, scrollable rows, and Load more action.
+// layoutOrdersTable creates the framed surface's order header, scrollable rows, and Load more action.
+// Before the first request, it fills the remaining panel space with the same safe message rather than nesting another card.
 func (ui *DesktopUI) layoutOrdersTable(gtx layout.Context) layout.Dimensions {
 	if ui.activeConnectionID == "" || (!ui.ordersState.Loaded && !ui.ordersState.Loading) {
-		return emptyOrdersState(gtx, ui.theme, ui.ordersState.Status)
+		return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(28), Bottom: unit.Dp(28), Left: unit.Dp(28)}.Layout(gtx, bodyText(ui.theme, emptyOrdersMessage(ui.ordersState.Status), mutedTextColor))
 	}
-	return roundedPanel(gtx, cardBackground, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(ui.layoutOrdersHeader),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return topRule(gtx, color.NRGBA{R: 221, G: 221, B: 221, A: 255})
-			}),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return ui.ordersList.Layout(gtx, len(ui.ordersState.Rows)+1, ui.layoutOrdersListItem)
-			}),
-		)
-	})
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(ui.layoutOrdersHeader),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return topRule(gtx, panelBorderColor) }),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return ui.ordersList.Layout(gtx, len(ui.ordersState.Rows)+1, ui.layoutOrdersListItem)
+		}),
+	)
 }
 
 // layoutOrdersHeader renders fixed table column labels using the same widths as row values.
@@ -272,7 +291,8 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// layoutOrdersListItem renders status/empty feedback followed by selectable order rows and Load more.
+// layoutOrdersListItem renders selectable order rows with a full-width divider after every row.
+// The separator stays outside the selected-row fill so adjacent rows retain a clear visual boundary.
 func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.Dimensions {
 	if index == len(ui.ordersState.Rows) {
 		return ui.layoutOrdersFooter(gtx)
@@ -283,21 +303,23 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 		ui.ordersState.ToggleSelection(row.ID)
 		ui.invalidate()
 	}
-	return layout.Inset{Right: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return control.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if ui.ordersState.IsSelected(row.ID) {
-					// Clip the highlight to this row; an unbounded paint operation would tint following rows too.
-					paint.FillShape(gtx.Ops, color.NRGBA{R: 243, G: 243, B: 243, A: 255}, clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Op())
-				}
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			}, func(gtx layout.Context) layout.Dimensions {
-				// Rows share the header's outer inset, so only vertical padding belongs here.
-				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutOrderColumns(gtx, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
+	return control.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					if ui.ordersState.IsSelected(row.ID) {
+						// Paint only the measured row area so its highlight never reaches neighboring entries.
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 243, G: 243, B: 243, A: 255}, clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Op())
+					}
+					return layout.Dimensions{Size: gtx.Constraints.Min}
+				}, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(13), Right: unit.Dp(12), Bottom: unit.Dp(13), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return ui.layoutOrderColumns(gtx, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
+					})
 				})
-			})
-		})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return topRule(gtx, panelBorderColor) }),
+		)
 	})
 }
 
@@ -311,7 +333,7 @@ func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 		if ui.ordersState.Loading {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "Loading…", mutedTextColor)))
 		} else if ui.ordersState.Cursor != "" && !ui.ordersSearchActive {
-			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), layout.Rigid(material.Button(ui.theme, &ui.loadMoreOrdersButton, "Load more").Layout))
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), layout.Rigid(primaryButton(ui.theme, &ui.loadMoreOrdersButton, "Load more")))
 		} else if len(ui.ordersState.Rows) == 0 && ui.ordersState.Loaded {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "No orders match these filters.", mutedTextColor)))
 		}
@@ -379,7 +401,7 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 // Refresh is disabled by behavior while an API operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
-		layout.Rigid(material.Button(ui.theme, &ui.refreshOrdersButton, "Refresh").Layout),
+		layout.Rigid(primaryButton(ui.theme, &ui.refreshOrdersButton, "Refresh")),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (applies on Refresh)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
@@ -420,14 +442,13 @@ func (ui *DesktopUI) statesButtonLabel() string {
 	return "States (" + itoa(len(ui.ordersState.IncludedStates)) + ")"
 }
 
-// emptyOrdersState renders an actionable safe message before the first connection/order request.
-func emptyOrdersState(gtx layout.Context, theme *material.Theme, message string) layout.Dimensions {
+// emptyOrdersMessage returns the safe placeholder text displayed before the first connection or order request.
+// A non-empty status takes precedence so the caller can surface request feedback in the existing Orders panel.
+func emptyOrdersMessage(message string) string {
 	if message == "" {
-		message = "Orders will appear here after a saved connection is selected."
+		return "Orders will appear here after a saved connection is selected."
 	}
-	return roundedPanel(gtx, cardBackground, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(28), Bottom: unit.Dp(28), Left: unit.Dp(28)}.Layout(gtx, bodyText(theme, message, mutedTextColor))
-	})
+	return message
 }
 
 // orderTabButton renders a low-profile tab with an underline for the selected server-state filter.

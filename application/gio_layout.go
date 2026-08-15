@@ -17,11 +17,15 @@ import (
 )
 
 var (
-	cardBackground  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	formBackground  = color.NRGBA{R: 238, G: 245, B: 255, A: 255}
-	mutedTextColor  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
-	dangerColor     = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
-	modalScrimColor = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
+	cardBackground     = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	formBackground     = color.NRGBA{R: 238, G: 245, B: 255, A: 255}
+	mutedTextColor     = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	dangerColor        = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
+	modalScrimColor    = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
+	panelBorderColor   = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
+	primaryButtonColor = color.NRGBA{R: 48, G: 48, B: 48, A: 255}
+	primaryButtonText  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	selectionBarColor  = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
 )
 
 // layoutBrands renders a vertically scrollable selector of saved connections and the current safe profile status.
@@ -381,7 +385,7 @@ func card(gtx layout.Context, child layout.Widget) layout.Dimensions {
 }
 
 // roundedPanel paints a rounded background behind child without relying on absolute screen coordinates.
-// Gio calculates the panel dimensions from its child, which lets the interface reflow when the window resizes.
+// Its background fills the child's measured dimensions so responsive content keeps a consistent surface.
 func roundedPanel(gtx layout.Context, background color.NRGBA, child layout.Widget) layout.Dimensions {
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -391,6 +395,29 @@ func roundedPanel(gtx layout.Context, background color.NRGBA, child layout.Widge
 		},
 		child,
 	)
+}
+
+// outlinedPanel renders child on a rounded surface enclosed by a one-device-independent-pixel border.
+// The border and fill colors are supplied by the caller, while the returned dimensions include the border.
+func outlinedPanel(gtx layout.Context, background, border color.NRGBA, child layout.Widget) layout.Dimensions {
+	return roundedPanel(gtx, border, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(1), Right: unit.Dp(1), Bottom: unit.Dp(1), Left: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return roundedPanel(gtx, background, child)
+		})
+	})
+}
+
+// primaryButton creates the dark filled action treatment used for the application's primary controls.
+// The returned widget preserves the supplied clickable's interaction state and lays out its label with white text.
+func primaryButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		style := material.Button(theme, button, label)
+		style.Background = primaryButtonColor
+		style.Color = primaryButtonText
+		style.CornerRadius = unit.Dp(4)
+		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
+		return style.Layout(gtx)
+	}
 }
 
 // fill paints the full available layout area with a solid color.
