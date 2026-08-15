@@ -6,8 +6,8 @@ This document proposes a maintainable path from the current Gio desktop applicat
 
 The initial connection-management application now has a read-only Orders vertical slice. It provides:
 
-- persistent sidebar navigation for Brand profile, Connections, and Orders;
-- a session-only active saved Faire connection;
+- persistent sidebar navigation for Orders plus an expandable Settings submenu containing Brand profile, Connections, and manual update checking;
+- an Orders startup page with no active saved Faire connection selected until the user explicitly chooses one;
 - asynchronous, paginated, cached Orders loading;
 - status tabs, a state-filter dialog, supported date filters, direct order-number lookup, and creation-time sorting;
 - selectable table rows and CSV exports for New, Backordered, or selected orders; and
@@ -64,17 +64,17 @@ The following is the target structure as the application grows. Existing files c
 │       └── main.go
 ├── application/
 │   ├── application.go
-│   ├── gio.go
+│   ├── desktop_ui.go
+│   ├── gio_runtime.go
 │   ├── gio_layout.go
-│   ├── desktop_ui.go              # future extraction from gio.go
-│   ├── gio_runtime.go             # future extraction from gio.go
 │   ├── navigation.go
-│   ├── async.go
+│   ├── update.go
 │   ├── connection_actions.go
 │   ├── connection_page.go
 │   ├── brands_page.go
 │   ├── orders_page.go
 │   ├── orders_actions.go
+│   ├── async.go                   # future, only after repeated async patterns emerge
 │   ├── products_page.go
 │   ├── inventory_page.go
 │   ├── customers_page.go
@@ -152,7 +152,7 @@ The following is the target structure as the application grows. Existing files c
 └── go.sum
 ```
 
-`features/` and `internal/` should be introduced only when the first feature makes them useful. Until then, keeping a small amount of feature-specific code in `application/` is preferable to creating empty abstractions.
+Additional feature and internal packages should be introduced only when a completed feature makes them useful. Until then, keeping a small amount of feature-specific code in `application/` is preferable to creating empty abstractions.
 
 ---
 
@@ -168,24 +168,24 @@ The following is the target structure as the application grows. Existing files c
 
 This package is the desktop composition root. It wires together the manager, API client creation, feature state, reusable Gio controls, and screen layout.
 
-| File                    | Responsibility                                                                                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `application.go`        | Presentation-independent helpers shared by desktop actions: startup loading, safe error-message conversion, profile summaries, and explicitly named environment-token lookup.                                                                          |
-| `gio.go`                | Current home of `DesktopUI`, long-lived widget state, `Run`, the Gio window event loop, result-channel draining, and the established Brand profile and Connections screens. Split it only when another feature makes the extraction useful.            |
-| `desktop_ui.go`         | Future extraction for the `DesktopUI` type and its long-lived state: `*app.Window`, theme, selected connection ID, selected route, persistent editors, lists, clickables, status fields, and result channels.                                          |
-| `gio_runtime.go`        | Future extraction for `Run`, Gio's window event loop, `app.FrameEvent` setup, `app.DestroyEvent` shutdown, result-channel draining, and invalidation policy.                                                                                           |
-| `gio_layout.go`         | Shared Gio layout primitives. It should not contain feature-specific API calls.                                                                                                                                                                        |
-| `navigation.go`         | Implements the current sidebar, Brand profile, Connections, and Orders routes, the session-only active-connection picker, and the Orders state-filter dialog. Future routes remain non-interactive until their workflows exist.                        |
-| `async.go`              | Optional future home for reusable cancellable-work helpers when more than one page needs them. Results must contain only safe typed data, user-safe status text, or errors sanitized before display.                                                   |
-| `connection_actions.go` | Future extraction for create, metadata update, delete, token replacement, explicit import, active-connection selection, and refresh actions that currently remain in `gio.go`.                                                                         |
-| `connection_page.go`    | Future extraction for the Connections screen and connection forms.                                                                                                                                                                                     |
-| `brands_page.go`        | Future extraction for the Brand profile verification screen and active-connection summary.                                                                                                                                                             |
+| File                    | Responsibility                                                                                                                                                                                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `application.go`        | Presentation-independent helpers shared by desktop actions: startup loading, safe error-message conversion, profile summaries, and explicitly named environment-token lookup.                                                                                           |
+| `desktop_ui.go`         | Defines `DesktopUI`, long-lived Gio widget and presentation state, startup construction, the top-level layout, and route selection.                                                                                                                                     |
+| `gio_runtime.go`        | Runs the Gio window lifecycle: `Run`, frame-event setup, safe result draining, frame submission, shutdown, and cancellation.                                                                                                                                            |
+| `gio_layout.go`         | Shared Gio layout primitives, fields, status treatment, panels, buttons, and drawing helpers. It contains no feature-page rendering or feature-specific API calls.                                                                                                      |
+| `navigation.go`         | Implements the sidebar, expandable Settings submenu, session-only active-connection picker, Orders state-filter dialog, and route selection. Future product routes remain non-interactive until their workflows exist.                                                  |
+| `update.go`             | Checks GitHub Releases at startup and on demand, presents safe update status, and coordinates user-approved installation.                                                                                                                                               |
+| `async.go`              | Optional future home for reusable cancellable-work helpers when more than one page needs the same request lifecycle. Results must contain only safe typed data, user-safe status text, or sanitized errors.                                                             |
+| `connection_actions.go` | Loads Brand profiles and creates, updates, imports, replaces, deletes, refreshes, and selects saved connections without exposing credentials.                                                                                                                           |
+| `connection_page.go`    | Renders the saved-connection management forms, rows, and deletion confirmation dialog.                                                                                                                                                                                  |
+| `brands_page.go`        | Renders the Brand profile verification screen and active-connection summary.                                                                                                                                                                                            |
 | `orders_page.go`        | Renders the implemented read-only Orders route: status tabs, direct lookup and supported filters, row selection, CSV-export menu, table/list rows, empty/loading/error states, and pagination controls. It delegates query and presentation logic to `features/orders`. |
-| `orders_actions.go`     | Loads Orders asynchronously through `Manager.Client` for the active connection. It provides stale-result protection, an in-memory safe-row cache, pagination, direct lookup, full-order CSV exports, and sanitized error results. It does not implement mutations. |
-| `products_page.go`      | Future product catalog page rendering: search, filters, product table/grid, details and editing entry points.                                                                                                                                          |
-| `inventory_page.go`     | Future inventory page rendering: stock table, search/filter state, and inventory-update forms.                                                                                                                                                         |
-| `customers_page.go`     | Future retailer/customer rendering: list, profiles, search, and detail screen entry points.                                                                                                                                                            |
-| `settings_page.go`      | Application preferences and non-secret display settings. Connection credential management remains in the Connections page.                                                                                                                             |
+| `orders_actions.go`     | Loads Orders asynchronously through `Manager.Client` for the active connection. It provides stale-result protection, an in-memory safe-row cache, pagination, direct lookup, full-order CSV exports, and sanitized error results. It does not implement mutations.      |
+| `products_page.go`      | Future product catalog page rendering: search, filters, product table/grid, details and editing entry points.                                                                                                                                                           |
+| `inventory_page.go`     | Future inventory page rendering: stock table, search/filter state, and inventory-update forms.                                                                                                                                                                          |
+| `customers_page.go`     | Future retailer/customer rendering: list, profiles, search, and detail screen entry points.                                                                                                                                                                             |
+| `settings_page.go`      | Application preferences and non-secret display settings. Connection credential management remains in the Connections page.                                                                                                                                              |
 
 ### `features/`
 
@@ -201,7 +201,7 @@ A feature package contains **UI-framework-independent feature logic**. It may im
 | `lookup.go`    | Normalizes an entered display ID and converts it to Faire's internal `OrderID` format before a direct lookup.                                                                                        |
 | `presenter.go` | Converts typed Faire order responses into UI-ready, non-secret `Row` values: order number, status, customer label, totals, dates, commission label, and source. Formats dates/currency consistently. |
 | `selection.go` | Adds/removes selected order IDs and selects or clears the visible rows. Keeps bulk-action selection behavior unit-testable without Gio.                                                              |
-| `export.go`    | Defines the stable order CSV header and writes full typed orders as one row per item without retaining raw API data in UI state.                                                                       |
+| `export.go`    | Defines the stable order CSV header and writes full typed orders as one row per item without retaining raw API data in UI state.                                                                     |
 | `*_test.go`    | Covers query construction, lookup normalization, row presentation, CSV output, optional API fields, date/currency formatting, and selection behavior without Gio.                                    |
 
 #### `features/products/`
@@ -392,7 +392,7 @@ No mutation is implemented. Do not add “Create order,” shipment edits, packi
 
 ### Add a read-only Order detail vertical slice
 
-The Orders list has reached the right stopping point for a first workflow. The logical next step is a focused, read-only detail screen—not mutations or another broad navigation area:
+The Gio composition layer has been split into dedicated state, runtime, connection-action, connection-page, and Brand-profile files. The Orders list has reached the right stopping point for a first workflow, so the logical next step is a focused, read-only detail screen—not mutations or another broad navigation area:
 
 > Select an order from the active connection's list → open its details → load and present its supported information without retaining or exposing unnecessary customer data.
 
@@ -445,9 +445,10 @@ This builds directly on the current `Orders.Get` lookup path and turns table sel
 
 1. Active connection state, route navigation, and the read-only Orders list — **completed**.
 2. Status tabs, supported filters, direct lookup, pagination, caching, and row selection — **completed**.
-3. Read-only order detail page, preserving the Orders-list context.
-4. Product and inventory read-only pages.
-5. Mutating workflows with validation, confirmation, refresh behavior, and tests: inventory updates, shipment processing, and product editing.
-6. OAuth Authorization Code Grant and reauthorization workflow.
-7. Extract shared Gio shell and asynchronous helpers only when multiple completed features justify them.
-8. Platform build/release validation, CI, and packaging.
+3. Split the Gio composition layer into desktop state, runtime, connection actions, connection page, and Brand profile page files — **completed**.
+4. Read-only order detail page, preserving the Orders-list context.
+5. Product and inventory read-only pages.
+6. Mutating workflows with validation, confirmation, refresh behavior, and tests: inventory updates, shipment processing, and product editing.
+7. OAuth Authorization Code Grant and reauthorization workflow.
+8. Extract shared Gio shell and asynchronous helpers only when multiple completed features justify them.
+9. Platform build/release validation, CI, and packaging.

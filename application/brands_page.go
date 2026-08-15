@@ -1,0 +1,54 @@
+package application
+
+import (
+	"gioui.org/layout"
+	"gioui.org/unit"
+	"gioui.org/widget/material"
+)
+
+// layoutBrands renders a vertically scrollable selector of saved connections and the current safe profile status.
+// Each row uses stable controls keyed by connection ID so scrolling does not change pointer interaction identity.
+func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
+	itemCount := len(ui.connections) + 1
+	if len(ui.connections) == 0 {
+		itemCount++
+	}
+	return ui.brandsList.Layout(gtx, itemCount, func(gtx layout.Context, index int) layout.Dimensions {
+		if index == 0 {
+			return layout.Inset{Bottom: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(material.H3(ui.theme, "Choose a saved brand connection").Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+					layout.Rigid(bodyText(ui.theme, "Select a connection to verify its read-only Faire brand profile.", mutedTextColor)),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+					layout.Rigid(statusText(ui.theme, ui.status)),
+				)
+			})
+		}
+		if index == 1 && len(ui.connections) == 0 {
+			return bodyText(ui.theme, "No connections have been saved yet. Use the Connections tab to add one.", mutedTextColor)(gtx)
+		}
+		connectionIndex := index - 1
+		if len(ui.connections) == 0 {
+			connectionIndex--
+		}
+		connection := ui.connections[connectionIndex]
+		controls := ui.rowControlsFor(connection.ID)
+		if controls.selectProfile.Clicked(gtx) {
+			ui.selectConnection(connection.ID)
+		}
+		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return card(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(16), Right: unit.Dp(16), Bottom: unit.Dp(16), Left: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(material.H5(ui.theme, connection.Label).Layout),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+						layout.Rigid(bodyText(ui.theme, connectionDetails(connection), mutedTextColor)),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+						layout.Rigid(primaryButton(ui.theme, &controls.selectProfile, "Load brand profile")),
+					)
+				})
+			})
+		})
+	})
+}

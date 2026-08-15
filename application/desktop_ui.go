@@ -1,0 +1,255 @@
+package application
+
+import (
+	"context"
+	"image/color"
+	"time"
+
+	"gioui.org/app"
+	"gioui.org/layout"
+	"gioui.org/unit"
+	"gioui.org/widget"
+	"gioui.org/widget/material"
+
+	"github.com/Fepozopo/faire-gui/connections"
+	"github.com/Fepozopo/faire-gui/faire"
+	"github.com/Fepozopo/faire-gui/features/orders"
+)
+
+const (
+	// brandsTab displays non-secret profile verification for the active connection.
+	brandsTab = iota
+	// connectionsTab displays saved connection management.
+	connectionsTab
+	// ordersTab displays the read-only Orders workflow.
+	ordersTab
+)
+
+// DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
+// Its methods run on Gio's frame goroutine, while profile, order, and update requests publish only safe results through channels.
+type DesktopUI struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	window *app.Window
+	theme  *material.Theme
+
+	manager     *connections.Manager
+	connections []connections.Connection
+
+	activeConnectionID           string
+	activeConnectionLabel        string
+	selectedTab                  int
+	settingsMenuOpen             bool
+	connectionPickerOpen         bool
+	statesDialogOpen             bool
+	exportMenuOpen               bool
+	csvExportBlockedDialogOpen   bool
+	csvExportCompletedDialogOpen bool
+	csvExportCompletedFilename   string
+
+	ordersState        orders.State
+	ordersCache        map[string]ordersCacheEntry
+	ordersRequestID    uint64
+	exportRequestID    uint64
+	ordersSearchActive bool
+	ordersExporting    bool
+	pendingStates      map[faire.OrderState]struct{}
+	editorMode         connectionEditorMode
+	editing            connections.Connection
+
+	status           string
+	managementStatus string
+
+	labelEditor       widget.Editor
+	brandIDEditor     widget.Editor
+	environmentEditor widget.Editor
+	accessTokenEditor widget.Editor
+
+	brandsList                      widget.List
+	connectionsList                 widget.List
+	ordersList                      widget.List
+	connectionPickerList            widget.List
+	orderSearchEditor               widget.Editor
+	createdAtMinEditor              widget.Editor
+	tabButtons                      [3]widget.Clickable
+	orderStatusTabs                 [5]widget.Clickable
+	activeConnectionButton          widget.Clickable
+	closeConnectionPicker           widget.Clickable
+	addConnectionButton             widget.Clickable
+	refreshOrdersButton             widget.Clickable
+	loadMoreOrdersButton            widget.Clickable
+	clearOrderSearchButton          widget.Clickable
+	stateFilterButton               widget.Clickable
+	applyStatesButton               widget.Clickable
+	cancelStatesButton              widget.Clickable
+	selectAllStatesButton           widget.Clickable
+	selectNoStatesButton            widget.Clickable
+	headerSelectVisibleOrdersButton widget.Clickable
+	exportMenuButton                widget.Clickable
+	exportNewOrdersButton           widget.Clickable
+	exportBackorderedOrdersButton   widget.Clickable
+	exportSelectedOrdersButton      widget.Clickable
+	closeExportMenuButton           widget.Clickable
+	closeCSVExportBlockedButton     widget.Clickable
+	closeCSVExportCompletedButton   widget.Clickable
+	searchOrdersButton              widget.Clickable
+	saveButton                      widget.Clickable
+	importButton                    widget.Clickable
+	cancelButton                    widget.Clickable
+	confirmDelete                   widget.Clickable
+	cancelDelete                    widget.Clickable
+	settingsButton                  widget.Clickable
+	settingsBrandProfile            widget.Clickable
+	settingsConnections             widget.Clickable
+	checkForUpdates                 widget.Clickable
+	updateLater                     widget.Clickable
+	installUpdate                   widget.Clickable
+	closeUpdateCheckStatus          widget.Clickable
+	modalBlocker                    widget.Clickable
+
+	rowControls              map[string]*connectionRowControls
+	connectionPickerControls map[string]*widget.Clickable
+	orderRowControls         map[faire.OrderID]*widget.Clickable
+	stateControls            map[faire.OrderState]*widget.Clickable
+	deleteDialog             deleteDialogState
+	updateDialog             updateDialogState
+	updateCheckDialog        updateCheckDialogState
+	results                  chan profileLoadResult
+	orderResults             chan orderLoadResult
+	orderExportResults       chan orderExportResult
+	updateResults            chan updateCheckResult
+	updateInstallResults     chan updateInstallResult
+}
+
+// connectionRowControls owns persistent click state for one saved-connection row.
+// Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity.
+type connectionRowControls struct {
+	selectProfile widget.Clickable
+	editMetadata  widget.Clickable
+	replaceToken  widget.Clickable
+	delete        widget.Clickable
+}
+
+// deleteDialogState describes the metadata-only saved connection whose deletion awaits confirmation.
+type deleteDialogState struct {
+	open       bool
+	connection connections.Connection
+}
+
+// profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.
+type profileLoadResult struct {
+	status string
+}
+
+// newDesktopUI constructs a DesktopUI from loaded non-secret metadata, result channels, and persistent Gio controls.
+// The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
+func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
+	ui := &DesktopUI{
+		ctx:                      ctx,
+		cancel:                   cancel,
+		window:                   window,
+		theme:                    material.NewTheme(),
+		manager:                  manager,
+		connections:              savedConnections,
+		status:                   startupStatus,
+		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
+		selectedTab:              ordersTab,
+		ordersCache:              make(map[string]ordersCacheEntry),
+		pendingStates:            make(map[faire.OrderState]struct{}),
+		rowControls:              make(map[string]*connectionRowControls),
+		connectionPickerControls: make(map[string]*widget.Clickable),
+		orderRowControls:         make(map[faire.OrderID]*widget.Clickable),
+		stateControls:            make(map[faire.OrderState]*widget.Clickable),
+		results:                  make(chan profileLoadResult, 1),
+		orderResults:             make(chan orderLoadResult, 2),
+		orderExportResults:       make(chan orderExportResult, 1),
+		updateResults:            make(chan updateCheckResult, 1),
+		updateInstallResults:     make(chan updateInstallResult, 1),
+	}
+	ui.configureEditors()
+	ui.resetOrdersState()
+	ui.brandsList.Axis = layout.Vertical
+	ui.connectionsList.Axis = layout.Vertical
+	ui.ordersList.Axis = layout.Vertical
+	ui.connectionPickerList.Axis = layout.Vertical
+	ui.orderSearchEditor.SingleLine = true
+	ui.createdAtMinEditor.SingleLine = true
+	return ui
+}
+
+// configureEditors applies persistent field behavior once, rather than recreating editor state every frame.
+// The masked token editor is the only UI state that can contain a direct access token.
+func (ui *DesktopUI) configureEditors() {
+	ui.labelEditor.SingleLine = true
+	ui.brandIDEditor.SingleLine = true
+	ui.environmentEditor.SingleLine = true
+	ui.accessTokenEditor.SingleLine = true
+	ui.accessTokenEditor.Mask = '•'
+}
+
+// resetOrdersState creates a fresh default order query and synchronizes its
+// one-year created-order lookback with the visible date editor.
+func (ui *DesktopUI) resetOrdersState() {
+	now := time.Now()
+	createdAtMinimumInput, _ := orders.DefaultCreatedAtMinimum(now, time.Local)
+	ui.ordersState = orders.NewStateAt(now, time.Local)
+	ui.createdAtMinEditor.SetText(createdAtMinimumInput)
+}
+
+// Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.
+// In Gio, this function is called for every requested frame; persistent fields on DesktopUI preserve interaction state.
+func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
+	ui.handleTabClicks(gtx)
+	return layout.Stack{Alignment: layout.NW}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return fill(gtx, color.NRGBA{R: 250, G: 250, B: 250, A: 255})
+		}),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(ui.layoutSidebar),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(32), Bottom: unit.Dp(28), Left: unit.Dp(32)}.Layout(gtx, ui.layoutActivePage)
+				}),
+			)
+		}),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			switch {
+			case ui.updateDialog.open:
+				return ui.layoutUpdateModal(gtx)
+			case ui.updateCheckDialog.open:
+				return ui.layoutUpdateCheckStatusModal(gtx)
+			case ui.deleteDialog.open:
+				return ui.layoutDeleteModal(gtx)
+			case ui.connectionPickerOpen:
+				return ui.layoutConnectionPicker(gtx)
+			case ui.statesDialogOpen:
+				return ui.layoutStatesDialog(gtx)
+			case ui.exportMenuOpen:
+				return ui.layoutOrderExportMenu(gtx)
+			case ui.csvExportBlockedDialogOpen:
+				return ui.layoutCSVExportBlockedDialog(gtx)
+			case ui.csvExportCompletedDialogOpen:
+				return ui.layoutCSVExportCompletedDialog(gtx)
+			default:
+				return layout.Dimensions{}
+			}
+		}),
+	)
+}
+
+// handleTabClicks selects a tab from persistent clickable state before laying out the active content.
+// Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
+func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+		return
+	}
+	for index := range ui.tabButtons {
+		if ui.tabButtons[index].Clicked(gtx) {
+			ui.selectedTab = index
+			if index == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
+				ui.startOrdersLoad(false, false)
+			}
+			ui.invalidate()
+		}
+	}
+}
