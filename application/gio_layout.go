@@ -18,14 +18,14 @@ import (
 
 var (
 	cardBackground     = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	formBackground     = color.NRGBA{R: 238, G: 245, B: 255, A: 255}
+	selectionBarColor  = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
+	formBackground     = selectionBarColor
 	mutedTextColor     = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
 	dangerColor        = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
 	modalScrimColor    = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
 	panelBorderColor   = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
 	primaryButtonColor = color.NRGBA{R: 48, G: 48, B: 48, A: 255}
 	primaryButtonText  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	selectionBarColor  = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
 )
 
 // layoutBrands renders a vertically scrollable selector of saved connections and the current safe profile status.
