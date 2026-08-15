@@ -150,15 +150,15 @@ func (ui *DesktopUI) layoutConnectionPicker(gtx layout.Context) layout.Dimension
 					if connection.ID == ui.activeConnectionID {
 						label += " (active)"
 					}
-					return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, material.Button(ui.theme, control, label).Layout)
+					return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, primaryButton(ui.theme, control, label))
 				})
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(material.Button(ui.theme, &ui.addConnectionButton, "Add connection").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.addConnectionButton, "Add connection")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					layout.Rigid(material.Button(ui.theme, &ui.closeConnectionPicker, "Close").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.closeConnectionPicker, "Close")),
 				)
 			}),
 		)
@@ -177,6 +177,7 @@ func (ui *DesktopUI) connectionPickerControlFor(connectionID string) *widget.Cli
 }
 
 // layoutStatesDialog applies a multi-select state filter by expressing unselected known states as API exclusions.
+// Its state controls are presented alphabetically by their user-facing labels for quick scanning.
 func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 	if ui.cancelStatesButton.Clicked(gtx) {
 		ui.statesDialogOpen = false
@@ -207,9 +208,9 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(material.Button(ui.theme, &ui.selectAllStatesButton, "Select all").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.selectAllStatesButton, "Select all")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					layout.Rigid(material.Button(ui.theme, &ui.selectNoStatesButton, "Select none").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.selectNoStatesButton, "Select none")),
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
@@ -230,16 +231,16 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 				if _, selected := ui.pendingStates[state]; selected {
 					label = "✓ " + label
 				}
-				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, material.Button(ui.theme, control, label).Layout)
+				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, primaryButton(ui.theme, control, label))
 			}))
 		}
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(material.Button(ui.theme, &ui.applyStatesButton, "Apply states").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.applyStatesButton, "Apply states")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					layout.Rigid(material.Button(ui.theme, &ui.cancelStatesButton, "Cancel").Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.cancelStatesButton, "Cancel")),
 				)
 			}),
 		)
@@ -278,9 +279,19 @@ func (ui *DesktopUI) stateControlFor(state faire.OrderState) *widget.Clickable {
 	return control
 }
 
-// ordersKnownStates centralizes the currently supported status list for the state-picker modal.
+// ordersKnownStates returns the state-picker options in alphabetical user-facing label order.
+// The returned slice contains each supported API state exactly once for selection and exclusion construction.
 func ordersKnownStates() []faire.OrderState {
-	return []faire.OrderState{faire.OrderStateNew, faire.OrderStateProcessing, faire.OrderStatePreTransit, faire.OrderStateInTransit, faire.OrderStateDelivered, faire.OrderStateCanceled, faire.OrderStateBackordered, faire.OrderStatePendingRetailerConfirmation}
+	return []faire.OrderState{
+		faire.OrderStateBackordered,
+		faire.OrderStateCanceled,
+		faire.OrderStateDelivered,
+		faire.OrderStateInTransit,
+		faire.OrderStateNew,
+		faire.OrderStatePendingRetailerConfirmation,
+		faire.OrderStatePreTransit,
+		faire.OrderStateProcessing,
+	}
 }
 
 // mapKeys converts confirmed state selections to an unordered slice accepted by feature state validation.

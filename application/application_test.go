@@ -113,6 +113,26 @@ func TestSelectedOrdersLabelReportsCurrentSelectionCount(t *testing.T) {
 	}
 }
 
+// TestOrdersKnownStatesAreAlphabetical verifies the state-picker options follow their displayed label order.
+func TestOrdersKnownStatesAreAlphabetical(t *testing.T) {
+	t.Parallel()
+
+	got := ordersKnownStates()
+	want := []faire.OrderState{
+		faire.OrderStateBackordered,
+		faire.OrderStateCanceled,
+		faire.OrderStateDelivered,
+		faire.OrderStateInTransit,
+		faire.OrderStateNew,
+		faire.OrderStatePendingRetailerConfirmation,
+		faire.OrderStatePreTransit,
+		faire.OrderStateProcessing,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ordersKnownStates() = %#v, want alphabetical options %#v", got, want)
+	}
+}
+
 // TestBlockedOrderExportOpensDialog verifies an unmapped brand's export failure is presented prominently.
 func TestBlockedOrderExportOpensDialog(t *testing.T) {
 	t.Parallel()

@@ -67,7 +67,7 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 						layout.Rigid(bodyText(ui.theme, connectionDetails(connection), mutedTextColor)),
 						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-						layout.Rigid(material.Button(ui.theme, &controls.selectProfile, "Load brand profile").Layout),
+						layout.Rigid(primaryButton(ui.theme, &controls.selectProfile, "Load brand profile")),
 					)
 				})
 			})
@@ -162,9 +162,9 @@ func (ui *DesktopUI) createEditorFields() []layout.FlexChild {
 		fieldSpacer(),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-				layout.Rigid(material.Button(ui.theme, &ui.saveButton, "Save direct-token connection").Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.saveButton, "Save direct-token connection")),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-				layout.Rigid(material.Button(ui.theme, &ui.importButton, "Import from environment variable").Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.importButton, "Import from environment variable")),
 			)
 		}),
 	}
@@ -208,13 +208,13 @@ func (ui *DesktopUI) environmentImportEditorFields() []layout.FlexChild {
 	}
 }
 
-// saveCancelButtons renders the persistent primary action alongside a control that discards transient form state.
+// saveCancelButtons renders persistent dark filled controls for saving or discarding transient form state.
 func (ui *DesktopUI) saveCancelButtons(primaryLabel string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-			layout.Rigid(material.Button(ui.theme, &ui.saveButton, primaryLabel).Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.saveButton, primaryLabel)),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-			layout.Rigid(material.Button(ui.theme, &ui.cancelButton, "Cancel").Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.cancelButton, "Cancel")),
 		)
 	}
 }
@@ -266,7 +266,7 @@ func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connecti
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-						layout.Rigid(material.Button(ui.theme, &controls.editMetadata, "Edit metadata").Layout),
+						layout.Rigid(primaryButton(ui.theme, &controls.editMetadata, "Edit metadata")),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 						layout.Rigid(ui.deleteButton(controls)),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
@@ -274,7 +274,7 @@ func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connecti
 							if connection.AuthenticationMode != faire.AuthenticationModeAccessToken {
 								return layout.Dimensions{}
 							}
-							return material.Button(ui.theme, &controls.replaceToken, "Replace access token").Layout(gtx)
+							return primaryButton(ui.theme, &controls.replaceToken, "Replace access token")(gtx)
 						}),
 					)
 				}),
@@ -290,13 +290,9 @@ func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connecti
 	})
 }
 
-// deleteButton renders the destructive action with an explicit red background to differentiate it from metadata edits.
+// deleteButton renders the destructive red action while preserving the shared filled-button dimensions.
 func (ui *DesktopUI) deleteButton(controls *connectionRowControls) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		button := material.Button(ui.theme, &controls.delete, "Delete")
-		button.Background = dangerColor
-		return button.Layout(gtx)
-	}
+	return dangerButton(ui.theme, &controls.delete, "Delete")
 }
 
 // layoutDeleteModal draws a full-window scrim before the dialog card so pointer input cannot reach controls behind it.
@@ -326,12 +322,10 @@ func (ui *DesktopUI) layoutDeleteModal(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(bodyText(ui.theme, fmtDeleteMessage(ui.deleteDialog.connection), mutedTextColor)),
 						layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							confirm := material.Button(ui.theme, &ui.confirmDelete, "Delete")
-							confirm.Background = dangerColor
 							return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-								layout.Rigid(material.Button(ui.theme, &ui.cancelDelete, "Cancel").Layout),
+								layout.Rigid(primaryButton(ui.theme, &ui.cancelDelete, "Cancel")),
 								layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-								layout.Rigid(confirm.Layout),
+								layout.Rigid(dangerButton(ui.theme, &ui.confirmDelete, "Delete")),
 							)
 						}),
 					)
@@ -407,12 +401,24 @@ func outlinedPanel(gtx layout.Context, background, border color.NRGBA, child lay
 	})
 }
 
-// primaryButton creates the dark filled action treatment used for the application's primary controls.
+// primaryButton creates the dark filled action treatment used for the application's non-destructive controls.
 // The returned widget preserves the supplied clickable's interaction state and lays out its label with white text.
 func primaryButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return filledButton(theme, button, label, primaryButtonColor)
+}
+
+// dangerButton creates the red filled treatment reserved for destructive Delete actions.
+// The returned widget matches primary-button sizing while retaining a visually distinct destructive color.
+func dangerButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return filledButton(theme, button, label, dangerColor)
+}
+
+// filledButton creates a consistently sized filled button using the supplied background color.
+// The returned widget keeps the provided clickable's state and renders label text with the application foreground color.
+func filledButton(theme *material.Theme, button *widget.Clickable, label string, background color.NRGBA) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		style := material.Button(theme, button, label)
-		style.Background = primaryButtonColor
+		style.Background = background
 		style.Color = primaryButtonText
 		style.CornerRadius = unit.Dp(4)
 		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
