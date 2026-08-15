@@ -17,6 +17,7 @@ import (
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
+	"github.com/Fepozopo/faire-gui/internal/buildinfo"
 	"github.com/Fepozopo/faire-gui/updater"
 )
 
@@ -81,10 +82,13 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, including the default created-at filter, required by the desktop screens.
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, default Brand profile page, and created-at filter required by the desktop screens.
 func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
+	if ui.selectedTab != brandsTab {
+		t.Fatalf("selected tab = %d, want Brand profile tab %d at launch", ui.selectedTab, brandsTab)
+	}
 	if ui.brandsList.Axis != 1 || ui.connectionsList.Axis != 1 {
 		t.Fatalf("list axes = (%d, %d), want both vertical", ui.brandsList.Axis, ui.connectionsList.Axis)
 	}
@@ -115,6 +119,39 @@ func TestUpdateCheckOpensCompatibleReleasePrompt(t *testing.T) {
 
 	if !ui.updateDialog.open || ui.updateDialog.update.Version.String() != "0.2.0" {
 		t.Fatalf("update dialog = %#v, want an open prompt for 0.2.0", ui.updateDialog)
+	}
+}
+
+// TestManualUpdateCheckReportsUpToDate verifies an explicit no-update result remains visible to the user.
+func TestManualUpdateCheckReportsUpToDate(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.updateCheckDialog = updateCheckDialogState{open: true, checking: true}
+	ui.updateResults <- updateCheckResult{userInitiated: true}
+
+	ui.drainUpdateResults()
+
+	if !ui.updateCheckDialog.open || ui.updateCheckDialog.checking || ui.updateCheckDialog.title != "You're up to date" {
+		t.Fatalf("update-check dialog = %#v, want a completed up-to-date dialog", ui.updateCheckDialog)
+	}
+	wantMessage := "Version " + buildinfo.Version + " is the latest compatible version."
+	if ui.updateCheckDialog.message != wantMessage {
+		t.Fatalf("update-check message = %q, want %q", ui.updateCheckDialog.message, wantMessage)
+	}
+}
+
+// TestManualUpdateCheckReportsFailure verifies an explicit check converts errors into safe retry guidance.
+func TestManualUpdateCheckReportsFailure(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.updateCheckDialog = updateCheckDialogState{open: true, checking: true}
+	ui.updateResults <- updateCheckResult{userInitiated: true, err: errors.New("network details must remain private")}
+
+	ui.drainUpdateResults()
+
+	if !ui.updateCheckDialog.open || ui.updateCheckDialog.checking || ui.updateCheckDialog.title != "Unable to check for updates" {
+		t.Fatalf("update-check dialog = %#v, want a completed failure dialog", ui.updateCheckDialog)
+	}
+	if strings.Contains(ui.updateCheckDialog.message, "network details") || !strings.Contains(ui.updateCheckDialog.message, "internet connection") {
+		t.Fatalf("update-check message = %q, want safe internet-connection guidance", ui.updateCheckDialog.message)
 	}
 }
 

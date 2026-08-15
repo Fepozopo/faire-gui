@@ -46,7 +46,7 @@ Upload these **unarchived executables** to that GitHub Release with these exact 
 | Windows ARM64 | `faire-gui_windows_arm64.exe` |
 | Windows AMD64 | `faire-gui_windows_amd64.exe` |
 
-On startup, the desktop app asks GitHub for the latest stable release, compares its semantic version to the embedded `Version`, and only prompts if the release is newer and includes the asset matching the active platform. Choosing **Update and restart** downloads the executable beside the running application. On Darwin it atomically replaces and execs the process; on Windows a short-lived helper waits for the process to exit, replaces the locked `.exe`, and restarts it. Draft and pre-release GitHub Releases are not selected by GitHub’s `latest` endpoint.
+On startup, the desktop app asks GitHub for the latest stable release, compares its semantic version to the embedded `Version`, and only prompts if the release is newer and includes the asset matching the active platform. **Settings → Check for updates** performs the same check on demand and confirms whether the app is current, an update is available, or the check could not be completed. Choosing **Update and restart** downloads the executable beside the running application. On Darwin it atomically replaces and execs the process; on Windows a short-lived helper waits for the process to exit, replaces the locked `.exe`, and restarts it. Draft and pre-release GitHub Releases are not selected by GitHub’s `latest` endpoint.
 
 ## Backend structure
 

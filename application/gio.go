@@ -42,6 +42,7 @@ type DesktopUI struct {
 	activeConnectionID           string
 	activeConnectionLabel        string
 	selectedTab                  int
+	settingsMenuOpen             bool
 	connectionPickerOpen         bool
 	statesDialogOpen             bool
 	exportMenuOpen               bool
@@ -100,8 +101,14 @@ type DesktopUI struct {
 	cancelButton                    widget.Clickable
 	confirmDelete                   widget.Clickable
 	cancelDelete                    widget.Clickable
+	settingsButton                  widget.Clickable
+	settingsBrandProfile            widget.Clickable
+	settingsConnections             widget.Clickable
+	checkForUpdates                 widget.Clickable
+	closeSettingsMenu               widget.Clickable
 	updateLater                     widget.Clickable
 	installUpdate                   widget.Clickable
+	closeUpdateCheckStatus          widget.Clickable
 	modalBlocker                    widget.Clickable
 
 	rowControls              map[string]*connectionRowControls
@@ -110,6 +117,7 @@ type DesktopUI struct {
 	stateControls            map[faire.OrderState]*widget.Clickable
 	deleteDialog             deleteDialogState
 	updateDialog             updateDialogState
+	updateCheckDialog        updateCheckDialogState
 	results                  chan profileLoadResult
 	orderResults             chan orderLoadResult
 	orderExportResults       chan orderExportResult
@@ -145,7 +153,7 @@ func Run() {
 	window := new(app.Window)
 	window.Option(app.Title(windowTitle), app.Size(unit.Dp(windowWidth), unit.Dp(windowHeight)))
 	ui := newDesktopUI(ctx, cancel, window, manager, savedConnections, startupStatus)
-	ui.startUpdateCheck()
+	ui.startUpdateCheck(false)
 
 	go func() {
 		// Gio requires app.Main on the process main goroutine, so the event loop stays in a worker goroutine.
@@ -241,7 +249,7 @@ func (ui *DesktopUI) shutdown() {
 	ui.ordersState.Cursor = ""
 }
 
-// Layout processes current-frame interaction and emits the complete desktop UI, including any update prompt.
+// Layout processes current-frame interaction and emits the complete desktop UI, including update and Settings dialogs.
 // In Gio, this function is called for every requested frame; persistent fields on DesktopUI preserve interaction state.
 func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 	ui.handleTabClicks(gtx)
@@ -261,6 +269,10 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 			switch {
 			case ui.updateDialog.open:
 				return ui.layoutUpdateModal(gtx)
+			case ui.updateCheckDialog.open:
+				return ui.layoutUpdateCheckStatusModal(gtx)
+			case ui.settingsMenuOpen:
+				return ui.layoutSettingsMenu(gtx)
 			case ui.deleteDialog.open:
 				return ui.layoutDeleteModal(gtx)
 			case ui.connectionPickerOpen:
@@ -283,7 +295,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.settingsMenuOpen || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

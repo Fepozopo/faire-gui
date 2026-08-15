@@ -14,8 +14,8 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// layoutSidebar renders the persistent application navigation and active-connection switcher.
-// Unimplemented product routes remain visually present but do not register interactive controls.
+// layoutSidebar renders the persistent application navigation, active-connection switcher, and Settings entry.
+// Brand profile and Connections are available only through Settings, while unimplemented product routes remain visually present but non-interactive.
 func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 	width := gtx.Dp(unit.Dp(220))
 	gtx.Constraints.Min.X = width
@@ -28,16 +28,10 @@ func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(28), Right: unit.Dp(16), Bottom: unit.Dp(24), Left: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(ui.layoutConnectionSwitcher),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutNavigationItem(gtx, brandsTab, "Brand profile")
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return ui.layoutNavigationItem(gtx, connectionsTab, "Connections")
-				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 				layout.Rigid(ui.layoutUnavailableNavigation),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(ui.layoutSettingsNavigation),
 			)
 		})
 	})
@@ -95,7 +89,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 
 // layoutUnavailableNavigation shows planned routes without misleading users into believing the pages work already.
 func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dimensions {
-	labels := []string{"Orders", "Products", "Customers", "Marketing", "Analytics", "My shop", "Faire Direct", "Settings"}
+	labels := []string{"Orders", "Products", "Customers", "Marketing", "Analytics", "My shop", "Faire Direct"}
 	children := make([]layout.FlexChild, 0, len(labels)*2)
 	for index, label := range labels {
 		index, label := index, label
@@ -109,6 +103,54 @@ func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dime
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// layoutSettingsNavigation opens the Settings submenu from the persistent left navigation.
+// It keeps Brand profile and Connections reachable from their existing routes while grouping account-related actions together.
+func (ui *DesktopUI) layoutSettingsNavigation(gtx layout.Context) layout.Dimensions {
+	if ui.settingsButton.Clicked(gtx) {
+		ui.settingsMenuOpen = true
+		ui.invalidate()
+	}
+	return ui.settingsButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return roundedPanel(gtx, color.NRGBA{}, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, material.Body1(ui.theme, "Settings").Layout)
+		})
+	})
+}
+
+// layoutSettingsMenu presents settings destinations and the user-initiated update check.
+// Selecting a destination closes the menu before the existing page renders, while an update check opens a status modal until its background request completes.
+func (ui *DesktopUI) layoutSettingsMenu(gtx layout.Context) layout.Dimensions {
+	if ui.settingsBrandProfile.Clicked(gtx) {
+		ui.settingsMenuOpen = false
+		ui.selectedTab = brandsTab
+		ui.invalidate()
+	}
+	if ui.settingsConnections.Clicked(gtx) {
+		ui.settingsMenuOpen = false
+		ui.selectedTab = connectionsTab
+		ui.invalidate()
+	}
+	if ui.checkForUpdates.Clicked(gtx) {
+		ui.settingsMenuOpen = false
+		ui.startManualUpdateCheck()
+	}
+	if ui.closeSettingsMenu.Clicked(gtx) {
+		ui.settingsMenuOpen = false
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "Settings", func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(primaryButton(ui.theme, &ui.settingsBrandProfile, "Brand profile")),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.settingsConnections, "Connections")),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.checkForUpdates, "Check for updates")),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.closeSettingsMenu, "Close")),
+		)
+	})
 }
 
 // layoutActivePage lays out the currently selected functional route inside the shared sidebar shell.
