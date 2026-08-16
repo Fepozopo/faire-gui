@@ -175,6 +175,9 @@ func navigationHighlight(active bool) color.NRGBA {
 
 // layoutActivePage lays out the currently selected functional route inside the shared sidebar shell.
 func (ui *DesktopUI) layoutActivePage(gtx layout.Context) layout.Dimensions {
+	if ui.orderDetailOpen && ui.selectedTab == ordersTab {
+		return ui.layoutOrderDetail(gtx)
+	}
 	switch ui.selectedTab {
 	case connectionsTab:
 		return ui.layoutConnections(gtx)

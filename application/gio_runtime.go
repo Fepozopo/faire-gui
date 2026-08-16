@@ -6,6 +6,9 @@ import (
 	"gioui.org/app"
 	"gioui.org/op"
 	"gioui.org/unit"
+
+	"github.com/Fepozopo/faire-gui/features/orders"
+	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
 
 // Run starts the Faire Gio desktop application and checks GitHub Releases for a compatible update.
@@ -13,9 +16,13 @@ import (
 func Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, savedConnections, startupStatus := loadSavedConnections(ctx)
+	store, storeErr := openOrdersStore(ctx)
+	if storeErr != nil {
+		startupStatus = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
+	}
 	window := new(app.Window)
 	window.Option(app.Title(windowTitle), app.Size(unit.Dp(windowWidth), unit.Dp(windowHeight)))
-	ui := newDesktopUI(ctx, cancel, window, manager, savedConnections, startupStatus)
+	ui := newDesktopUIWithOrders(ctx, cancel, window, manager, savedConnections, store, startupStatus)
 	ui.startUpdateCheck(false)
 
 	go func() {
@@ -27,7 +34,7 @@ func Run() {
 }
 
 // runWindow handles Gio window events, drains safe background results, and submits complete frames.
-// It releases cached Orders rows and cancels profile, order, and update work when Gio reports that the desktop window has been destroyed.
+// It releases in-memory Orders presentation data, closes persistent storage, and cancels background work when Gio reports window destruction.
 func (ui *DesktopUI) runWindow() error {
 	defer ui.shutdown()
 
@@ -39,7 +46,10 @@ func (ui *DesktopUI) runWindow() error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, event)
 			ui.drainResults()
+			ui.drainConnectionCleanupResults()
 			ui.drainOrderResults()
+			ui.drainOrderDetailResults()
+			ui.drainOrdersSchedule()
 			ui.drainOrderExportResults()
 			ui.drainUpdateResults()
 			ui.drainUpdateInstallResults()
@@ -49,11 +59,24 @@ func (ui *DesktopUI) runWindow() error {
 	}
 }
 
-// shutdown cancels in-flight work and releases the session-only Orders cache and visible rows.
-// It is safe to call more than once because context cancellation and assigning nil slices or maps are idempotent.
+// openOrdersStore opens and migrates the process-local private Orders database before any page can read it.
+func openOrdersStore(ctx context.Context) (ordersstore.Store, error) {
+	path, err := ordersstore.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return ordersstore.Open(ctx, path)
+}
+
+// shutdown cancels in-flight work, closes the persistent Orders store, and releases only in-memory presentation rows.
+// It is safe to call more than once because context cancellation, store closing, and assigning nil slices are idempotent.
 func (ui *DesktopUI) shutdown() {
 	ui.cancel()
-	ui.ordersCache = nil
+	if ui.ordersStore != nil {
+		_ = ui.ordersStore.Close()
+		ui.ordersStore = nil
+	}
 	ui.ordersState.Rows = nil
 	ui.ordersState.Cursor = ""
+	ui.orderDetail = orders.Detail{}
 }

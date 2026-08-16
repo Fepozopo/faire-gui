@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -240,7 +241,7 @@ func (ui *DesktopUI) requestDelete(connection connections.Connection) {
 	ui.window.Invalidate()
 }
 
-// deleteConnection removes metadata and credentials only after the modal confirm control triggers it.
+// deleteConnection removes metadata, credentials, and that connection's private local Orders cache after modal confirmation.
 // It refreshes list data on success so the deleted connection can no longer be selected.
 func (ui *DesktopUI) deleteConnection() {
 	connection := ui.deleteDialog.connection
@@ -255,6 +256,9 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.window.Invalidate()
 		return
 	}
+	if ui.ordersStore != nil {
+		go ui.deleteConnectionCache(connection.ID, connection.Label, ui.ordersStore)
+	}
 	ui.managementStatus = "Deleted connection " + connection.Label + "."
 	ui.status = "Deleted " + connection.Label + "."
 	if ui.activeConnectionID == connection.ID {
@@ -266,6 +270,38 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.orderSearchEditor.SetText("")
 	}
 	ui.refreshConnections()
+}
+
+// connectionCleanupResult carries a credential-safe result from background connection-cache cleanup.
+type connectionCleanupResult struct {
+	label  string
+	status string
+}
+
+// deleteConnectionCache removes only a deleted connection's local Orders data outside the Gio frame loop.
+func (ui *DesktopUI) deleteConnectionCache(connectionID, label string, store interface {
+	DeleteConnectionData(context.Context, string) error
+}) {
+	if err := store.DeleteConnectionData(ui.ctx, connectionID); err != nil {
+		select {
+		case ui.connectionCleanupResults <- connectionCleanupResult{label: label, status: "Deleted connection " + label + ", but its local order data could not be removed."}:
+			ui.invalidate()
+		case <-ui.ctx.Done():
+		}
+	}
+}
+
+// drainConnectionCleanupResults applies safe background cache-cleanup failure statuses on the Gio frame loop.
+func (ui *DesktopUI) drainConnectionCleanupResults() {
+	for {
+		select {
+		case result := <-ui.connectionCleanupResults:
+			ui.managementStatus = result.status
+			ui.status = "Connection deleted; local order data removal needs attention."
+		default:
+			return
+		}
+	}
 }
 
 // refreshConnections reloads metadata and discards stale per-row click state after a successful operation.

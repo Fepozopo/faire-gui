@@ -14,6 +14,7 @@ import (
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
+	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
 
 const (
@@ -47,15 +48,22 @@ type DesktopUI struct {
 	csvExportCompletedDialogOpen bool
 	csvExportCompletedFilename   string
 
-	ordersState        orders.State
-	ordersCache        map[string]ordersCacheEntry
-	ordersRequestID    uint64
-	exportRequestID    uint64
-	ordersSearchActive bool
-	ordersExporting    bool
-	pendingStates      map[faire.OrderState]struct{}
-	editorMode         connectionEditorMode
-	editing            connections.Connection
+	ordersStore             ordersstore.Store
+	ordersState             orders.State
+	ordersRequestID         uint64
+	detailRequestID         uint64
+	exportRequestID         uint64
+	ordersSearchActive      bool
+	ordersExporting         bool
+	orderDetailOpen         bool
+	orderDetailLoading      bool
+	orderDetail             orders.Detail
+	orderDetailStatus       string
+	orderDetailID           faire.OrderID
+	orderDetailConnectionID string
+	pendingStates           map[faire.OrderState]struct{}
+	editorMode              connectionEditorMode
+	editing                 connections.Connection
 
 	status           string
 	managementStatus string
@@ -77,6 +85,13 @@ type DesktopUI struct {
 	closeConnectionPicker           widget.Clickable
 	addConnectionButton             widget.Clickable
 	refreshOrdersButton             widget.Clickable
+	rebuildOrdersButton             widget.Clickable
+	deleteLocalOrdersButton         widget.Clickable
+	confirmOrdersDataAction         widget.Clickable
+	cancelOrdersDataAction          widget.Clickable
+	openSelectedOrderButton         widget.Clickable
+	backToOrdersButton              widget.Clickable
+	refreshOrderDetailButton        widget.Clickable
 	loadMoreOrdersButton            widget.Clickable
 	clearOrderSearchButton          widget.Clickable
 	stateFilterButton               widget.Clickable
@@ -112,11 +127,15 @@ type DesktopUI struct {
 	orderRowControls         map[faire.OrderID]*widget.Clickable
 	stateControls            map[faire.OrderState]*widget.Clickable
 	deleteDialog             deleteDialogState
+	ordersDataDialog         ordersDataDialogState
 	updateDialog             updateDialogState
 	updateCheckDialog        updateCheckDialogState
 	results                  chan profileLoadResult
+	connectionCleanupResults chan connectionCleanupResult
 	orderResults             chan orderLoadResult
+	orderDetailResults       chan orderDetailResult
 	orderExportResults       chan orderExportResult
+	ordersSchedule           chan struct{}
 	updateResults            chan updateCheckResult
 	updateInstallResults     chan updateInstallResult
 }
@@ -136,14 +155,26 @@ type deleteDialogState struct {
 	connection connections.Connection
 }
 
+// ordersDataDialogState describes an explicitly confirmed local-only Orders cache action.
+type ordersDataDialogState struct {
+	open    bool
+	rebuild bool
+}
+
 // profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.
 type profileLoadResult struct {
 	status string
 }
 
-// newDesktopUI constructs a DesktopUI from loaded non-secret metadata, result channels, and persistent Gio controls.
-// The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
+// newDesktopUI constructs a DesktopUI without persistent Orders storage for focused UI tests.
+// Production startup uses newDesktopUIWithOrders after successfully opening the process-local store.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
+	return newDesktopUIWithOrders(ctx, cancel, window, manager, savedConnections, nil, startupStatus)
+}
+
+// newDesktopUIWithOrders constructs a DesktopUI from non-secret metadata, an optional persistent Orders store, result channels, and Gio controls.
+// The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
+func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, store ordersstore.Store, startupStatus string) *DesktopUI {
 	ui := &DesktopUI{
 		ctx:                      ctx,
 		cancel:                   cancel,
@@ -151,20 +182,23 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 		theme:                    material.NewTheme(),
 		manager:                  manager,
 		connections:              savedConnections,
+		ordersStore:              store,
 		status:                   startupStatus,
 		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
 		selectedTab:              ordersTab,
-		ordersCache:              make(map[string]ordersCacheEntry),
 		pendingStates:            make(map[faire.OrderState]struct{}),
 		rowControls:              make(map[string]*connectionRowControls),
 		connectionPickerControls: make(map[string]*widget.Clickable),
 		orderRowControls:         make(map[faire.OrderID]*widget.Clickable),
 		stateControls:            make(map[faire.OrderState]*widget.Clickable),
 		results:                  make(chan profileLoadResult, 1),
-		orderResults:             make(chan orderLoadResult, 2),
+		connectionCleanupResults: make(chan connectionCleanupResult, 1),
+		orderResults:             make(chan orderLoadResult, 4),
+		orderDetailResults:       make(chan orderDetailResult, 2),
 		orderExportResults:       make(chan orderExportResult, 1),
 		updateResults:            make(chan updateCheckResult, 1),
 		updateInstallResults:     make(chan updateInstallResult, 1),
+		ordersSchedule:           make(chan struct{}, 1),
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()
@@ -174,6 +208,7 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 	ui.connectionPickerList.Axis = layout.Vertical
 	ui.orderSearchEditor.SingleLine = true
 	ui.createdAtMinEditor.SingleLine = true
+	ui.startOrdersScheduler()
 	return ui
 }
 
@@ -220,6 +255,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutUpdateCheckStatusModal(gtx)
 			case ui.deleteDialog.open:
 				return ui.layoutDeleteModal(gtx)
+			case ui.ordersDataDialog.open:
+				return ui.layoutOrdersDataModal(gtx)
 			case ui.connectionPickerOpen:
 				return ui.layoutConnectionPicker(gtx)
 			case ui.statesDialogOpen:
@@ -240,7 +277,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.ordersDataDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

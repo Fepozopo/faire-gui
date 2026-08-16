@@ -11,11 +11,9 @@ import (
 // ErrInvalidDisplayID indicates that input is not a canonical Faire display ID.
 var ErrInvalidDisplayID = errors.New("invalid Faire order display ID")
 
-// OrderIDFromDisplayID normalizes a display ID with optional surrounding
-// whitespace and a leading hash, then converts it to Faire's order-ID form. Only
-// one to 128 ASCII letters or digits are accepted to prevent arbitrary text from
-// becoming a request identifier while supporting display-ID lengths beyond a single example.
-func OrderIDFromDisplayID(displayID string) (faire.OrderID, error) {
+// NormalizeDisplayID normalizes and validates a visible Faire order number for local indexed lookup.
+// Only one to 128 ASCII letters or digits are accepted so arbitrary input cannot become an API identifier.
+func NormalizeDisplayID(displayID string) (string, error) {
 	normalized := strings.TrimSpace(displayID)
 	if withoutHash, found := strings.CutPrefix(normalized, "#"); found {
 		normalized = strings.TrimSpace(withoutHash)
@@ -27,6 +25,15 @@ func OrderIDFromDisplayID(displayID string) (faire.OrderID, error) {
 		if !isASCIIAlphaNumeric(character) {
 			return "", ErrInvalidDisplayID
 		}
+	}
+	return strings.ToUpper(normalized), nil
+}
+
+// OrderIDFromDisplayID normalizes a display ID with optional surrounding whitespace and a leading hash, then converts it to Faire's order-ID form.
+func OrderIDFromDisplayID(displayID string) (faire.OrderID, error) {
+	normalized, err := NormalizeDisplayID(displayID)
+	if err != nil {
+		return "", err
 	}
 	return faire.OrderID("bo_" + strings.ToLower(normalized)), nil
 }

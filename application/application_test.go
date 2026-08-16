@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -19,6 +20,8 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/buildinfo"
+	"github.com/Fepozopo/faire-gui/internal/ordersstore"
+	"github.com/Fepozopo/faire-gui/internal/orderssync"
 	"github.com/Fepozopo/faire-gui/updater"
 )
 
@@ -357,20 +360,16 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 }
 
-// TestShutdownReleasesOrdersCache verifies window teardown dereferences all cached and visible Orders rows and cancels in-flight work.
-func TestShutdownReleasesOrdersCache(t *testing.T) {
+// TestShutdownReleasesOrdersPresentationState verifies window teardown dereferences visible Orders rows and cancels in-flight work without a session cache.
+func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ui := newDesktopUI(ctx, cancel, nil, nil, nil, "")
-	ui.ordersCache["query"] = ordersCacheEntry{Rows: []orders.Row{{DisplayID: "ABCD123456"}}, Cursor: "next-page"}
 	ui.ordersState.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
 	ui.ordersState.Cursor = "next-page"
 
 	ui.shutdown()
 	ui.shutdown()
 
-	if ui.ordersCache != nil {
-		t.Fatalf("ordersCache = %#v, want nil", ui.ordersCache)
-	}
 	if ui.ordersState.Rows != nil || ui.ordersState.Cursor != "" {
 		t.Fatalf("orders state = %#v, want rows and cursor cleared", ui.ordersState)
 	}
@@ -378,6 +377,76 @@ func TestShutdownReleasesOrdersCache(t *testing.T) {
 	case <-ctx.Done():
 	default:
 		t.Fatal("shutdown() did not cancel the application context")
+	}
+}
+
+// TestLoadOrderDetailPublishesOnlyTypedPresentation verifies a local snapshot becomes a detail model without an API call.
+func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
+	ctx := context.Background()
+	store, err := ordersstore.Open(ctx, filepath.Join(t.TempDir(), "orders.sqlite3"))
+	if err != nil {
+		t.Fatalf("ordersstore.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	orderID := faire.OrderID("order-1")
+	displayID, updatedAt, notes := "DISPLAY-1", "2026-02-03T04:05:06Z", "Private note"
+	order := faire.Order{ID: &orderID, DisplayID: &displayID, UpdatedAt: &updatedAt, Notes: &notes}
+	record, err := orderssync.RecordFromOrder("connection-a", order, time.Date(2026, 2, 3, 5, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("RecordFromOrder() error = %v", err)
+	}
+	if err := store.UpsertOrders(ctx, []ordersstore.OrderRecord{record}); err != nil {
+		t.Fatalf("UpsertOrders() error = %v", err)
+	}
+	var result orderDetailResult
+	loadOrderDetail(ctx, store, 1, "connection-a", orderID, func(value orderDetailResult) { result = value })
+	if result.Status != "" || result.Detail.OrderID != orderID || result.Detail.DisplayID != displayID || result.Detail.Notes != notes {
+		t.Fatalf("detail result = %#v", result)
+	}
+}
+
+// TestDrainOrderDetailResultsRejectsStaleSelection verifies an old snapshot worker cannot replace a newer detail selection.
+func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-b"
+	ui.orderDetailID = faire.OrderID("order-b")
+	ui.detailRequestID = 2
+	ui.orderDetailStatus = "current"
+	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "stale"}}
+
+	ui.drainOrderDetailResults()
+
+	if ui.orderDetail.DisplayID != "" || ui.orderDetailStatus != "current" {
+		t.Fatalf("stale detail result changed current state: %#v, status=%q", ui.orderDetail, ui.orderDetailStatus)
+	}
+}
+
+// TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter verifies empty local state filters replace, rather than retain, stale rows.
+func TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-all"), DisplayID: "ALL-ORDER"}}
+	ui.ordersState.Loaded = true
+	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "No locally stored orders match this state.", ApplyRows: true}
+
+	ui.drainOrderResults()
+
+	if len(ui.ordersState.Rows) != 0 || !ui.ordersState.Loaded || ui.ordersState.Status != "No locally stored orders match this state." {
+		t.Fatalf("orders state = %#v, want an applied empty state-filter result", ui.ordersState)
+	}
+}
+
+// TestDrainOrderResultsPreservesRowsForAFailedRefresh verifies errors do not erase a useful locally stored table.
+func TestDrainOrderResultsPreservesRowsForAFailedRefresh(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-local"), DisplayID: "LOCAL-ORDER"}}
+	ui.orderResults <- orderLoadResult{RequestID: 1, Status: "Orders could not be loaded."}
+
+	ui.drainOrderResults()
+
+	if len(ui.ordersState.Rows) != 1 || ui.ordersState.Status != "Orders could not be loaded." {
+		t.Fatalf("orders state = %#v, want retained local rows and error status", ui.ordersState)
 	}
 }
 

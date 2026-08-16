@@ -63,7 +63,7 @@ func (ui *DesktopUI) ordersConnectionText() string {
 }
 
 // handleOrdersControls processes controls before rendering so visible rows update in the same frame.
-// Refresh validates the Created At Minimum value, replaces the server query, and re-fetches from Faire.
+// Refresh validates the local created-date filter and invokes the shared incremental synchronization path.
 func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	if ui.searchOrdersButton.Clicked(gtx) {
 		ui.loadOrderByDisplayID()
@@ -83,7 +83,7 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 			ui.invalidate()
 			return
 		}
-		// Refresh deliberately bypasses the cache so the edited date always reaches Faire in a new request.
+		// The selected boundary filters local rows; bootstrap and incremental sync retain their own safe boundaries.
 		ui.ordersState.Query.CreatedAtMin = createdAtMin
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
@@ -92,6 +92,18 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	}
 	if ui.loadMoreOrdersButton.Clicked(gtx) {
 		ui.startOrdersLoad(true, false)
+		ui.invalidate()
+	}
+	if ui.openSelectedOrderButton.Clicked(gtx) {
+		ui.openSelectedOrder()
+		ui.invalidate()
+	}
+	if ui.rebuildOrdersButton.Clicked(gtx) {
+		ui.requestOrdersDataAction(true)
+		ui.invalidate()
+	}
+	if ui.deleteLocalOrdersButton.Clicked(gtx) {
+		ui.requestOrdersDataAction(false)
 		ui.invalidate()
 	}
 
@@ -172,7 +184,7 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the selected-order context and primary CSV export action on a muted toolbar.
+// layoutOrderActionBar renders selection, dedicated detail navigation, export, and local-data actions on a muted toolbar.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -184,8 +196,13 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 					layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 					// The wider gap distinguishes the selection context from the action it informs.
 					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.openSelectedOrderButton, "Open selected")),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.exportMenuButton, "Export")),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+					layout.Rigid(primaryButton(ui.theme, &ui.rebuildOrdersButton, "Rebuild local data")),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.deleteLocalOrdersButton, "Delete local data")),
 				)
 			})
 		},
@@ -257,6 +274,33 @@ func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.D
 			layout.Rigid(bodyText(ui.theme, "Saved in Downloads as "+ui.csvExportCompletedFilename+".", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(primaryButton(ui.theme, &ui.closeCSVExportCompletedButton, "Close")),
+		)
+	})
+}
+
+// layoutOrdersDataModal confirms a destructive local-only cache action before any private snapshots are deleted.
+func (ui *DesktopUI) layoutOrdersDataModal(gtx layout.Context) layout.Dimensions {
+	if ui.cancelOrdersDataAction.Clicked(gtx) {
+		ui.ordersDataDialog = ordersDataDialogState{}
+		ui.invalidate()
+	}
+	if ui.confirmOrdersDataAction.Clicked(gtx) {
+		ui.startOrdersDataAction(ui.ordersDataDialog.rebuild)
+		ui.invalidate()
+	}
+	action := "Delete local order data"
+	description := "This removes locally stored order details, including customer and shipping information, for the selected connection only. It never deletes data at Faire."
+	if ui.ordersDataDialog.rebuild {
+		action = "Delete and rebuild local order data"
+		description += " A new one-year local history download will begin after deletion."
+	}
+	return modalPanel(gtx, ui, action, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, description, mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(dangerButton(ui.theme, &ui.confirmOrdersDataAction, action)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.cancelOrdersDataAction, "Cancel")),
 		)
 	})
 }
@@ -397,13 +441,13 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 	)
 }
 
-// refreshOrdersControl renders Refresh and the visible API date-filter label below it.
-// Refresh is disabled by behavior while an API operation is in flight.
+// refreshOrdersControl renders manual synchronization and the local created-date filter.
+// Refresh is disabled by behavior while an incompatible Orders operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
 		layout.Rigid(primaryButton(ui.theme, &ui.refreshOrdersButton, "Refresh")),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (applies on Refresh)").Layout),
+		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (local view filter)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.dateFilterField(gtx, &ui.createdAtMinEditor, "M/D/YYYY")
