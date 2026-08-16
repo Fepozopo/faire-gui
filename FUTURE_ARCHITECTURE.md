@@ -88,6 +88,7 @@ The following is the target structure as the application grows. Existing files c
 │   │   ├── lookup.go
 │   │   ├── presenter.go
 │   │   ├── selection.go
+│   │   ├── detail.go
 │   │   ├── export.go
 │   │   └── *_test.go
 │   ├── products/
@@ -123,9 +124,19 @@ The following is the target structure as the application grows. Existing files c
 │   │   ├── result.go
 │   │   ├── request.go
 │   │   └── *_test.go
-│   └── sanitize/
-│       ├── status.go
-│       └── status_test.go
+│   ├── sanitize/
+│   │   ├── status.go
+│   │   └── status_test.go
+│   ├── ordersstore/
+│   │   ├── store.go
+│   │   ├── sqlite.go
+│   │   ├── migrations.go
+│   │   ├── queries.go
+│   │   └── *_test.go
+│   └── orderssync/
+│       ├── source.go
+│       ├── syncer.go
+│       └── *_test.go
 ├── connections/
 │   ├── connection.go
 │   ├── manager.go
@@ -193,16 +204,17 @@ A feature package contains **UI-framework-independent feature logic**. It may im
 
 #### `features/orders/`
 
-| File           | Responsibility                                                                                                                                                                                       |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `doc.go`       | Documents the package boundary: Gio-free Orders state, query construction, lookup normalization, presentation, and selection behavior.                                                               |
-| `state.go`     | Defines `State`, the supported server query, included state filters, selected order IDs, cursor, loading/status state, cache metadata, and safe row data.                                            |
-| `query.go`     | Converts selected state/date filters, creation-time or update-time sorting, and a cursor into supported Faire order-list request options.                                                            |
-| `lookup.go`    | Normalizes an entered display ID and converts it to Faire's internal `OrderID` format before a direct lookup.                                                                                        |
-| `presenter.go` | Converts typed Faire order responses into UI-ready, non-secret `Row` values: order number, status, customer label, totals, dates, commission label, and source. Formats dates/currency consistently. |
-| `selection.go` | Adds/removes selected order IDs and selects or clears the visible rows. Keeps bulk-action selection behavior unit-testable without Gio.                                                              |
-| `export.go`    | Defines the stable order CSV header and writes full typed orders as one row per item without retaining raw API data in UI state.                                                                     |
-| `*_test.go`    | Covers query construction, lookup normalization, row presentation, CSV output, optional API fields, date/currency formatting, and selection behavior without Gio.                                    |
+| File           | Responsibility                                                                                                                                                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `doc.go`       | Documents the package boundary: Gio-free Orders state, query construction, lookup normalization, presentation, and selection behavior.                                                                                                                       |
+| `state.go`     | Defines `State`, the supported server query, included state filters, selected order IDs, cursor, loading/status state, cache metadata, and safe row data.                                                                                                    |
+| `query.go`     | Converts selected state/date filters, creation-time or update-time sorting, and a cursor into supported Faire order-list request options.                                                                                                                    |
+| `lookup.go`    | Normalizes an entered display ID and converts it to Faire's internal `OrderID` format before a direct lookup.                                                                                                                                                |
+| `presenter.go` | Converts typed Faire order responses into UI-ready, non-secret `Row` values: order number, status, customer label, totals, dates, commission label, and source. Formats dates/currency consistently.                                                         |
+| `selection.go` | Adds/removes selected order IDs and selects or clears the visible rows. Keeps bulk-action selection behavior unit-testable without Gio.                                                                                                                      |
+| `detail.go`    | Converts a locally stored or freshly retrieved typed Faire order into a purpose-built, credential-safe detail model. It exposes only fields deliberately approved for the detail screen and never gives layout code a raw API object or serialized snapshot. |
+| `export.go`    | Defines the stable order CSV header and writes full typed orders as one row per item without retaining raw API data in UI state.                                                                                                                             |
+| `*_test.go`    | Covers query construction, lookup normalization, list/detail presentation, CSV output, optional API fields, date/currency formatting, and selection behavior without Gio.                                                                                    |
 
 #### `features/products/`
 
@@ -270,6 +282,25 @@ This is optional until multiple pages need similar request handling.
 | `status.go`      | Shared policy helpers for converting known request, credential-store, and API errors into user-safe text. Never include raw bodies, headers, URLs containing credentials, or serialized request values. |
 | `status_test.go` | Redaction and safe-message tests.                                                                                                                                                                       |
 
+### `internal/ordersstore/`
+
+This package is the persistence boundary for locally cached Orders data. It is introduced when the persistent Orders sync slice is implemented.
+
+| File group                   | Responsibility                                                                                                                                                                                                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `store.go`, `queries.go`     | Defines storage-owned records and a narrow store interface for per-connection list reads, full snapshot reads, atomic upserts, sync checkpoints, and cache deletion. It must not import Gio or `faire/`, and must never persist credentials.                                 |
+| `sqlite.go`, `migrations.go` | Owns SQLite opening/closing, private file/WAL handling, append-only schema migrations, transactions, indexes, and storage-error classification. It stores complete approved order snapshots but never HTTP headers, request URLs, response envelopes, or authorization data. |
+| `*_test.go`                  | Covers migrations, connection isolation, snapshot round trips, atomic upserts, filtering/pagination, checkpoint integrity, and cache deletion.                                                                                                                               |
+
+### `internal/orderssync/`
+
+This package coordinates incremental remote-to-local synchronization without owning UI state or SQLite implementation details.
+
+| File group               | Responsibility                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source.go`, `syncer.go` | Defines a narrow injectable Faire-list source and follows `updated_at_min`/cursor pages with overlap protection. It converts typed Faire orders into atomic storage records, finalizes checkpoints only after a complete traversal, and returns safe sync summaries. It may depend on `faire/` and `internal/ordersstore/`, but never on Gio or `application/`. |
+| `*_test.go`              | Covers bootstrap, overlap, repeated cursors, partial failure/cancellation recovery, and snapshot/store convergence without real HTTP requests.                                                                                                                                                                                                                  |
+
 ### `connections/`
 
 Keep this package focused exactly as it is today.
@@ -317,12 +348,14 @@ cmd/faire-gui
       v
 application  ------------------>  internal/ui
       |                                  |
-      +----------------------------+-----+
-      |                            |
-      v                            v
-features/orders, products, ...  internal/async and internal/sanitize
-      |
-      +-------------> faire
+      +-------------------+--------------+-----+
+      |                   |              |
+      v                   v              v
+features/orders, ...  internal/orderssync  internal/async and internal/sanitize
+      |                   |
+      |                   +---------> internal/ordersstore
+      v
+    faire
       |
       +-------------> connections -------------> operating-system credential store
 ```
@@ -333,7 +366,8 @@ Important restrictions:
 - `connections/` must not depend on `application/`, `features/`, or Gio.
 - `features/` must not depend on Gio.
 - `internal/ui/` must not know API request types, credentials, or connection IDs beyond generic caller-provided values.
-- only `application/` should bridge persistent Gio widget state to feature state and manager/API operations.
+- `internal/ordersstore/` must not depend on Gio, `application/`, or `faire/`; `internal/orderssync/` may depend only on `faire/` and `internal/ordersstore/` among application packages.
+- only `application/` should bridge persistent Gio widget state to feature state, store/sync operations, and manager/API operations.
 
 ---
 
@@ -392,50 +426,52 @@ No mutation is implemented. Do not add “Create order,” shipment edits, packi
 
 ### Add a read-only Order detail vertical slice
 
-The Gio composition layer has been split into dedicated state, runtime, connection-action, connection-page, and Brand-profile files. The Orders list has reached the right stopping point for a first workflow, so the logical next step is a focused, read-only detail screen—not mutations or another broad navigation area:
+The Gio composition layer has been split into dedicated state, runtime, connection-action, connection-page, and Brand-profile files. The Orders list has reached the right stopping point for a first workflow, so the logical next step is a focused, read-only persistent sync and detail slice—not mutations or another broad navigation area:
 
-> Select an order from the active connection's list → open its details → load and present its supported information without retaining or exposing unnecessary customer data.
+> Synchronize complete approved order snapshots for the active connection → render the Orders list from local indexed data → select an order → present a typed local detail model → explicitly refresh from Faire only when requested.
 
-This builds directly on the current `Orders.Get` lookup path and turns table selection into a useful read-only workflow before shipment or packing-slip mutations are considered.
+This adds restart-safe local-first behavior and turns the current list into a useful read-only detail workflow before shipment or packing-slip mutations are considered. Complete cached order snapshots are private local data; they must be deleted with the selected connection's cache and must never be passed raw to the Gio frame loop.
 
 ### Scope
 
-1. Add an Orders-detail presentation model in `features/orders/`.
-   - Add a clearly named file such as `detail.go` rather than expanding the list-row model.
-   - Define only the display values needed by the detail screen.
-   - Exclude raw API payloads, addresses, notes, credentials, authorization data, and fields not deliberately approved for display.
-   - Unit test missing optional fields and output safety.
+1. Add persistent storage and synchronization boundaries.
+   - Add `internal/ordersstore/` for SQLite snapshots, local list/detail reads, migrations, checkpoint state, and per-connection cache deletion.
+   - Add `internal/orderssync/` for typed Faire pagination, overlap-safe `updated_at_min` synchronization, and final checkpoint progression.
+   - Keep `faire/` as the HTTP/API boundary and `connections/` as the metadata/credential boundary.
 
-2. Add detail route and persistent controls in `application/`.
-   - Preserve the existing list's filters, cursor, scroll position, cached rows, and selection when navigating back.
+2. Add Orders detail presentation models in `features/orders/`.
+   - Add a clearly named `detail.go` rather than expanding the list-row model.
+   - Convert a typed locally stored or freshly retrieved `faire.Order` into only the display values deliberately approved for the detail screen.
+   - Do not let raw snapshots, credentials, authorization data, HTTP data, or unapproved fields reach layout code.
+   - Unit test missing optional fields, output safety, and snapshot-to-detail mapping.
+
+3. Add local-first list/detail actions, route, and persistent controls in `application/`.
+   - Read local list rows before starting a background sync and preserve the existing list's filters, local cursor, scroll position, and selection when navigating back.
    - Use a dedicated `widget.Clickable` per visible order or an explicit detail action; do not overload selection, which remains reserved for future bulk actions.
-   - Provide a clear Back-to-Orders action.
-
-3. Add asynchronous detail loading in `application/orders_actions.go`.
-   - Obtain the client through `Manager.Client(ctx, activeConnectionID, ...)` in a goroutine.
-   - Call `client.Orders.Get` with the selected row's internal `faire.OrderID`.
-   - Publish only the safe detail model or sanitized status text to the frame loop.
-   - Add a separate detail request ID (or equivalent) so a stale result cannot overwrite a newer selection or a changed active connection.
+   - Read the selected order snapshot in a worker, convert it to the detail model, and provide a clear Back-to-Orders action.
+   - Add an explicit detail refresh that obtains the client through `Manager.Client`, calls `client.Orders.Get`, updates the snapshot in the background, and republishes a safe detail model.
+   - Use separate list/detail request IDs (or equivalent) so stale results cannot overwrite a newer selection, filter, or active connection.
 
 4. Render `application/order_detail_page.go`.
-   - Show the order number, status, dates, item summary, monetary summary, and only the customer information approved for this read-only screen.
-   - Include loading, empty/not-found, and actionable credential-safe error states.
+   - Show the order number, status, dates, item summary, monetary summary, and the customer/shipping/order information deliberately approved for this read-only screen.
+   - Include local-data freshness, loading, empty/not-found, and actionable credential-safe error states.
    - Keep shipment, packing-slip, cancellation, and other mutations absent.
 
 5. Test the vertical slice.
-   - selecting a row opens the matching detail request;
+   - selecting a row reads the matching local detail snapshot without a network request;
+   - an explicit refresh updates only that connection/order's local snapshot;
    - no active connection or missing order ID produces an actionable message without an API request;
-   - a changed connection or later selection rejects a stale detail result;
+   - a changed connection or later selection rejects a stale result;
    - list state is preserved when returning from detail; and
-   - visible detail statuses never include credentials, raw API response bodies, addresses, or notes.
+   - visible detail statuses never include credentials, raw API response bodies, or serialized order data.
 
 ### Acceptance criteria
 
-- A user can open a selected order's detail view from the current Orders list and return without losing the list context.
-- The detail request runs asynchronously and the window remains interactive while it is in progress.
-- The detail screen presents only the explicitly safe, typed display model.
-- Missing optional API fields, unknown states, and API failures render safely and actionably.
-- The existing Orders list, cache, pagination, filters, and selection controls continue to work unchanged.
+- A user can open a selected order's locally stored detail view from the current Orders list and return without losing the list context.
+- Local reads, synchronization, and explicit detail refreshes run asynchronously and the window remains interactive while work is in progress.
+- The detail screen presents only the explicitly approved, typed display model even though full snapshots are retained privately in SQLite.
+- Missing optional API fields, unknown states, unreadable local snapshots, and API failures render safely and actionably.
+- The existing Orders list, local pagination, filters, and selection controls continue to work unchanged.
 - Targeted feature/application tests pass, followed by `go test ./...` and `go test -race ./...`.
 - The macOS and Windows detail navigation workflow is manually verified before release.
 
@@ -446,7 +482,7 @@ This builds directly on the current `Orders.Get` lookup path and turns table sel
 1. Active connection state, route navigation, and the read-only Orders list — **completed**.
 2. Status tabs, supported filters, direct lookup, pagination, caching, and row selection — **completed**.
 3. Split the Gio composition layer into desktop state, runtime, connection actions, connection page, and Brand profile page files — **completed**.
-4. Read-only order detail page, preserving the Orders-list context.
+4. Persistent Orders sync and a read-only local-first order detail page, preserving the Orders-list context.
 5. Product and inventory read-only pages.
 6. Mutating workflows with validation, confirmation, refresh behavior, and tests: inventory updates, shipment processing, and product editing.
 7. OAuth Authorization Code Grant and reauthorization workflow.
