@@ -662,12 +662,13 @@ func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID st
 	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, UpdatedAtMin: updatedAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
 }
 
-// localRows converts storage projections to the existing safe table presentation type outside the frame loop.
+// localRows converts source storage projections, including delivery-address table values, to safe table presentation rows outside the frame loop.
+// It returns one presentation row per source record.
 func localRows(source []ordersstore.LocalRow) []orders.Row {
 	rows := make([]orders.Row, len(source))
 	for index, sourceRow := range source {
 		id := faire.OrderID(sourceRow.OrderID)
-		order := faire.Order{ID: &id, DisplayID: optionalPointer(sourceRow.DisplayID), State: optionalOrderState(sourceRow.State), Customer: optionalCustomer(sourceRow.CustomerName), CreatedAt: formatTimestampPointer(sourceRow.CreatedAtUTC), ExpectedShipDate: formatTimestampPointer(sourceRow.ExpectedShipAtUTC), Source: optionalPointer(sourceRow.Source)}
+		order := faire.Order{ID: &id, DisplayID: optionalPointer(sourceRow.DisplayID), State: optionalOrderState(sourceRow.State), Address: optionalAddress(sourceRow.AddressName), CreatedAt: formatTimestampPointer(sourceRow.CreatedAtUTC), ExpectedShipDate: formatTimestampPointer(sourceRow.ExpectedShipAtUTC), Source: optionalPointer(sourceRow.Source)}
 		row := orders.PresentRow(order)
 		if sourceRow.TotalDisplay != "" {
 			row.Total = sourceRow.TotalDisplay
@@ -697,12 +698,13 @@ func optionalOrderState(value string) *faire.OrderState {
 	return &state
 }
 
-// optionalCustomer maps a stored customer label to the table-only Faire customer projection.
-func optionalCustomer(value string) *faire.Customer {
+// optionalAddress maps value to a table-only Faire delivery-address projection.
+// It returns nil when value is absent so the presenter emits its missing-value placeholder.
+func optionalAddress(value string) *faire.Address {
 	if value == "" {
 		return nil
 	}
-	return &faire.Customer{FirstName: &value}
+	return &faire.Address{Name: &value}
 }
 
 // formatTimestampPointer preserves a storage timestamp as an RFC 3339 value for the shared table formatter.

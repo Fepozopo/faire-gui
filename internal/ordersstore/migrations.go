@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -18,6 +18,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, apply: applyMigrationOne},
 	{version: 2, apply: applyMigrationTwo},
+	{version: 3, apply: applyMigrationThree},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -57,6 +58,20 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationThree adds the delivery-address list projection and restores it from valid private snapshots.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationThree(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE orders ADD COLUMN address_name TEXT NULL`); err != nil {
+		return err
+	}
+	// Preserve immediately usable table names for cached orders without trusting malformed historical JSON.
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET address_name = CASE
+		WHEN json_valid(order_snapshot_json) THEN json_extract(order_snapshot_json, '$.address.name')
+		ELSE NULL
+	END`)
+	return err
 }
 
 // applyMigrationTwo adds the updated-at history boundary and requires one safe updated-at re-bootstrap for existing caches.

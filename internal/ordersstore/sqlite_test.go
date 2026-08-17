@@ -34,13 +34,13 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" {
-		t.Fatalf("List() = %#v, want durable order-1", page.Rows)
+	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" || page.Rows[0].AddressName != "Ada's Antiques" {
+		t.Fatalf("List() = %#v, want durable order-1 with its delivery address", page.Rows)
 	}
 }
 
-// TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap verifies a v1 cache retains its date while requiring a full updated-at traversal.
-func TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap(t *testing.T) {
+// TestMigrationsCarryForwardBoundaryAndAddressProjection verifies a v1 cache retains its date while migration 3 restores address names from valid snapshots.
+func TestMigrationsCarryForwardBoundaryAndAddressProjection(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "orders.sqlite3")
 	database, err := sql.Open("sqlite", path)
@@ -61,6 +61,23 @@ func TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap(t *testin
 			last_error_kind TEXT NULL,
 			last_error_at_utc INTEGER NULL
 		)`,
+		`CREATE TABLE orders (
+			connection_id TEXT NOT NULL,
+			order_id TEXT NOT NULL,
+			display_id TEXT NOT NULL,
+			state TEXT NULL,
+			customer_name TEXT NULL,
+			total_display TEXT NULL,
+			commission_display TEXT NULL,
+			source TEXT NULL,
+			created_at_utc INTEGER NULL,
+			expected_ship_at_utc INTEGER NULL,
+			updated_at_utc INTEGER NOT NULL,
+			order_snapshot_json TEXT NOT NULL,
+			snapshot_schema_version INTEGER NOT NULL,
+			synced_at_utc INTEGER NOT NULL,
+			PRIMARY KEY (connection_id, order_id)
+		)`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			_ = database.Close()
@@ -70,6 +87,10 @@ func TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap(t *testin
 	if _, err := database.ExecContext(ctx, `INSERT INTO order_sync_state(connection_id, bootstrap_created_at_min_utc, bootstrap_completed_at_utc, high_watermark_updated_at_utc, last_successful_sync_at_utc) VALUES (?, ?, ?, ?, ?)`, "connection-a", boundary.UnixMicro(), boundary.UnixMicro(), boundary.UnixMicro(), boundary.UnixMicro()); err != nil {
 		_ = database.Close()
 		t.Fatalf("insert v1 state error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada's Antiques"}}`, 1, boundary.UnixMicro()); err != nil {
+		_ = database.Close()
+		t.Fatalf("insert v1 order error = %v", err)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatalf("close v1 database error = %v", err)
@@ -82,6 +103,10 @@ func TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap(t *testin
 	state, found, err := store.SyncState(ctx, "connection-a")
 	if err != nil || !found || !state.BootstrapUpdatedAtMinUTC.Equal(boundary) || state.BootstrapCompletedAtUTC != nil || state.HighWatermarkUpdatedAtUTC != nil || state.LastSuccessfulSyncAtUTC != nil {
 		t.Fatalf("migrated state = %#v, found=%v, err=%v", state, found, err)
+	}
+	page, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", Limit: 1})
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" {
+		t.Fatalf("migrated address projection = %#v, err=%v", page, err)
 	}
 }
 
@@ -270,6 +295,7 @@ func testRecord(connectionID, orderID, displayID string, updatedAt time.Time) Or
 		DisplayID:             displayID,
 		State:                 "NEW",
 		CustomerName:          "Customer",
+		AddressName:           "Ada's Antiques",
 		TotalDisplay:          "USD 12.34",
 		CommissionDisplay:     "USD 1.23",
 		Source:                "FAIRE",

@@ -389,8 +389,8 @@ func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	orderID := faire.OrderID("order-1")
-	displayID, updatedAt, notes := "DISPLAY-1", "2026-02-03T04:05:06Z", "Private note"
-	order := faire.Order{ID: &orderID, DisplayID: &displayID, UpdatedAt: &updatedAt, Notes: &notes}
+	displayID, updatedAt, notes, addressName := "DISPLAY-1", "2026-02-03T04:05:06Z", "Private note", "Ada's Antiques"
+	order := faire.Order{ID: &orderID, DisplayID: &displayID, UpdatedAt: &updatedAt, Notes: &notes, Address: &faire.Address{Name: &addressName}}
 	record, err := orderssync.RecordFromOrder("connection-a", order, time.Date(2026, 2, 3, 5, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("RecordFromOrder() error = %v", err)
@@ -400,8 +400,16 @@ func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
 	}
 	var result orderDetailResult
 	loadOrderDetail(ctx, store, 1, "connection-a", orderID, func(value orderDetailResult) { result = value })
-	if result.Status != "" || result.Detail.OrderID != orderID || result.Detail.DisplayID != displayID || result.Detail.Notes != notes {
+	if result.Status != "" || result.Detail.OrderID != orderID || result.Detail.DisplayID != displayID || result.Detail.Notes != notes || result.Detail.ShippingAddress.Name != addressName {
 		t.Fatalf("detail result = %#v", result)
+	}
+}
+
+// TestLocalRowsUseStoredDeliveryAddressName verifies cached table rows use the persisted delivery address rather than customer data.
+func TestLocalRowsUseStoredDeliveryAddressName(t *testing.T) {
+	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques"}})
+	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" {
+		t.Fatalf("localRows() = %#v, want delivery address name", rows)
 	}
 }
 

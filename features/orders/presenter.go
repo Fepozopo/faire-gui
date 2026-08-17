@@ -8,9 +8,9 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// Row is the safe, display-ready data for one Orders table row. It intentionally
-// excludes personally identifying address data, notes, tracking details, and other
-// raw-order fields that are not needed by the list.
+// Row is the display-ready data for one Orders table row. It includes the delivery
+// address name for the Customer column, while excluding other address details,
+// notes, tracking details, and raw-order fields not needed by the list.
 type Row struct {
 	ID         faire.OrderID
 	DisplayID  string
@@ -34,15 +34,15 @@ func PresentRows(orders []faire.Order) []Row {
 	return rows
 }
 
-// PresentRow converts a Faire order into non-secret table values. Missing optional
-// fields use an em dash so table columns remain aligned without exposing Go pointer
-// formatting or inventing data.
+// PresentRow converts a Faire order into table values, including the delivery
+// address name in the Customer column. Missing optional fields use an em dash so
+// table columns remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
 		ID:         orderID(order.ID),
 		DisplayID:  optionalText(order.DisplayID),
 		Status:     displayStatus(order.State),
-		Customer:   displayCustomer(order.Customer),
+		Customer:   displayAddressName(order.Address),
 		Total:      formatOrderTotal(order.Items),
 		OrderDate:  formatDate(order.CreatedAt),
 		ShipDate:   formatDate(firstDate(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter)),
@@ -96,7 +96,16 @@ func displayStatus(state *faire.OrderState) string {
 	}
 }
 
-// displayCustomer combines the safe name fields available in the API response.
+// displayAddressName returns the delivery address name for the Customer column.
+func displayAddressName(address *faire.Address) string {
+	// List responses may omit the address, so preserve the table's missing-value convention.
+	if address == nil {
+		return "—"
+	}
+	return optionalText(address.Name)
+}
+
+// displayCustomer combines the first and last name fields for order detail views.
 func displayCustomer(customer *faire.Customer) string {
 	if customer == nil {
 		return "—"

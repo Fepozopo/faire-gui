@@ -6,12 +6,14 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestPresentRowFormatsOrdersTableValues verifies the table fields use stable safe formatting.
+// TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
+// including the delivery address name in the Customer column.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
 	state := faire.OrderStateInTransit
-	firstName := " Ada "
+	addressName := "Ada's Antiques"
+	firstName := "Ada"
 	lastName := "Lovelace"
 	createdAt := "2026-01-02T03:04:05Z"
 	expectedShipDate := "2026-01-03T04:05:06Z"
@@ -21,16 +23,17 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	currency := "usd"
 	commission := int64(250)
 	order := faire.Order{
-		ID:                  &id,
-		DisplayID:           &displayID,
-		State:               &state,
-		Customer:            &faire.Customer{FirstName: &firstName, LastName: &lastName},
-		CreatedAt:           &createdAt,
-		ExpectedShipDate:    &expectedShipDate,
-		Source:              &source,
-		Items:               []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
-		PayoutCosts:         &faire.PayoutCosts{CommissionCents: &commission},
-		Address:             &faire.Address{PhoneNumber: stringPointer("555-0100")},
+		ID:               &id,
+		DisplayID:        &displayID,
+		State:            &state,
+		Customer:         &faire.Customer{FirstName: &firstName, LastName: &lastName},
+		CreatedAt:        &createdAt,
+		ExpectedShipDate: &expectedShipDate,
+		Source:           &source,
+		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
+		PayoutCosts:      &faire.PayoutCosts{CommissionCents: &commission},
+		// Both fields are present to verify the address name takes precedence in the table.
+		Address:             &faire.Address{Name: &addressName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Do not expose this"),
 		PurchaseOrderNumber: stringPointer("PO-SECRET"),
 	}
@@ -40,7 +43,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ID:         id,
 		DisplayID:  displayID,
 		Status:     "In transit",
-		Customer:   "Ada Lovelace",
+		Customer:   addressName,
 		Total:      "USD 24.68",
 		OrderDate:  "2026-01-02",
 		ShipDate:   "2026-01-03",

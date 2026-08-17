@@ -255,7 +255,8 @@ func cursorPageOptions(cursor string) faire.OrderListOptions {
 	return faire.OrderListOptions{Cursor: &cursor}
 }
 
-// RecordFromOrder validates one remote order, verifies its JSON round trip, and builds its atomic stored representation.
+// RecordFromOrder validates order, verifies its JSON round trip, and builds an atomic stored representation for connectionID at syncedAt.
+// It preserves every supported typed Order field in the private snapshot and returns the record or a validation error.
 // It is used by synchronization and explicit per-order refreshes; callers must upsert the result without advancing a feed checkpoint.
 func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time) (ordersstore.OrderRecord, error) {
 	if order.ID == nil || strings.TrimSpace(string(*order.ID)) == "" || order.UpdatedAt == nil {
@@ -287,6 +288,7 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		DisplayID:             displayID,
 		State:                 row.state,
 		CustomerName:          row.customer,
+		AddressName:           row.addressName,
 		TotalDisplay:          row.total,
 		CommissionDisplay:     row.commission,
 		Source:                row.source,
@@ -299,17 +301,19 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 	}, nil
 }
 
-// projection contains storage-owned list values derived atomically from a remote Order.
+// projection contains storage-owned list values, including the delivery address name, derived atomically from a remote Order.
 type projection struct {
-	displayID  string
-	state      string
-	customer   string
-	total      string
-	commission string
-	source     string
+	displayID   string
+	state       string
+	customer    string
+	addressName string
+	total       string
+	commission  string
+	source      string
 }
 
-// projectOrder derives list columns without exposing a raw Order outside the worker.
+// projectOrder derives list columns, including the delivery address name, from order without exposing a raw Order outside the worker.
+// It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
 	if order.DisplayID != nil {
@@ -320,6 +324,9 @@ func projectOrder(order faire.Order) projection {
 	}
 	if order.Customer != nil {
 		value.customer = strings.TrimSpace(strings.Join([]string{optionalString(order.Customer.FirstName), optionalString(order.Customer.LastName)}, " "))
+	}
+	if order.Address != nil {
+		value.addressName = optionalString(order.Address.Name)
 	}
 	value.total = orderTotal(order.Items)
 	value.commission = commission(order.PayoutCosts)
