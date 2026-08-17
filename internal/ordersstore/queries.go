@@ -54,7 +54,7 @@ func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, erro
 		direction = "DESC"
 	}
 	args = append(args, query.Limit+1)
-	statement := `SELECT order_id, display_id, state, customer_name, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, synced_at_utc
+	statement := `SELECT order_id, display_id, state, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, synced_at_utc
 		FROM orders WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY ` + sortColumn + ` ` + direction + ` NULLS LAST, order_id ASC LIMIT ?`
 	rows, err := s.database.QueryContext(ctx, statement, args...)
@@ -117,7 +117,7 @@ func rowSortTime(row LocalRow, column LocalSortColumn) *time.Time {
 // FindByDisplayID returns one connection-scoped indexed row for connectionID and visible displayID.
 // It returns ErrNotFound when the local row does not exist.
 func (s *SQLiteStore) FindByDisplayID(ctx context.Context, connectionID, displayID string) (LocalRow, error) {
-	row := s.database.QueryRowContext(ctx, `SELECT order_id, display_id, state, customer_name, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, synced_at_utc FROM orders WHERE connection_id = ? AND display_id = ?`, connectionID, displayID)
+	row := s.database.QueryRowContext(ctx, `SELECT order_id, display_id, state, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, synced_at_utc FROM orders WHERE connection_id = ? AND display_id = ?`, connectionID, displayID)
 	value, err := scanLocalRow(row)
 	if err == sql.ErrNoRows {
 		return LocalRow{}, ErrNotFound
@@ -157,17 +157,17 @@ func (s *SQLiteStore) UpsertOrders(ctx context.Context, records []OrderRecord) e
 		return classifyError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	statement := `INSERT INTO orders (connection_id, order_id, display_id, state, customer_name, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	statement := `INSERT INTO orders (connection_id, order_id, display_id, state, address_name, total_amount_minor, total_currency, commission_bps, source, created_at_utc, expected_ship_at_utc, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(connection_id, order_id) DO UPDATE SET
-		display_id = excluded.display_id, state = excluded.state, customer_name = excluded.customer_name, address_name = excluded.address_name,
+		display_id = excluded.display_id, state = excluded.state, address_name = excluded.address_name,
 		total_amount_minor = excluded.total_amount_minor, total_currency = excluded.total_currency, commission_bps = excluded.commission_bps,
 		source = excluded.source, created_at_utc = excluded.created_at_utc, expected_ship_at_utc = excluded.expected_ship_at_utc,
 		updated_at_utc = excluded.updated_at_utc, order_snapshot_json = excluded.order_snapshot_json,
 		snapshot_schema_version = excluded.snapshot_schema_version, synced_at_utc = excluded.synced_at_utc
 		WHERE excluded.updated_at_utc >= orders.updated_at_utc`
 	for _, record := range records {
-		if _, err := tx.ExecContext(ctx, statement, record.ConnectionID, record.OrderID, record.DisplayID, nullableText(record.State), nullableText(record.CustomerName), nullableText(record.AddressName), nullableInt64(record.TotalAmountMinor), nullableText(record.TotalCurrency), nullableInt64(record.CommissionBPS), nullableText(record.Source), nullableTime(record.CreatedAtUTC), nullableTime(record.ExpectedShipAtUTC), record.UpdatedAtUTC.UTC().UnixMicro(), record.SnapshotJSON, record.SnapshotSchemaVersion, record.SyncedAtUTC.UTC().UnixMicro()); err != nil {
+		if _, err := tx.ExecContext(ctx, statement, record.ConnectionID, record.OrderID, record.DisplayID, nullableText(record.State), nullableText(record.AddressName), nullableInt64(record.TotalAmountMinor), nullableText(record.TotalCurrency), nullableInt64(record.CommissionBPS), nullableText(record.Source), nullableTime(record.CreatedAtUTC), nullableTime(record.ExpectedShipAtUTC), record.UpdatedAtUTC.UTC().UnixMicro(), record.SnapshotJSON, record.SnapshotSchemaVersion, record.SyncedAtUTC.UTC().UnixMicro()); err != nil {
 			return classifyError(err)
 		}
 	}
@@ -300,14 +300,14 @@ func (s *SQLiteStore) DeleteConnectionData(ctx context.Context, connectionID str
 // It returns the populated row or the scanner error.
 func scanLocalRow(scanner interface{ Scan(...any) error }) (LocalRow, error) {
 	var row LocalRow
-	var state, customer, address, currency, source sql.NullString
+	var state, address, currency, source sql.NullString
 	var total, commission sql.NullInt64
 	var created, expected sql.NullInt64
 	var updated, synced int64
-	if err := scanner.Scan(&row.OrderID, &row.DisplayID, &state, &customer, &address, &total, &currency, &commission, &source, &created, &expected, &updated, &synced); err != nil {
+	if err := scanner.Scan(&row.OrderID, &row.DisplayID, &state, &address, &total, &currency, &commission, &source, &created, &expected, &updated, &synced); err != nil {
 		return LocalRow{}, err
 	}
-	row.State, row.CustomerName, row.AddressName, row.TotalCurrency, row.Source = state.String, customer.String, address.String, currency.String, source.String
+	row.State, row.AddressName, row.TotalCurrency, row.Source = state.String, address.String, currency.String, source.String
 	row.TotalAmountMinor, row.CommissionBPS = nullableInt64Pointer(total), nullableInt64Pointer(commission)
 	row.CreatedAtUTC, row.ExpectedShipAtUTC = nullableTimeFromInt(created), nullableTimeFromInt(expected)
 	row.UpdatedAtUTC, row.SyncedAtUTC = time.UnixMicro(updated).UTC(), time.UnixMicro(synced).UTC()

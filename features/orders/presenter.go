@@ -126,31 +126,11 @@ func displayCustomer(customer *faire.Customer) string {
 	return strings.Join(parts, " ")
 }
 
-// formatOrderTotal totals item price values and returns the Orders-table total label. Modern Money data takes precedence;
-// price_cents is used only as a legacy fallback when Money is unavailable, and mixed currencies return the missing-value placeholder.
+// formatOrderTotal converts the shared raw item subtotal into an Orders-table total label.
+// It returns the standard missing-value placeholder when the items have no usable price or use mixed currencies.
 func formatOrderTotal(items []faire.OrderItem) string {
-	var amountMinor int64
-	currency := ""
-	foundAmount := false
-	for _, item := range items {
-		amount, itemCurrency, found := itemAmount(item)
-		if !found {
-			continue
-		}
-		if currency == "" {
-			currency = itemCurrency
-		}
-		// Mixed currencies cannot be summed meaningfully, so omit a misleading total.
-		if itemCurrency != currency {
-			return "—"
-		}
-		amountMinor += amount
-		foundAmount = true
-	}
-	if !foundAmount {
-		return "—"
-	}
-	return formatTotalAmount(amountMinor, currency)
+	amountMinor, currency := faire.OrderItemsTotal(items)
+	return FormatTotal(amountMinor, currency)
 }
 
 // FormatTotal converts raw total minor units and currency into the Orders-table label.
@@ -173,21 +153,6 @@ func formatTotalAmount(amountMinor int64, currency string) string {
 		return fmt.Sprintf("%s$%d.%02d", sign, amountMinor/100, amountMinor%100)
 	}
 	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amountMinor/100, amountMinor%100)
-}
-
-// itemAmount returns a line item's monetary value multiplied by its quantity.
-func itemAmount(item faire.OrderItem) (int64, string, bool) {
-	quantity := int64(1)
-	if item.Quantity != nil {
-		quantity = *item.Quantity
-	}
-	if item.Price != nil && item.Price.AmountMinor != nil && item.Price.Currency != nil && *item.Price.Currency != "" {
-		return *item.Price.AmountMinor * quantity, *item.Price.Currency, true
-	}
-	if item.PriceCents != nil {
-		return *item.PriceCents * quantity, "USD", true
-	}
-	return 0, "", false
 }
 
 // FormatCommissionPercentage converts Faire's raw commission BPS to an Orders-table percentage.

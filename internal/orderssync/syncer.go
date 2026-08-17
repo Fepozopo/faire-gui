@@ -287,7 +287,6 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		OrderID:               string(*order.ID),
 		DisplayID:             displayID,
 		State:                 row.state,
-		CustomerName:          row.customer,
 		AddressName:           row.addressName,
 		TotalAmountMinor:      row.totalAmountMinor,
 		TotalCurrency:         row.totalCurrency,
@@ -306,7 +305,6 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 type projection struct {
 	displayID        string
 	state            string
-	customer         string
 	addressName      string
 	totalAmountMinor *int64
 	totalCurrency    string
@@ -324,11 +322,8 @@ func projectOrder(order faire.Order) projection {
 	if order.State != nil {
 		value.state = string(*order.State)
 	}
-	if order.Customer != nil {
-		value.customer = strings.TrimSpace(strings.Join([]string{optionalString(order.Customer.FirstName), optionalString(order.Customer.LastName)}, " "))
-	}
 	value.addressName = shippingBusinessOrRecipientName(order.Address)
-	value.totalAmountMinor, value.totalCurrency = orderTotal(order.Items)
+	value.totalAmountMinor, value.totalCurrency = faire.OrderItemsTotal(order.Items)
 	value.commissionBPS = commissionBPS(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
@@ -346,42 +341,6 @@ func shippingBusinessOrRecipientName(address *faire.Address) string {
 		return companyName
 	}
 	return optionalString(address.Name)
-}
-
-// orderTotal derives raw total minor units and currency from items for the Orders table projection.
-// It returns nil and an empty currency when no price exists or currencies are mixed.
-func orderTotal(items []faire.OrderItem) (*int64, string) {
-	var amount int64
-	currency := ""
-	found := false
-	for _, item := range items {
-		quantity := int64(1)
-		if item.Quantity != nil {
-			quantity = *item.Quantity
-		}
-		var itemAmount int64
-		var itemCurrency string
-		switch {
-		case item.Price != nil && item.Price.AmountMinor != nil && item.Price.Currency != nil && *item.Price.Currency != "":
-			itemAmount, itemCurrency = *item.Price.AmountMinor*quantity, *item.Price.Currency
-		case item.PriceCents != nil:
-			itemAmount, itemCurrency = *item.PriceCents*quantity, "USD"
-		default:
-			continue
-		}
-		if currency == "" {
-			currency = itemCurrency
-		}
-		if currency != itemCurrency {
-			return nil, ""
-		}
-		amount += itemAmount
-		found = true
-	}
-	if !found {
-		return nil, ""
-	}
-	return &amount, currency
 }
 
 // commissionBPS copies Faire's raw commission_bps field from costs for the Orders table projection.

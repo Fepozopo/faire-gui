@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -23,6 +23,7 @@ var migrations = []migration{
 	{version: 5, apply: applyMigrationFive},
 	{version: 6, apply: applyMigrationSix},
 	{version: 7, apply: applyMigrationSeven},
+	{version: 8, apply: applyMigrationEight},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -62,6 +63,13 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationEight removes the unused customer-name projection because the table uses only the delivery business or recipient label.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationEight(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `ALTER TABLE orders DROP COLUMN customer_name`)
+	return err
 }
 
 // applyMigrationSeven replaces cached shipping-recipient labels with Faire business names when present.

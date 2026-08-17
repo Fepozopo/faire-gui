@@ -109,8 +109,8 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		t.Fatalf("migrated raw list projections = %#v, err=%v", page, err)
 	}
 	var legacyColumns int
-	if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name IN ('total_display', 'commission_display')`).Scan(&legacyColumns); err != nil || legacyColumns != 0 {
-		t.Fatalf("legacy formatted columns = %d, err=%v", legacyColumns, err)
+	if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name IN ('customer_name', 'total_display', 'commission_display')`).Scan(&legacyColumns); err != nil || legacyColumns != 0 {
+		t.Fatalf("legacy table-only columns = %d, err=%v", legacyColumns, err)
 	}
 }
 
@@ -301,7 +301,6 @@ func testRecord(connectionID, orderID, displayID string, updatedAt time.Time) Or
 		OrderID:               orderID,
 		DisplayID:             displayID,
 		State:                 "NEW",
-		CustomerName:          "Customer",
 		AddressName:           "Ada's Antiques",
 		TotalAmountMinor:      &total,
 		TotalCurrency:         "USD",

@@ -30,7 +30,6 @@ type OrderRecord struct {
 	OrderID               string
 	DisplayID             string
 	State                 string
-	CustomerName          string
 	AddressName           string
 	TotalAmountMinor      *int64
 	TotalCurrency         string
@@ -51,7 +50,6 @@ type LocalRow struct {
 	OrderID           string
 	DisplayID         string
 	State             string
-	CustomerName      string
 	AddressName       string
 	TotalAmountMinor  *int64
 	TotalCurrency     string
