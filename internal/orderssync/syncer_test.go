@@ -34,8 +34,8 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 		t.Fatalf("Summary = %#v, want bootstrap with two orders", summary)
 	}
 	page, err := store.List(ctx, ordersstore.ListQuery{ConnectionID: "connection-a", Limit: 2})
-	if err != nil || len(page.Rows) != 2 || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
-		t.Fatalf("stored raw commission BPS = %#v, err=%v", page, err)
+	if err != nil || len(page.Rows) != 2 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
+		t.Fatalf("stored business name and raw commission BPS = %#v, err=%v", page, err)
 	}
 	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" || options[1].Limit != nil || options[1].Page != nil || options[1].UpdatedAtMin != nil || options[1].CreatedAtMin != nil || options[1].SortBy != nil || options[1].ExcludedStates != nil || options[1].ShipAfterMax != nil || options[1].OriginalOrderID != nil {
 		t.Fatalf("sync options = %#v", options)
@@ -225,5 +225,6 @@ func syncOrder(id string, updatedAt time.Time) faire.Order {
 	createdAt := updatedAt.Add(-time.Hour).Format(time.RFC3339Nano)
 	updated := updatedAt.Format(time.RFC3339Nano)
 	commissionBPS := int64(1500)
-	return faire.Order{ID: &orderID, DisplayID: &displayID, CreatedAt: &createdAt, UpdatedAt: &updated, PayoutCosts: &faire.PayoutCosts{CommissionBPS: &commissionBPS}}
+	shippingRecipientName, businessName := "Ada Lovelace", "Ada's Antiques"
+	return faire.Order{ID: &orderID, DisplayID: &displayID, CreatedAt: &createdAt, UpdatedAt: &updated, Address: &faire.Address{Name: &shippingRecipientName, CompanyName: &businessName}, PayoutCosts: &faire.PayoutCosts{CommissionBPS: &commissionBPS}}
 }

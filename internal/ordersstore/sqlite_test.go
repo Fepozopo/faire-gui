@@ -39,7 +39,7 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	}
 }
 
-// TestMigrationsCarryForwardBoundaryAndListProjections verifies a v1 cache retains its date while later migrations restore address names and commission percentages from valid snapshots.
+// TestMigrationsCarryForwardBoundaryAndListProjections verifies a v1 cache retains its date while later migrations restore business names and raw financial projections from valid snapshots.
 func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "orders.sqlite3")
@@ -88,7 +88,7 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		_ = database.Close()
 		t.Fatalf("insert v1 state error = %v", err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500}}`, 1, boundary.UnixMicro()); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada Lovelace","company_name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500}}`, 1, boundary.UnixMicro()); err != nil {
 		_ = database.Close()
 		t.Fatalf("insert v1 order error = %v", err)
 	}

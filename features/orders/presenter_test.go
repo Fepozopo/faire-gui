@@ -7,12 +7,13 @@ import (
 )
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
-// including the delivery address name and commission percentage in their respective table columns.
+// including the delivery business name and commission percentage in their respective table columns.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
 	state := faire.OrderStateInTransit
-	addressName := "Ada's Antiques"
+	shippingRecipientName := "Ada Lovelace"
+	businessName := "Ada's Antiques"
 	firstName := "Ada"
 	lastName := "Lovelace"
 	createdAt := "2026-01-02T03:04:05Z"
@@ -33,8 +34,8 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		Source:           &source,
 		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
 		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission},
-		// Both fields are present to verify the address name takes precedence in the table.
-		Address:             &faire.Address{Name: &addressName, PhoneNumber: stringPointer("555-0100")},
+		// Both fields are present to verify the business name takes precedence over the shipping recipient in the table.
+		Address:             &faire.Address{Name: &shippingRecipientName, CompanyName: &businessName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Do not expose this"),
 		PurchaseOrderNumber: stringPointer("PO-SECRET"),
 	}
@@ -44,7 +45,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ID:         id,
 		DisplayID:  displayID,
 		Status:     "In transit",
-		Customer:   addressName,
+		Customer:   businessName,
 		Total:      "$24.68",
 		OrderDate:  "2026-01-02",
 		ShipDate:   "2026-01-03",
@@ -53,6 +54,15 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
+	}
+}
+
+// TestPresentRowFallsBackToShippingRecipient verifies orders without a business name display their shipping recipient.
+func TestPresentRowFallsBackToShippingRecipient(t *testing.T) {
+	shippingRecipientName := "Ada Lovelace"
+	row := PresentRow(faire.Order{Address: &faire.Address{Name: &shippingRecipientName}})
+	if row.Customer != shippingRecipientName {
+		t.Fatalf("Customer = %q, want shipping recipient %q", row.Customer, shippingRecipientName)
 	}
 }
 

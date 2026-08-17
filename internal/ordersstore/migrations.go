@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -22,6 +22,7 @@ var migrations = []migration{
 	{version: 4, apply: applyMigrationFour},
 	{version: 5, apply: applyMigrationFive},
 	{version: 6, apply: applyMigrationSix},
+	{version: 7, apply: applyMigrationSeven},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -61,6 +62,20 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationSeven replaces cached shipping-recipient labels with Faire business names when present.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationSeven(ctx context.Context, tx *sql.Tx) error {
+	// Existing snapshots already retain both address fields, so correct cached labels without another API request.
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET address_name = CASE
+		WHEN json_valid(order_snapshot_json) THEN COALESCE(
+			NULLIF(TRIM(json_extract(order_snapshot_json, '$.address.company_name')), ''),
+			NULLIF(TRIM(json_extract(order_snapshot_json, '$.address.name')), '')
+		)
+		ELSE NULL
+	END`)
+	return err
 }
 
 // applyMigrationSix removes the legacy formatted table projections after every cache has raw replacements.

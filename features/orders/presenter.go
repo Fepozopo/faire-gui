@@ -9,7 +9,7 @@ import (
 )
 
 // Row is the display-ready data for one Orders table row. It includes the delivery
-// address name and the commission percentage, while excluding other address details,
+// business name or shipping recipient and the commission percentage, while excluding other address details,
 // notes, tracking details, and raw-order fields not needed by the list.
 type Row struct {
 	ID         faire.OrderID
@@ -35,7 +35,7 @@ func PresentRows(orders []faire.Order) []Row {
 }
 
 // PresentRow converts a Faire order into table values, including the delivery
-// address name and Faire's commission percentage. Missing optional fields use an em dash so
+// business name or shipping recipient and Faire's commission percentage. Missing optional fields use an em dash so
 // table columns remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
@@ -96,11 +96,14 @@ func displayStatus(state *faire.OrderState) string {
 	}
 }
 
-// displayAddressName returns the delivery address name for the Customer column.
+// displayAddressName returns the delivery business name for the Customer column, falling back to the shipping recipient.
 func displayAddressName(address *faire.Address) string {
-	// List responses may omit the address, so preserve the table's missing-value convention.
+	// Faire's address name is the recipient, so prefer company_name when the order identifies a business.
 	if address == nil {
 		return "—"
+	}
+	if companyName := optionalText(address.CompanyName); companyName != "—" {
+		return companyName
 	}
 	return optionalText(address.Name)
 }

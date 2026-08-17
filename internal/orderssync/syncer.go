@@ -302,7 +302,7 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 	}, nil
 }
 
-// projection contains storage-owned raw list values, including total minor units, commission BPS, and the delivery address name, derived atomically from a remote Order.
+// projection contains storage-owned raw list values, including total minor units, commission BPS, and the delivery business or recipient name, derived atomically from a remote Order.
 type projection struct {
 	displayID        string
 	state            string
@@ -314,7 +314,7 @@ type projection struct {
 	source           string
 }
 
-// projectOrder derives raw list columns, including total minor units, commission BPS, and the delivery address name, from order without exposing a raw Order outside the worker.
+// projectOrder derives raw list columns, including total minor units, commission BPS, and the delivery business or recipient name, from order without exposing a raw Order outside the worker.
 // It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
@@ -327,15 +327,25 @@ func projectOrder(order faire.Order) projection {
 	if order.Customer != nil {
 		value.customer = strings.TrimSpace(strings.Join([]string{optionalString(order.Customer.FirstName), optionalString(order.Customer.LastName)}, " "))
 	}
-	if order.Address != nil {
-		value.addressName = optionalString(order.Address.Name)
-	}
+	value.addressName = shippingBusinessOrRecipientName(order.Address)
 	value.totalAmountMinor, value.totalCurrency = orderTotal(order.Items)
 	value.commissionBPS = commissionBPS(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
 	}
 	return value
+}
+
+// shippingBusinessOrRecipientName returns address's business name, falling back to its shipping recipient name.
+// It returns an empty string when Faire did not provide either value.
+func shippingBusinessOrRecipientName(address *faire.Address) string {
+	if address == nil {
+		return ""
+	}
+	if companyName := optionalString(address.CompanyName); companyName != "" {
+		return companyName
+	}
+	return optionalString(address.Name)
 }
 
 // orderTotal derives raw total minor units and currency from items for the Orders table projection.
