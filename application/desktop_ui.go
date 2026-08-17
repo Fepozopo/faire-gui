@@ -51,6 +51,7 @@ type DesktopUI struct {
 	ordersStore                ordersstore.Store
 	ordersState                orders.State
 	ordersRequestID            uint64
+	ordersDataStatusRequestID  uint64
 	detailRequestID            uint64
 	exportRequestID            uint64
 	ordersSearchActive         bool
@@ -86,8 +87,6 @@ type DesktopUI struct {
 	closeConnectionPicker           widget.Clickable
 	addConnectionButton             widget.Clickable
 	refreshOrdersButton             widget.Clickable
-	rebuildOrdersButton             widget.Clickable
-	deleteLocalOrdersButton         widget.Clickable
 	confirmOrdersDataAction         widget.Clickable
 	cancelOrdersDataAction          widget.Clickable
 	openSelectedOrderButton         widget.Clickable
@@ -146,10 +145,12 @@ type DesktopUI struct {
 // connectionRowControls owns persistent click state for one saved-connection row.
 // Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity.
 type connectionRowControls struct {
-	selectProfile widget.Clickable
-	editMetadata  widget.Clickable
-	replaceToken  widget.Clickable
-	delete        widget.Clickable
+	selectProfile    widget.Clickable
+	rebuildLocalData widget.Clickable
+	deleteLocalData  widget.Clickable
+	editMetadata     widget.Clickable
+	replaceToken     widget.Clickable
+	delete           widget.Clickable
 }
 
 // deleteDialogState describes the metadata-only saved connection whose deletion awaits confirmation.
@@ -158,10 +159,11 @@ type deleteDialogState struct {
 	connection connections.Connection
 }
 
-// ordersDataDialogState describes an explicitly confirmed local-only Orders cache action.
+// ordersDataDialogState describes an explicitly confirmed local-only Orders cache action for one immutable connection ID.
 type ordersDataDialogState struct {
-	open    bool
-	rebuild bool
+	open         bool
+	rebuild      bool
+	connectionID string
 }
 
 // profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.

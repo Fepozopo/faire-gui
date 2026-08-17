@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"gioui.org/layout"
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
@@ -317,12 +318,19 @@ func (ui *DesktopUI) publishOrderResult(result orderLoadResult) {
 }
 
 // drainOrderResults applies only the latest local-query or synchronization result, protecting current controls from stale work.
+// Rebuilds launched from Brand Profile also mirror their matching progress and completion status into that page's status area.
 func (ui *DesktopUI) drainOrderResults() {
 	for {
 		select {
 		case result := <-ui.orderResults:
 			if result.RequestID != ui.ordersRequestID {
 				continue
+			}
+			if result.RequestID == ui.ordersDataStatusRequestID {
+				ui.status = result.Status
+				if !result.KeepLoading {
+					ui.ordersDataStatusRequestID = 0
+				}
 			}
 			ui.ordersState.Loading = result.KeepLoading
 			if !result.ApplyRows {
@@ -476,24 +484,35 @@ func (ui *DesktopUI) drainOrderDetailResults() {
 	}
 }
 
-// requestOrdersDataAction opens explicit confirmation for a local-only delete or delete-and-rebuild operation.
-func (ui *DesktopUI) requestOrdersDataAction(rebuild bool) {
-	if ui.activeConnectionID == "" || ui.ordersStore == nil {
-		ui.ordersState.Status = "Choose an active saved connection before managing local order data."
+// requestOrdersDataAction opens explicit confirmation for a connection-scoped local-data delete or rebuild operation.
+// connectionID comes from the clicked Brand Profile card, preventing an action from affecting another connection's cached orders.
+func (ui *DesktopUI) requestOrdersDataAction(connectionID string, rebuild bool) {
+	if connectionID == "" || ui.ordersStore == nil {
+		ui.status = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
 		return
 	}
-	ui.ordersDataDialog = ordersDataDialogState{open: true, rebuild: rebuild}
+	ui.ordersDataDialog = ordersDataDialogState{open: true, rebuild: rebuild, connectionID: connectionID}
 }
 
-// startOrdersDataAction deletes only the active connection's private cached orders and optionally starts a fresh bootstrap.
-func (ui *DesktopUI) startOrdersDataAction(rebuild bool) {
-	if ui.ordersStore == nil || ui.activeConnectionID == "" {
+// startOrdersDataAction deletes only connectionID's private cached orders and optionally starts a fresh bootstrap.
+// It resets the Brand Profile list before work starts so the user can see status feedback; active-connection work continues through the Orders result channel.
+func (ui *DesktopUI) startOrdersDataAction(connectionID string, rebuild bool) {
+	if ui.ordersStore == nil || connectionID == "" {
 		return
 	}
+	// The status area is above the connection cards, so return there before the confirmation closes and background work begins.
+	ui.brandsList.Position = layout.Position{}
 	ui.ordersDataDialog = ordersDataDialogState{}
+	ui.status = "Removing locally stored order data…"
+	if connectionID != ui.activeConnectionID {
+		ui.ordersDataStatusRequestID = 0
+		ui.startInactiveOrdersDataAction(connectionID, rebuild)
+		return
+	}
 	ui.ordersRequestID++
 	requestID := ui.ordersRequestID
-	connectionID, store, manager, state := ui.activeConnectionID, ui.ordersStore, ui.manager, ui.ordersState
+	ui.ordersDataStatusRequestID = requestID
+	store, manager, state := ui.ordersStore, ui.manager, ui.ordersState
 	state.Cursor = ""
 	ui.ordersState.Rows = nil
 	ui.ordersState.Cursor = ""
@@ -511,6 +530,42 @@ func (ui *DesktopUI) startOrdersDataAction(rebuild bool) {
 			return
 		}
 		ui.loadOrders(requestID, connectionID, state, false, true, true, false, store, manager)
+	}()
+}
+
+// startInactiveOrdersDataAction performs a local-data action for a Brand Profile card that is not currently active in Orders.
+// It avoids replacing the active Orders table while still using the same connection-scoped store and all-pages synchronization workflow.
+func (ui *DesktopUI) startInactiveOrdersDataAction(connectionID string, rebuild bool) {
+	ui.status = "Removing locally stored order data…"
+	store, manager := ui.ordersStore, ui.manager
+	go func() {
+		if err := store.DeleteConnectionData(ui.ctx, connectionID); err != nil {
+			ui.publishProfileResult(ordersStorageErrorMessage(err))
+			return
+		}
+		if !rebuild {
+			ui.publishProfileResult("Deleted locally stored order data for this connection.")
+			return
+		}
+		if manager == nil {
+			ui.publishProfileResult("Saved connections are unavailable. Local order data was deleted but could not be rebuilt.")
+			return
+		}
+		client, _, err := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
+		if err != nil {
+			ui.publishProfileResult(ordersLoadErrorMessage(err))
+			return
+		}
+		syncer, err := orderssync.New(store, orderssync.SourceFunc(client.Orders.List), orderssync.Config{})
+		if err != nil {
+			ui.publishProfileResult("Orders could not be synchronized. Try refreshing later.")
+			return
+		}
+		if _, err := syncer.Sync(ui.ctx, connectionID); err != nil {
+			ui.publishProfileResult(ordersLoadErrorMessage(err))
+			return
+		}
+		ui.publishProfileResult("Local order data was rebuilt for this connection.")
 	}()
 }
 

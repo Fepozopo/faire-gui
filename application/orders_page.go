@@ -107,14 +107,6 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.openSelectedOrder()
 		ui.invalidate()
 	}
-	if ui.rebuildOrdersButton.Clicked(gtx) {
-		ui.requestOrdersDataAction(true)
-		ui.invalidate()
-	}
-	if ui.deleteLocalOrdersButton.Clicked(gtx) {
-		ui.requestOrdersDataAction(false)
-		ui.invalidate()
-	}
 
 	if ui.stateFilterButton.Clicked(gtx) {
 		ui.pendingStates = copyIncludedStates(ui.ordersState.IncludedStates)
@@ -193,7 +185,7 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders selection, dedicated detail navigation, export, and local-data actions on a muted toolbar.
+// layoutOrderActionBar renders selection, dedicated detail navigation, and export actions on a muted toolbar.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -208,10 +200,6 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 					layout.Rigid(primaryButton(ui.theme, &ui.openSelectedOrderButton, "Open selected")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.exportMenuButton, "Export")),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
-					layout.Rigid(primaryButton(ui.theme, &ui.rebuildOrdersButton, "Rebuild local data")),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(primaryButton(ui.theme, &ui.deleteLocalOrdersButton, "Delete local data")),
 				)
 			})
 		},
@@ -294,7 +282,7 @@ func (ui *DesktopUI) layoutOrdersDataModal(gtx layout.Context) layout.Dimensions
 		ui.invalidate()
 	}
 	if ui.confirmOrdersDataAction.Clicked(gtx) {
-		ui.startOrdersDataAction(ui.ordersDataDialog.rebuild)
+		ui.startOrdersDataAction(ui.ordersDataDialog.connectionID, ui.ordersDataDialog.rebuild)
 		ui.invalidate()
 	}
 	action := "Delete local order data"
