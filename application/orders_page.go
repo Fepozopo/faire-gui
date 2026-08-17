@@ -21,6 +21,7 @@ import (
 func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 	ui.handleOrdersControls(gtx)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(ui.layoutOrdersStatus),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(material.H3(ui.theme, "Orders").Layout),
@@ -33,6 +34,14 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Flexed(1, ui.layoutOrdersWorkspace),
 	)
+}
+
+// layoutOrdersStatus renders credential-safe loading, success, and error feedback above the Orders title.
+func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
+	if ui.ordersState.Status == "" {
+		return layout.Dimensions{}
+	}
+	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, bodyText(ui.theme, ui.ordersState.Status, mutedTextColor))
 }
 
 // layoutOrdersWorkspace groups the tabs, controls, selection bar, and table in one bordered Orders surface.
@@ -381,16 +390,11 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 	})
 }
 
-// layoutOrdersFooter displays safe status feedback and appends another API page without clearing selection.
+// layoutOrdersFooter appends another local table page or an empty-result message without duplicating the page-level status.
 func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 	return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(12), Bottom: unit.Dp(14), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{}
-		if ui.ordersState.Status != "" {
-			children = append(children, layout.Rigid(bodyText(ui.theme, ui.ordersState.Status, mutedTextColor)))
-		}
-		if ui.ordersState.Loading {
-			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "Loading…", mutedTextColor)))
-		} else if ui.ordersState.Cursor != "" && !ui.ordersSearchActive {
+		if !ui.ordersState.Loading && ui.ordersState.Cursor != "" && !ui.ordersSearchActive {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), layout.Rigid(primaryButton(ui.theme, &ui.loadMoreOrdersButton, "Load more")))
 		} else if len(ui.ordersState.Rows) == 0 && ui.ordersState.Loaded {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "No orders match these filters.", mutedTextColor)))
