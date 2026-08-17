@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 6
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -19,6 +19,9 @@ var migrations = []migration{
 	{version: 1, apply: applyMigrationOne},
 	{version: 2, apply: applyMigrationTwo},
 	{version: 3, apply: applyMigrationThree},
+	{version: 4, apply: applyMigrationFour},
+	{version: 5, apply: applyMigrationFive},
+	{version: 6, apply: applyMigrationSix},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -58,6 +61,69 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationSix removes the legacy formatted table projections after every cache has raw replacements.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationSix(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range []string{
+		`ALTER TABLE orders DROP COLUMN total_display`,
+		`ALTER TABLE orders DROP COLUMN commission_display`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigrationFive adds raw numeric Orders-table projections and backfills them from valid cached snapshots.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationFive(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range []string{
+		`ALTER TABLE orders ADD COLUMN total_amount_minor INTEGER NULL`,
+		`ALTER TABLE orders ADD COLUMN total_currency TEXT NULL`,
+		`ALTER TABLE orders ADD COLUMN commission_bps INTEGER NULL`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	// Rebuild typed projections from snapshots so cached rows remain usable before their next remote synchronization.
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET
+		total_amount_minor = CASE WHEN json_valid(order_snapshot_json) THEN (
+			SELECT CASE WHEN COUNT(*) > 0 AND COUNT(DISTINCT currency) = 1 THEN SUM(amount_minor) END
+			FROM (
+				SELECT (CASE WHEN json_extract(item.value, '$.price.amount_minor') IS NOT NULL AND COALESCE(json_extract(item.value, '$.price.currency'), '') <> '' THEN json_extract(item.value, '$.price.amount_minor') ELSE json_extract(item.value, '$.price_cents') END) * COALESCE(json_extract(item.value, '$.quantity'), 1) AS amount_minor,
+					CASE WHEN json_extract(item.value, '$.price.amount_minor') IS NOT NULL AND COALESCE(json_extract(item.value, '$.price.currency'), '') <> '' THEN json_extract(item.value, '$.price.currency') ELSE 'USD' END AS currency
+				FROM json_each(orders.order_snapshot_json, '$.items') AS item
+				WHERE (json_extract(item.value, '$.price.amount_minor') IS NOT NULL AND COALESCE(json_extract(item.value, '$.price.currency'), '') <> '') OR json_extract(item.value, '$.price_cents') IS NOT NULL
+			)
+		) END,
+		total_currency = CASE WHEN json_valid(order_snapshot_json) THEN (
+			SELECT CASE WHEN COUNT(*) > 0 AND COUNT(DISTINCT currency) = 1 THEN MIN(currency) END
+			FROM (
+				SELECT CASE WHEN json_extract(item.value, '$.price.amount_minor') IS NOT NULL AND COALESCE(json_extract(item.value, '$.price.currency'), '') <> '' THEN json_extract(item.value, '$.price.currency') ELSE 'USD' END AS currency
+				FROM json_each(orders.order_snapshot_json, '$.items') AS item
+				WHERE (json_extract(item.value, '$.price.amount_minor') IS NOT NULL AND COALESCE(json_extract(item.value, '$.price.currency'), '') <> '') OR json_extract(item.value, '$.price_cents') IS NOT NULL
+			)
+		) END,
+		commission_bps = CASE WHEN json_valid(order_snapshot_json) THEN json_extract(order_snapshot_json, '$.payout_costs.commission_bps') END`)
+	return err
+}
+
+// applyMigrationFour replaces cached commission amounts with Faire's commission_bps percentage projection.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationFour(ctx context.Context, tx *sql.Tx) error {
+	// Existing cached snapshots already retain commission_bps, so rewrite the table-only display value without another API request.
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET commission_display = CASE
+		WHEN json_valid(order_snapshot_json) THEN CASE
+			WHEN json_extract(order_snapshot_json, '$.payout_costs.commission_bps') IS NOT NULL THEN printf('%.2f%%', json_extract(order_snapshot_json, '$.payout_costs.commission_bps') * 0.01)
+			ELSE NULL
+		END
+		ELSE NULL
+	END`)
+	return err
 }
 
 // applyMigrationThree adds the delivery-address list projection and restores it from valid private snapshots.

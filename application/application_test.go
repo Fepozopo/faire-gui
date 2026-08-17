@@ -405,11 +405,12 @@ func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
 	}
 }
 
-// TestLocalRowsUseStoredDeliveryAddressName verifies cached table rows use the persisted delivery address rather than customer data.
-func TestLocalRowsUseStoredDeliveryAddressName(t *testing.T) {
-	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques"}})
-	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" {
-		t.Fatalf("localRows() = %#v, want delivery address name", rows)
+// TestLocalRowsFormatRawDeliveryAndFinancialValues verifies cached table rows format raw delivery, total, and commission values only at presentation time.
+func TestLocalRowsFormatRawDeliveryAndFinancialValues(t *testing.T) {
+	total, commissionBPS := int64(1234), int64(1500)
+	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalAmountMinor: &total, TotalCurrency: "USD", CommissionBPS: &commissionBPS}})
+	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].Total != "$12.34" || rows[0].Commission != "15.00%" {
+		t.Fatalf("localRows() = %#v, want formatted raw values", rows)
 	}
 }
 

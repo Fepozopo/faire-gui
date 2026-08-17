@@ -289,8 +289,9 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		State:                 row.state,
 		CustomerName:          row.customer,
 		AddressName:           row.addressName,
-		TotalDisplay:          row.total,
-		CommissionDisplay:     row.commission,
+		TotalAmountMinor:      row.totalAmountMinor,
+		TotalCurrency:         row.totalCurrency,
+		CommissionBPS:         row.commissionBPS,
 		Source:                row.source,
 		CreatedAtUTC:          optionalTimestamp(order.CreatedAt),
 		ExpectedShipAtUTC:     firstTimestamp(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter),
@@ -301,18 +302,19 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 	}, nil
 }
 
-// projection contains storage-owned list values, including the delivery address name, derived atomically from a remote Order.
+// projection contains storage-owned raw list values, including total minor units, commission BPS, and the delivery address name, derived atomically from a remote Order.
 type projection struct {
-	displayID   string
-	state       string
-	customer    string
-	addressName string
-	total       string
-	commission  string
-	source      string
+	displayID        string
+	state            string
+	customer         string
+	addressName      string
+	totalAmountMinor *int64
+	totalCurrency    string
+	commissionBPS    *int64
+	source           string
 }
 
-// projectOrder derives list columns, including the delivery address name, from order without exposing a raw Order outside the worker.
+// projectOrder derives raw list columns, including total minor units, commission BPS, and the delivery address name, from order without exposing a raw Order outside the worker.
 // It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
@@ -328,16 +330,17 @@ func projectOrder(order faire.Order) projection {
 	if order.Address != nil {
 		value.addressName = optionalString(order.Address.Name)
 	}
-	value.total = orderTotal(order.Items)
-	value.commission = commission(order.PayoutCosts)
+	value.totalAmountMinor, value.totalCurrency = orderTotal(order.Items)
+	value.commissionBPS = commissionBPS(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
 	}
 	return value
 }
 
-// orderTotal produces the stable storage projection used by the existing Orders table.
-func orderTotal(items []faire.OrderItem) string {
+// orderTotal derives raw total minor units and currency from items for the Orders table projection.
+// It returns nil and an empty currency when no price exists or currencies are mixed.
+func orderTotal(items []faire.OrderItem) (*int64, string) {
 	var amount int64
 	currency := ""
 	found := false
@@ -360,38 +363,25 @@ func orderTotal(items []faire.OrderItem) string {
 			currency = itemCurrency
 		}
 		if currency != itemCurrency {
-			return ""
+			return nil, ""
 		}
 		amount += itemAmount
 		found = true
 	}
 	if !found {
-		return ""
+		return nil, ""
 	}
-	return formatMoney(amount, currency)
+	return &amount, currency
 }
 
-// commission derives the stored commission display from modern or legacy Faire payout fields.
-func commission(costs *faire.PayoutCosts) string {
-	if costs == nil {
-		return ""
+// commissionBPS copies Faire's raw commission_bps field from costs for the Orders table projection.
+// It returns nil when the API did not provide a commission percentage.
+func commissionBPS(costs *faire.PayoutCosts) *int64 {
+	if costs == nil || costs.CommissionBPS == nil {
+		return nil
 	}
-	if costs.Commission != nil && costs.Commission.AmountMinor != nil && costs.Commission.Currency != nil && *costs.Commission.Currency != "" {
-		return formatMoney(*costs.Commission.AmountMinor, *costs.Commission.Currency)
-	}
-	if costs.CommissionCents != nil {
-		return formatMoney(*costs.CommissionCents, "USD")
-	}
-	return ""
-}
-
-// formatMoney formats a minor-unit amount consistently with the existing Orders list.
-func formatMoney(amount int64, currency string) string {
-	sign := ""
-	if amount < 0 {
-		sign, amount = "-", -amount
-	}
-	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amount/100, amount%100)
+	value := *costs.CommissionBPS
+	return &value
 }
 
 // optionalString returns trimmed optional text for storage projections.

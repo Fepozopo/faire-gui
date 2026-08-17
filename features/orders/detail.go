@@ -88,7 +88,7 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		Shipments:           presentDetailShipments(order.Shipments),
 		ShippingAddress:     presentDetailAddress(order.Address),
 		Total:               formatOrderTotal(order.Items),
-		Commission:          formatCommission(order.PayoutCosts),
+		Commission:          formatCommissionAmount(order.PayoutCosts),
 		IsFreeShipping:      detailBoolean(order.IsFreeShipping),
 		PendingCancellation: detailBoolean(order.HasPendingRetailerCancellationRequest),
 		FulfilledByFaire:    detailBoolean(order.IsFulfilledByFaire),

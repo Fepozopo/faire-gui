@@ -7,7 +7,7 @@ import (
 )
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
-// including the delivery address name in the Customer column.
+// including the delivery address name and commission percentage in their respective table columns.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
@@ -22,6 +22,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	amount := int64(1234)
 	currency := "usd"
 	commission := int64(250)
+	commissionBPS := int64(1500)
 	order := faire.Order{
 		ID:               &id,
 		DisplayID:        &displayID,
@@ -31,7 +32,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ExpectedShipDate: &expectedShipDate,
 		Source:           &source,
 		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
-		PayoutCosts:      &faire.PayoutCosts{CommissionCents: &commission},
+		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission},
 		// Both fields are present to verify the address name takes precedence in the table.
 		Address:             &faire.Address{Name: &addressName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Do not expose this"),
@@ -44,10 +45,10 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		DisplayID:  displayID,
 		Status:     "In transit",
 		Customer:   addressName,
-		Total:      "USD 24.68",
+		Total:      "$24.68",
 		OrderDate:  "2026-01-02",
 		ShipDate:   "2026-01-03",
-		Commission: "USD 2.50",
+		Commission: "15.00%",
 		Source:     source,
 	}
 	if row != want {
@@ -81,8 +82,19 @@ func TestPresentRowUsesDateFallbackAndLegacyItemPrice(t *testing.T) {
 	if row.ShipDate != requestedShipDate {
 		t.Fatalf("ShipDate = %q, want %q", row.ShipDate, requestedShipDate)
 	}
-	if row.Total != "USD 29.97" {
-		t.Fatalf("Total = %q, want %q", row.Total, "USD 29.97")
+	if row.Total != "$29.97" {
+		t.Fatalf("Total = %q, want %q", row.Total, "$29.97")
+	}
+}
+
+// TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise verifies the table's unambiguous total formatting policy.
+func TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise(t *testing.T) {
+	amount := int64(1234)
+	if value := FormatTotal(&amount, "usd"); value != "$12.34" {
+		t.Fatalf("USD total = %q, want $12.34", value)
+	}
+	if value := FormatTotal(&amount, "EUR"); value != "EUR 12.34" {
+		t.Fatalf("EUR total = %q, want EUR 12.34", value)
 	}
 }
 

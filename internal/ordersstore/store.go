@@ -22,8 +22,9 @@ var ErrCorruptData = errors.New("orders store: corrupt local data")
 const SnapshotSchemaVersion = 1
 
 // OrderRecord is one atomic, connection-scoped Orders snapshot and its indexed list projection.
+// Its projection includes raw total and commission values plus the delivery address.
 // SnapshotJSON retains every supported typed Order field, including nested fulfillment,
-// address, payout, and retailer data, and must never contain credentials or HTTP metadata.
+// payout, and retailer data, and must never contain credentials or HTTP metadata.
 type OrderRecord struct {
 	ConnectionID          string
 	OrderID               string
@@ -31,8 +32,9 @@ type OrderRecord struct {
 	State                 string
 	CustomerName          string
 	AddressName           string
-	TotalDisplay          string
-	CommissionDisplay     string
+	TotalAmountMinor      *int64
+	TotalCurrency         string
+	CommissionBPS         *int64
 	Source                string
 	CreatedAtUTC          *time.Time
 	ExpectedShipAtUTC     *time.Time
@@ -43,7 +45,7 @@ type OrderRecord struct {
 }
 
 // LocalRow is the safe indexed projection needed to present one Orders table row.
-// It includes the delivery address name needed by the Customer column while excluding
+// It includes the delivery address name, raw total values, and raw commission BPS while excluding
 // the complete snapshot and the remaining private nested fields.
 type LocalRow struct {
 	OrderID           string
@@ -51,8 +53,9 @@ type LocalRow struct {
 	State             string
 	CustomerName      string
 	AddressName       string
-	TotalDisplay      string
-	CommissionDisplay string
+	TotalAmountMinor  *int64
+	TotalCurrency     string
+	CommissionBPS     *int64
 	Source            string
 	CreatedAtUTC      *time.Time
 	ExpectedShipAtUTC *time.Time

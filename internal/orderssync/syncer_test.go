@@ -33,6 +33,10 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	if !summary.Bootstrap || summary.Orders != 2 {
 		t.Fatalf("Summary = %#v, want bootstrap with two orders", summary)
 	}
+	page, err := store.List(ctx, ordersstore.ListQuery{ConnectionID: "connection-a", Limit: 2})
+	if err != nil || len(page.Rows) != 2 || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
+		t.Fatalf("stored raw commission BPS = %#v, err=%v", page, err)
+	}
 	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" || options[1].Limit != nil || options[1].Page != nil || options[1].UpdatedAtMin != nil || options[1].CreatedAtMin != nil || options[1].SortBy != nil || options[1].ExcludedStates != nil || options[1].ShipAfterMax != nil || options[1].OriginalOrderID != nil {
 		t.Fatalf("sync options = %#v", options)
 	}
@@ -214,11 +218,12 @@ func newTestSyncer(t *testing.T, store ordersstore.Store, source Source, now tim
 	return syncer
 }
 
-// syncOrder returns a minimal valid typed Faire order for synchronization tests.
+// syncOrder returns a minimal valid typed Faire order with a commission percentage for synchronization tests.
 func syncOrder(id string, updatedAt time.Time) faire.Order {
 	orderID := faire.OrderID(id)
 	displayID := "DISPLAY-" + id
 	createdAt := updatedAt.Add(-time.Hour).Format(time.RFC3339Nano)
 	updated := updatedAt.Format(time.RFC3339Nano)
-	return faire.Order{ID: &orderID, DisplayID: &displayID, CreatedAt: &createdAt, UpdatedAt: &updated}
+	commissionBPS := int64(1500)
+	return faire.Order{ID: &orderID, DisplayID: &displayID, CreatedAt: &createdAt, UpdatedAt: &updated, PayoutCosts: &faire.PayoutCosts{CommissionBPS: &commissionBPS}}
 }

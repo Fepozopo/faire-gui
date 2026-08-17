@@ -9,7 +9,7 @@ import (
 )
 
 // Row is the display-ready data for one Orders table row. It includes the delivery
-// address name for the Customer column, while excluding other address details,
+// address name and the commission percentage, while excluding other address details,
 // notes, tracking details, and raw-order fields not needed by the list.
 type Row struct {
 	ID         faire.OrderID
@@ -35,7 +35,7 @@ func PresentRows(orders []faire.Order) []Row {
 }
 
 // PresentRow converts a Faire order into table values, including the delivery
-// address name in the Customer column. Missing optional fields use an em dash so
+// address name and Faire's commission percentage. Missing optional fields use an em dash so
 // table columns remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
@@ -46,7 +46,7 @@ func PresentRow(order faire.Order) Row {
 		Total:      formatOrderTotal(order.Items),
 		OrderDate:  formatDate(order.CreatedAt),
 		ShipDate:   formatDate(firstDate(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter)),
-		Commission: formatCommission(order.PayoutCosts),
+		Commission: FormatCommissionPercentage(commissionBPS(order.PayoutCosts)),
 		Source:     optionalText(order.Source),
 	}
 }
@@ -123,8 +123,8 @@ func displayCustomer(customer *faire.Customer) string {
 	return strings.Join(parts, " ")
 }
 
-// formatOrderTotal totals item price values. Modern Money data takes precedence;
-// price_cents is used only as a legacy fallback when Money is unavailable.
+// formatOrderTotal totals item price values and returns the Orders-table total label. Modern Money data takes precedence;
+// price_cents is used only as a legacy fallback when Money is unavailable, and mixed currencies return the missing-value placeholder.
 func formatOrderTotal(items []faire.OrderItem) string {
 	var amountMinor int64
 	currency := ""
@@ -147,7 +147,29 @@ func formatOrderTotal(items []faire.OrderItem) string {
 	if !foundAmount {
 		return "—"
 	}
-	return formatMoney(amountMinor, currency)
+	return formatTotalAmount(amountMinor, currency)
+}
+
+// FormatTotal converts raw total minor units and currency into the Orders-table label.
+// It returns the standard missing-value placeholder when either raw value is unavailable.
+func FormatTotal(amountMinor *int64, currency string) string {
+	if amountMinor == nil || strings.TrimSpace(currency) == "" {
+		return "—"
+	}
+	return formatTotalAmount(*amountMinor, currency)
+}
+
+// formatTotalAmount formats amountMinor for a total, using $ for USD and an ISO currency code otherwise.
+// It returns the resulting signed total label.
+func formatTotalAmount(amountMinor int64, currency string) string {
+	sign := ""
+	if amountMinor < 0 {
+		sign, amountMinor = "-", -amountMinor
+	}
+	if strings.EqualFold(currency, "USD") {
+		return fmt.Sprintf("%s$%d.%02d", sign, amountMinor/100, amountMinor%100)
+	}
+	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amountMinor/100, amountMinor%100)
 }
 
 // itemAmount returns a line item's monetary value multiplied by its quantity.
@@ -165,9 +187,27 @@ func itemAmount(item faire.OrderItem) (int64, string, bool) {
 	return 0, "", false
 }
 
-// formatCommission formats the explicit commission Money when present and falls
-// back to the legacy cents field for older API responses.
-func formatCommission(costs *faire.PayoutCosts) string {
+// FormatCommissionPercentage converts Faire's raw commission BPS to an Orders-table percentage.
+// It returns the standard missing-value placeholder when bps is unavailable.
+func FormatCommissionPercentage(bps *int64) string {
+	if bps == nil {
+		return "—"
+	}
+	return formatPercentageFromBPS(*bps)
+}
+
+// commissionBPS returns a copy of the raw commission_bps value in costs for table presentation.
+func commissionBPS(costs *faire.PayoutCosts) *int64 {
+	if costs == nil || costs.CommissionBPS == nil {
+		return nil
+	}
+	value := *costs.CommissionBPS
+	return &value
+}
+
+// formatCommissionAmount formats the explicit commission Money in costs for the order detail page.
+// It falls back to the legacy cents field and returns the standard missing-value placeholder when neither is present.
+func formatCommissionAmount(costs *faire.PayoutCosts) string {
 	if costs == nil {
 		return "—"
 	}
@@ -178,6 +218,16 @@ func formatCommission(costs *faire.PayoutCosts) string {
 		return formatMoney(*costs.CommissionCents, "USD")
 	}
 	return "—"
+}
+
+// formatPercentageFromBPS converts value basis points to a signed percentage with two decimal places.
+// It returns the resulting percentage label.
+func formatPercentageFromBPS(value int64) string {
+	sign := ""
+	if value < 0 {
+		sign, value = "-", -value
+	}
+	return fmt.Sprintf("%s%d.%02d%%", sign, value/100, value%100)
 }
 
 // formatMoney produces a locale-independent currency code and two decimal places,

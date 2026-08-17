@@ -662,7 +662,7 @@ func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID st
 	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, UpdatedAtMin: updatedAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
 }
 
-// localRows converts source storage projections, including delivery-address table values, to safe table presentation rows outside the frame loop.
+// localRows converts source storage projections, including raw totals and commission BPS, to safe table presentation rows outside the frame loop.
 // It returns one presentation row per source record.
 func localRows(source []ordersstore.LocalRow) []orders.Row {
 	rows := make([]orders.Row, len(source))
@@ -670,12 +670,8 @@ func localRows(source []ordersstore.LocalRow) []orders.Row {
 		id := faire.OrderID(sourceRow.OrderID)
 		order := faire.Order{ID: &id, DisplayID: optionalPointer(sourceRow.DisplayID), State: optionalOrderState(sourceRow.State), Address: optionalAddress(sourceRow.AddressName), CreatedAt: formatTimestampPointer(sourceRow.CreatedAtUTC), ExpectedShipDate: formatTimestampPointer(sourceRow.ExpectedShipAtUTC), Source: optionalPointer(sourceRow.Source)}
 		row := orders.PresentRow(order)
-		if sourceRow.TotalDisplay != "" {
-			row.Total = sourceRow.TotalDisplay
-		}
-		if sourceRow.CommissionDisplay != "" {
-			row.Commission = sourceRow.CommissionDisplay
-		}
+		row.Total = orders.FormatTotal(sourceRow.TotalAmountMinor, sourceRow.TotalCurrency)
+		row.Commission = orders.FormatCommissionPercentage(sourceRow.CommissionBPS)
 		rows[index] = row
 	}
 	return rows

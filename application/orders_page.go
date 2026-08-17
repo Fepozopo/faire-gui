@@ -361,7 +361,7 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		ui.invalidate()
 	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission", "Source"}, true, ui.allVisibleOrdersSelected())
+		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
