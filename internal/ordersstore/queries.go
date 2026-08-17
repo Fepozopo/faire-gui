@@ -80,6 +80,19 @@ func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, erro
 	return page, nil
 }
 
+// CountByState returns the number of locally stored orders for connectionID whose state exactly matches state.
+// It uses the connection-and-state index so tab badges do not require loading snapshots or table pages.
+func (s *SQLiteStore) CountByState(ctx context.Context, connectionID, state string) (int, error) {
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(state) == "" {
+		return 0, fmt.Errorf("connection ID and state: %w", ErrInvalidRecord)
+	}
+	var count int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE connection_id = ? AND state = ?`, connectionID, state).Scan(&count); err != nil {
+		return 0, classifyError(err)
+	}
+	return count, nil
+}
+
 // localSortColumn maps the closed storage-owned sort set to a trusted SQLite column name.
 func localSortColumn(column LocalSortColumn) (string, error) {
 	switch column {

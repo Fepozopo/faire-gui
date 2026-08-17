@@ -59,7 +59,7 @@ type State struct {
 }
 
 // NewState returns an orders state that initially includes all supported orders,
-// starts at the 90-day updated-order lookback, uses Faire's supported update-time
+// starts at the 30-day updated-order lookback, uses Faire's supported update-time
 // ordering, and locally orders rows by newest order date. Its initialized maps allow
 // selection and filter updates without special handling by callers.
 func NewState() State {
@@ -67,7 +67,7 @@ func NewState() State {
 }
 
 // NewStateAt returns a new orders state using now and location for its default
-// 90-day updated-order lookback. It initializes local table sorting to newest
+// 30-day updated-order lookback. It initializes local table sorting to newest
 // order date first, allowing callers and tests to use the same default UI state.
 func NewStateAt(now time.Time, location *time.Location) State {
 	_, updatedAtMin := DefaultUpdatedAtMinimum(now, location)

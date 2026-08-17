@@ -8,10 +8,10 @@ import (
 
 const (
 	dateInputLayout              = "1/2/2006"
-	defaultUpdatedAtLookbackDays = 90
+	defaultUpdatedAtLookbackDays = 30
 )
 
-// DefaultUpdatedAtMinimum returns the 90-day lookback as a date-field value and
+// DefaultUpdatedAtMinimum returns the 30-day lookback as a date-field value and
 // its equivalent RFC 3339 start-of-day timestamp in location. now supplies the
 // reference time; a nil location uses the local timezone, matching date filters
 // submitted from the desktop UI.

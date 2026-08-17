@@ -106,7 +106,7 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
 	if !ui.updatedAtMinEditor.SingleLine || ui.updatedAtMinEditor.Text() == "" || ui.ordersState.Query.UpdatedAtMin == "" {
-		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 90-day lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
+		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 30-day lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
 	}
 }
 
@@ -421,6 +421,22 @@ func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
 	}
 }
 
+// TestDrainOrderDetailResultsUpdatesNewOrderCount verifies an accepted detail refresh updates the New tab badge.
+func TestDrainOrderDetailResultsUpdatesNewOrderCount(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-a"
+	ui.detailRequestID = 1
+	ui.orderDetailID = faire.OrderID("order-a")
+	ui.orderDetailLoading = true
+	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "ORDER-A"}, NewOrdersCount: 2, ApplyNewOrdersCount: true}
+
+	ui.drainOrderDetailResults()
+
+	if ui.newOrdersCount != 2 || ui.orderDetail.DisplayID != "ORDER-A" || ui.orderDetailLoading {
+		t.Fatalf("detail result application = {newOrdersCount:%d detail:%#v loading:%t}, want count 2, ORDER-A, and completed loading", ui.newOrdersCount, ui.orderDetail, ui.orderDetailLoading)
+	}
+}
+
 // TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe verifies invalid sync feedback identifies only a safe phase.
 func TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe(t *testing.T) {
 	message := ordersLoadErrorMessage(&orderssync.ListError{Phase: orderssync.ListPhaseHistory, Cursor: true, Err: &faire.APIError{StatusCode: 400, Body: "private response"}})
@@ -440,6 +456,21 @@ func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
 
 	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.UpdatedAtMin != boundary || ui.updatedAtMinEditor.Text() != historyBoundaryInput(boundary) {
 		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.UpdatedAtMin, ui.updatedAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
+	}
+}
+
+// TestDrainOrderResultsUpdatesNewOrderCount verifies only the latest eligible Orders result can replace the New tab badge.
+func TestDrainOrderResultsUpdatesNewOrderCount(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 2
+	ui.newOrdersCount = 3
+	ui.orderResults <- orderLoadResult{RequestID: 1, NewOrdersCount: 99, ApplyNewOrdersCount: true}
+	ui.orderResults <- orderLoadResult{RequestID: 2, NewOrdersCount: 4, ApplyNewOrdersCount: true}
+
+	ui.drainOrderResults()
+
+	if ui.newOrdersCount != 4 {
+		t.Fatalf("newOrdersCount = %d, want 4", ui.newOrdersCount)
 	}
 }
 

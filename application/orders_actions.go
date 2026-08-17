@@ -21,26 +21,49 @@ import (
 )
 
 // orderLoadResult carries one credential-safe local Orders query or synchronization result to the frame loop.
-// It never holds a client, credentials, raw API response, snapshot, address, or order notes.
+// NewOrdersCount holds the active connection's complete locally stored New-order count when ApplyNewOrdersCount
+// is true. It never holds a client, credentials, raw API response, snapshot, address, or order notes.
 type orderLoadResult struct {
-	RequestID     uint64
-	Append        bool
-	Rows          []orders.Row
-	Cursor        string
-	Status        string
-	ApplyRows     bool
-	KeepLoading   bool
-	UpdatedAtMin  string
-	ApplyBoundary bool
+	RequestID           uint64
+	Append              bool
+	Rows                []orders.Row
+	Cursor              string
+	Status              string
+	ApplyRows           bool
+	KeepLoading         bool
+	UpdatedAtMin        string
+	ApplyBoundary       bool
+	NewOrdersCount      int
+	ApplyNewOrdersCount bool
 }
 
-// orderDetailResult carries one typed local-detail result to the frame loop without exposing its serialized snapshot.
+// newOrdersCount returns the active connection's complete locally stored New-order count.
+// Its boolean result is false when the count query fails, allowing callers to retain successful primary results.
+func newOrdersCount(ctx context.Context, store ordersstore.Store, connectionID string) (int, bool) {
+	// The badge represents all retained New orders, not only rows visible through the current table filters or page.
+	count, err := store.CountByState(ctx, connectionID, string(faire.OrderStateNew))
+	return count, err == nil
+}
+
+// attachNewOrdersCount adds the active connection's complete locally stored New-order count to result.
+// If the independent count query fails, result remains usable so an already successful table read is not discarded.
+func attachNewOrdersCount(ctx context.Context, store ordersstore.Store, connectionID string, result orderLoadResult) orderLoadResult {
+	if count, found := newOrdersCount(ctx, store, connectionID); found {
+		result.NewOrdersCount = count
+		result.ApplyNewOrdersCount = true
+	}
+	return result
+}
+
+// orderDetailResult carries one typed local-detail result and, when available, a New-order badge count to the frame loop without exposing its serialized snapshot.
 type orderDetailResult struct {
-	RequestID    uint64
-	ConnectionID string
-	OrderID      faire.OrderID
-	Detail       orders.Detail
-	Status       string
+	RequestID           uint64
+	ConnectionID        string
+	OrderID             faire.OrderID
+	Detail              orders.Detail
+	Status              string
+	NewOrdersCount      int
+	ApplyNewOrdersCount bool
 }
 
 // localCursorPayload is the non-sensitive worker-only encoding of a local SQLite keyset cursor.
@@ -178,7 +201,7 @@ func (ui *DesktopUI) startOrdersLoad(appendResults, refresh, synchronize bool) {
 	go ui.loadOrders(requestID, connectionID, state, appendResults, refresh, synchronize, restoreBoundary, store, manager)
 }
 
-// loadOrders performs local SQLite reads, optional Faire synchronization, and final local re-queries outside the Gio frame loop.
+// loadOrders performs local SQLite reads, optional Faire synchronization, final local re-queries, and New-order count reads outside the Gio frame loop.
 func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state orders.State, appendResults, refresh, synchronize, restoreBoundary bool, store ordersstore.Store, manager *connections.Manager) {
 	boundary := ""
 	if restoreBoundary {
@@ -198,7 +221,8 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 		return
 	}
 	localResult := func(status string, keepLoading bool) orderLoadResult {
-		return orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
+		result := orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
+		return attachNewOrdersCount(ui.ctx, store, connectionID, result)
 	}
 	if appendResults || !synchronize {
 		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
@@ -287,7 +311,8 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 	go func() {
 		local, localErr := store.FindByDisplayID(ui.ctx, connectionID, displayID)
 		if localErr == nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows([]ordersstore.LocalRow{local}), Status: "Showing the matching locally stored order.", ApplyRows: true})
+			result := orderLoadResult{RequestID: requestID, Rows: localRows([]ordersstore.LocalRow{local}), Status: "Showing the matching locally stored order.", ApplyRows: true}
+			ui.publishOrderResult(attachNewOrdersCount(ui.ctx, store, connectionID, result))
 			return
 		}
 		if !errors.Is(localErr, ordersstore.ErrNotFound) {
@@ -313,7 +338,8 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Order was retrieved but could not be stored locally. Try again later."})
 			return
 		}
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: []orders.Row{orders.PresentRow(*order)}, Status: "Showing the matching order.", ApplyRows: true})
+		result := orderLoadResult{RequestID: requestID, Rows: []orders.Row{orders.PresentRow(*order)}, Status: "Showing the matching order.", ApplyRows: true}
+		ui.publishOrderResult(attachNewOrdersCount(ui.ctx, store, connectionID, result))
 	}()
 }
 
@@ -327,7 +353,7 @@ func (ui *DesktopUI) publishOrderResult(result orderLoadResult) {
 	ui.invalidate()
 }
 
-// drainOrderResults applies only the latest local-query or synchronization result, protecting current controls from stale work.
+// drainOrderResults applies only the latest local-query or synchronization result, including its New-order badge count, protecting current controls from stale work.
 // Rebuilds launched from Brand Profile also mirror their matching progress and completion status into that page's status area.
 func (ui *DesktopUI) drainOrderResults() {
 	for {
@@ -346,6 +372,9 @@ func (ui *DesktopUI) drainOrderResults() {
 				}
 			}
 			ui.ordersState.Loading = result.KeepLoading
+			if result.ApplyNewOrdersCount {
+				ui.newOrdersCount = result.NewOrdersCount
+			}
 			if !result.ApplyRows {
 				ui.ordersState.Status = result.Status
 				continue
@@ -439,7 +468,12 @@ func (ui *DesktopUI) refreshOrderDetail() {
 			ui.publishOrderDetailResult(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
 			return
 		}
-		ui.publishOrderDetailResult(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)})
+		result := orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)}
+		if count, found := newOrdersCount(ui.ctx, store, connectionID); found {
+			result.NewOrdersCount = count
+			result.ApplyNewOrdersCount = true
+		}
+		ui.publishOrderDetailResult(result)
 	}()
 }
 
@@ -476,7 +510,7 @@ func (ui *DesktopUI) publishOrderDetailResult(result orderDetailResult) {
 	ui.invalidate()
 }
 
-// drainOrderDetailResults accepts only results for the current detail request, connection, and selected order.
+// drainOrderDetailResults accepts only results for the current detail request, connection, and selected order, including a refreshed New-order badge count.
 func (ui *DesktopUI) drainOrderDetailResults() {
 	for {
 		select {
@@ -485,6 +519,9 @@ func (ui *DesktopUI) drainOrderDetailResults() {
 				continue
 			}
 			ui.orderDetailLoading = false
+			if result.ApplyNewOrdersCount {
+				ui.newOrdersCount = result.NewOrdersCount
+			}
 			if result.Status != "" {
 				ui.orderDetailStatus = result.Status
 				continue
@@ -549,7 +586,7 @@ func (ui *DesktopUI) startOrdersDataAction(connectionID string, rebuild bool) {
 			return
 		}
 		if !rebuild {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Deleted locally stored order data for this connection."})
+			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Deleted locally stored order data for this connection.", ApplyNewOrdersCount: true})
 			return
 		}
 		ui.loadOrders(requestID, connectionID, state, false, true, true, false, store, manager)

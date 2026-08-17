@@ -59,16 +59,16 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	}
 }
 
-// TestNewStateAtUsesUpdateTimeServerSortAnd90DayLookback verifies the initial
+// TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback verifies the initial
 // server query uses update-time sorting and the default update boundary.
-func TestNewStateAtUsesUpdateTimeServerSortAnd90DayLookback(t *testing.T) {
+func TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback(t *testing.T) {
 	location := time.FixedZone("UTC-05", -5*60*60)
 	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
 	if state.Query.SortBy != faire.OrderSortByUpdatedAt {
 		t.Fatalf("NewStateAt().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByUpdatedAt)
 	}
-	if state.Query.UpdatedAtMin != "2025-12-21T00:00:00-05:00" {
-		t.Fatalf("NewStateAt().Query.UpdatedAtMin = %q, want 90-day lookback", state.Query.UpdatedAtMin)
+	if state.Query.UpdatedAtMin != "2026-02-19T00:00:00-05:00" {
+		t.Fatalf("NewStateAt().Query.UpdatedAtMin = %q, want 30-day lookback", state.Query.UpdatedAtMin)
 	}
 }
 

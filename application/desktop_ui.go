@@ -50,6 +50,7 @@ type DesktopUI struct {
 
 	ordersStore                  ordersstore.Store
 	ordersState                  orders.State
+	newOrdersCount               int
 	ordersRequestID              uint64
 	ordersDataStatusRequestID    uint64
 	ordersDataActionConnectionID string
@@ -230,10 +231,12 @@ func (ui *DesktopUI) configureEditors() {
 	ui.accessTokenEditor.Mask = '•'
 }
 
-// resetOrdersState creates a fresh default order query and synchronizes its
-// 90-day updated-order lookback with the visible date editor.
+// resetOrdersState creates a fresh default order query, clears the connection-scoped New-order count,
+// and synchronizes its 30-day updated-order lookback with the visible date editor.
 func (ui *DesktopUI) resetOrdersState() {
 	ui.ordersHistoryBoundaryKnown = false
+	// Counts are connection-scoped, so avoid showing the prior connection's New badge during the next load.
+	ui.newOrdersCount = 0
 	now := time.Now()
 	updatedAtMinimumInput, _ := orders.DefaultUpdatedAtMinimum(now, time.Local)
 	ui.ordersState = orders.NewStateAt(now, time.Local)

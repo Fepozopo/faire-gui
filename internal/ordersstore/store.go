@@ -114,6 +114,8 @@ type SyncState struct {
 type Store interface {
 	Close() error
 	List(context.Context, ListQuery) (ListPage, error)
+	// CountByState returns the number of stored orders for connection ID whose state exactly matches state.
+	CountByState(context.Context, string, string) (int, error)
 	FindByDisplayID(context.Context, string, string) (LocalRow, error)
 	Snapshot(context.Context, string, string) (Snapshot, error)
 	UpsertOrders(context.Context, []OrderRecord) error

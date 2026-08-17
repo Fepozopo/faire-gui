@@ -134,14 +134,15 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 }
 
 // layoutOrderTabs draws high-level status presets followed by an advanced state picker.
-// Selecting either control updates the supported API state filter.
+// The New preset includes the active connection's complete locally stored New-order count; selecting either control updates the supported API state filter.
 func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 	tabs := []struct {
-		label string
-		state *faire.OrderState
+		label        string
+		state        *faire.OrderState
+		showNewCount bool
 	}{
 		{label: "All"},
-		{label: "New", state: faire.Ptr(faire.OrderStateNew)},
+		{label: "New", state: faire.Ptr(faire.OrderStateNew), showNewCount: true},
 		{label: "Processing", state: faire.Ptr(faire.OrderStateProcessing)},
 		{label: "Fulfilled", state: faire.Ptr(faire.OrderStateDelivered)},
 		{label: "Canceled", state: faire.Ptr(faire.OrderStateCanceled)},
@@ -164,7 +165,11 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 						ui.invalidate()
 					}
 					selected := (tab.state == nil && len(ui.ordersState.IncludedStates) == len(orders.KnownStates())) || (tab.state != nil && len(ui.ordersState.IncludedStates) == 1 && stateIncluded(ui.ordersState.IncludedStates, *tab.state))
-					return orderTabButton(gtx, ui.theme, button, tab.label, selected)
+					count := -1
+					if tab.showNewCount {
+						count = ui.newOrdersCount
+					}
+					return orderTabButton(gtx, ui.theme, button, tab.label, count, selected)
 				})
 			}))
 		}
@@ -303,7 +308,7 @@ func (ui *DesktopUI) layoutOrdersDataModal(gtx layout.Context) layout.Dimensions
 	description := "This removes locally stored order details, including customer and shipping information, for the selected connection only. It never deletes data at Faire."
 	if ui.ordersDataDialog.rebuild {
 		action = "Delete and rebuild local order data"
-		description += " A new 90-day local history download will begin after deletion."
+		description += " A new 30-day local history download will begin after deletion."
 	}
 	return modalPanel(gtx, ui, action, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -545,17 +550,29 @@ func emptyOrdersMessage(message string) string {
 }
 
 // orderTabButton renders a low-profile tab with an underline for the selected server-state filter.
-func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, label string, selected bool) layout.Dimensions {
+// A non-negative count renders a compact badge beside label; a negative count omits the badge.
+func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, label string, count int, selected bool) layout.Dimensions {
 	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				style := material.Body1(theme, label)
+				textColor := mutedTextColor
 				if selected {
-					style.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
-				} else {
-					style.Color = mutedTextColor
+					textColor = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
 				}
-				return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(6), Bottom: unit.Dp(10), Left: unit.Dp(6)}.Layout(gtx, style.Layout)
+				return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(6), Bottom: unit.Dp(10), Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						style := material.Body1(theme, label)
+						style.Color = textColor
+						return style.Layout(gtx)
+					})}
+					if count >= 0 {
+						children = append(children,
+							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return orderTabCountBadge(gtx, theme, count) }),
+						)
+					}
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+				})
 			}),
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				if !selected {
@@ -564,6 +581,17 @@ func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Cl
 				return bottomRule(gtx, color.NRGBA{R: 50, G: 50, B: 50, A: 255})
 			}),
 		)
+	})
+}
+
+// orderTabCountBadge renders the muted pill used to display the complete locally stored New-order count.
+func orderTabCountBadge(gtx layout.Context, theme *material.Theme, count int) layout.Dimensions {
+	return roundedPanel(gtx, selectionBarColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(2), Right: unit.Dp(7), Bottom: unit.Dp(2), Left: unit.Dp(7)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			style := material.Label(theme, unit.Sp(12), itoa(count))
+			style.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+			return style.Layout(gtx)
+		})
 	})
 }
 

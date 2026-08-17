@@ -11,7 +11,7 @@ import (
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
 
-// TestSyncBootstrapsAllPagesAndFinalizesCheckpoint verifies a 90-day bootstrap traverses every remote cursor with an exact cursor-only follow-up request.
+// TestSyncBootstrapsAllPagesAndFinalizesCheckpoint verifies a 30-day bootstrap traverses every remote cursor with an exact cursor-only follow-up request.
 func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	store := openSyncStore(t)
@@ -36,7 +36,7 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" || options[1].Limit != nil || options[1].Page != nil || options[1].UpdatedAtMin != nil || options[1].CreatedAtMin != nil || options[1].SortBy != nil || options[1].ExcludedStates != nil || options[1].ShipAfterMax != nil || options[1].OriginalOrderID != nil {
 		t.Fatalf("sync options = %#v", options)
 	}
-	wantBoundary := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	wantBoundary := time.Date(2026, 1, 30, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
 	if *options[0].UpdatedAtMin != wantBoundary {
 		t.Fatalf("UpdatedAtMin = %q, want %q", *options[0].UpdatedAtMin, wantBoundary)
 	}

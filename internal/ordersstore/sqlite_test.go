@@ -151,6 +151,29 @@ func TestListUsesStateFilterAndStableKeysetPagination(t *testing.T) {
 	}
 }
 
+// TestCountByStateScopesNewOrderCountsToTheActiveConnection verifies tab counts include every matching local order without crossing connections.
+func TestCountByStateScopesNewOrderCountsToTheActiveConnection(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	updated := time.Date(2026, 2, 3, 12, 0, 0, 0, time.UTC)
+	newFirst := testRecord("connection-a", "order-new-1", "DISPLAY-NEW-1", updated)
+	newFirst.State = "NEW"
+	newSecond := testRecord("connection-a", "order-new-2", "DISPLAY-NEW-2", updated)
+	newSecond.State = "NEW"
+	processing := testRecord("connection-a", "order-processing", "DISPLAY-PROCESSING", updated)
+	processing.State = "PROCESSING"
+	otherConnection := testRecord("connection-b", "order-new-other", "DISPLAY-NEW-OTHER", updated)
+	otherConnection.State = "NEW"
+	if err := store.UpsertOrders(ctx, []OrderRecord{newFirst, newSecond, processing, otherConnection}); err != nil {
+		t.Fatalf("UpsertOrders() error = %v", err)
+	}
+
+	count, err := store.CountByState(ctx, "connection-a", "NEW")
+	if err != nil || count != 2 {
+		t.Fatalf("CountByState() = %d, %v; want 2, nil", count, err)
+	}
+}
+
 // TestListSortsExpectedShipDateInBothDirections verifies local ship-date sorting and keyset pagination remain deterministic.
 func TestListSortsExpectedShipDateInBothDirections(t *testing.T) {
 	ctx := context.Background()
