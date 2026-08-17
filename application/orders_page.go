@@ -450,15 +450,16 @@ func (ui *DesktopUI) orderHeaderLabel(gtx layout.Context, label string) layout.D
 	return style.Layout(gtx)
 }
 
-// sortHeaderLabel adds an arrow only to the selected local date-sort column.
+// sortHeaderLabel adds a vertical direction arrow only to the selected local date-sort column.
+// An upward arrow places older dates first, while a downward arrow places newer dates first.
 func (ui *DesktopUI) sortHeaderLabel(column orders.TableSortColumn, label string) string {
 	if ui.ordersState.TableSort.Column != column {
 		return label
 	}
 	if ui.ordersState.TableSort.Direction == orders.TableSortAscending {
-		return label + " ←"
+		return label + " ↑"
 	}
-	return label + " →"
+	return label + " ↓"
 }
 
 // orderCheckbox draws a larger, clipped checkbox indicator for the table header and rows.
