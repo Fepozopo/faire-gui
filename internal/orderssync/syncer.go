@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +18,35 @@ var ErrRepeatedCursor = errors.New("orders sync: repeated cursor")
 
 // ErrInvalidRemoteOrder indicates a remote order cannot safely participate in checkpointed synchronization.
 var ErrInvalidRemoteOrder = errors.New("orders sync: invalid remote order")
+
+// ListPhase identifies the non-sensitive synchronization request category that failed.
+type ListPhase string
+
+const (
+	// ListPhaseBootstrap identifies a first one-year historical synchronization request.
+	ListPhaseBootstrap ListPhase = "bootstrap"
+	// ListPhaseHistory identifies an explicit earlier-history expansion request.
+	ListPhaseHistory ListPhase = "history"
+	// ListPhaseIncremental identifies an overlap-safe updated-orders request.
+	ListPhaseIncremental ListPhase = "incremental"
+)
+
+// ListError wraps a failed remote list call with safe request-phase metadata.
+type ListError struct {
+	Phase  ListPhase
+	Cursor bool
+	Err    error
+}
+
+// Error returns a credential-safe synchronization failure description without response content or request data.
+func (e *ListError) Error() string {
+	return "orders sync list request failed"
+}
+
+// Unwrap exposes the underlying error for safe classification by callers.
+func (e *ListError) Unwrap() error {
+	return e.Err
+}
 
 // Config controls bounded and overlap-safe remote synchronization.
 type Config struct {
@@ -136,8 +166,17 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 	summary.Bootstrap = bootstrap
 	summary.HistoryExpanded = historyExpansion
 	options.Limit = faire.Ptr(int64(s.pageSize))
+	// Faire recommends explicit updated-at ordering for predictable polling and cursor traversal.
+	sortBy := faire.OrderSortByUpdatedAt
+	options.SortBy = &sortBy
+	phase := ListPhaseIncremental
+	if bootstrap {
+		phase = ListPhaseBootstrap
+	} else if historyExpansion {
+		phase = ListPhaseHistory
+	}
 
-	maximumUpdatedAt, ordersCount, syncErr := s.syncPages(ctx, connectionID, options)
+	maximumUpdatedAt, ordersCount, syncErr := s.syncPages(ctx, connectionID, options, phase)
 	if syncErr != nil {
 		// Failure metadata is deliberately a small safe category; the UI never receives the raw failure.
 		_ = s.store.RecordFailure(context.Background(), connectionID, errorKind(syncErr), s.now().UTC())
@@ -165,7 +204,7 @@ func bootstrapBoundary(now time.Time, location *time.Location) time.Time {
 }
 
 // syncPages follows remote cursors, validates every full snapshot, and commits each page before the final checkpoint.
-func (s *Syncer) syncPages(ctx context.Context, connectionID string, options faire.OrderListOptions) (*time.Time, int, error) {
+func (s *Syncer) syncPages(ctx context.Context, connectionID string, options faire.OrderListOptions, phase ListPhase) (*time.Time, int, error) {
 	seenCursors := make(map[string]struct{})
 	var maximumUpdatedAt *time.Time
 	ordersCount := 0
@@ -175,7 +214,7 @@ func (s *Syncer) syncPages(ctx context.Context, connectionID string, options fai
 		}
 		page, err := s.source.List(ctx, &options)
 		if err != nil {
-			return nil, ordersCount, err
+			return nil, ordersCount, &ListError{Phase: phase, Cursor: options.Cursor != nil && strings.TrimSpace(*options.Cursor) != "", Err: err}
 		}
 		if page == nil {
 			return nil, ordersCount, fmt.Errorf("nil order page: %w", ErrInvalidRemoteOrder)
@@ -377,6 +416,10 @@ func firstTimestamp(values ...*string) *time.Time {
 
 // errorKind classifies errors without propagating remote bodies, snapshots, paths, or credentials.
 func errorKind(err error) string {
+	var apiError *faire.APIError
+	if errors.As(err, &apiError) && apiError.StatusCode == http.StatusBadRequest {
+		return "invalid_request"
+	}
 	switch {
 	case errors.Is(err, context.Canceled):
 		return "canceled"

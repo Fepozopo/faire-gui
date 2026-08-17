@@ -75,17 +75,40 @@ func ordersLoadErrorMessage(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "Order loading was canceled."
 	}
+	var listError *orderssync.ListError
 	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
 		switch apiError.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."
 		case http.StatusTooManyRequests:
 			return "Faire is rate limiting requests. Wait a moment, then refresh orders."
+		case http.StatusBadRequest:
+			if errors.As(err, &listError) {
+				return invalidOrdersRequestMessage(listError)
+			}
+			return "Faire rejected the order request as invalid. Adjust the history date and refresh again."
 		default:
 			return fmt.Sprintf("Faire could not load orders (HTTP %d). Try refreshing later.", apiError.StatusCode)
 		}
 	}
 	return "Orders could not be loaded. Check the saved connection and try refreshing."
+}
+
+// invalidOrdersRequestMessage identifies only the safe synchronization phase of a rejected Faire request.
+func invalidOrdersRequestMessage(listError *orderssync.ListError) string {
+	phase := "order synchronization"
+	switch listError.Phase {
+	case orderssync.ListPhaseBootstrap:
+		phase = "initial order-history synchronization"
+	case orderssync.ListPhaseHistory:
+		phase = "older order-history synchronization"
+	case orderssync.ListPhaseIncremental:
+		phase = "updated-orders synchronization"
+	}
+	if listError.Cursor {
+		phase += " follow-up page"
+	}
+	return "Faire rejected the " + phase + " request as invalid. Adjust the history date or rebuild local order data before refreshing again."
 }
 
 // setActiveConnection changes the session-only active connection, clears transient Orders state, and invalidates prior detail/export completions.
@@ -599,8 +622,18 @@ func decodeLocalCursor(value string) (*ordersstore.KeysetCursor, error) {
 // ordersNeedSync determines whether the selected connection lacks a completed bootstrap or is at least one hour stale.
 func ordersNeedSync(ctx context.Context, store ordersstore.Store, connectionID string, now time.Time) (bool, error) {
 	state, found, err := store.SyncState(ctx, connectionID)
-	if err != nil || !found || state.BootstrapCompletedAtUTC == nil || state.LastSuccessfulSyncAtUTC == nil {
+	if err != nil {
 		return true, err
+	}
+	if !found {
+		return true, nil
+	}
+	if state.LastErrorKind == "invalid_request" {
+		// An unchanged automatic request would repeat the same validation failure; require an explicit user adjustment and refresh.
+		return false, nil
+	}
+	if state.BootstrapCompletedAtUTC == nil || state.LastSuccessfulSyncAtUTC == nil {
+		return true, nil
 	}
 	return !state.LastSuccessfulSyncAtUTC.Add(time.Hour).After(now), nil
 }
@@ -609,6 +642,9 @@ func ordersNeedSync(ctx context.Context, store ordersstore.Store, connectionID s
 func localStatus(store ordersstore.Store, ctx context.Context, connectionID string) string {
 	state, found, err := store.SyncState(ctx, connectionID)
 	if err != nil || !found || state.LastSuccessfulSyncAtUTC == nil {
+		if found && state.LastErrorKind == "invalid_request" {
+			return "Showing locally stored orders. The last synchronization request was invalid; adjust the history date before refreshing."
+		}
 		return "Showing locally stored orders."
 	}
 	return "Showing locally stored orders. Last synced " + state.LastSuccessfulSyncAtUTC.Local().Format("Jan 2, 15:04") + "."

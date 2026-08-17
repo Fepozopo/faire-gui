@@ -33,7 +33,7 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	if !summary.Bootstrap || summary.Orders != 2 {
 		t.Fatalf("Summary = %#v, want bootstrap with two orders", summary)
 	}
-	if len(options) != 2 || options[0].CreatedAtMin == nil || options[0].UpdatedAtMin != nil || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" {
+	if len(options) != 2 || options[0].CreatedAtMin == nil || options[0].UpdatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" {
 		t.Fatalf("sync options = %#v", options)
 	}
 	wantBoundary := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
@@ -69,7 +69,7 @@ func TestSyncUsesOverlapForIncrementalRefresh(t *testing.T) {
 		t.Fatalf("Sync() error = %v", err)
 	}
 	want := watermark.Add(-5 * time.Minute).Format(time.RFC3339Nano)
-	if requested.UpdatedAtMin == nil || *requested.UpdatedAtMin != want || requested.CreatedAtMin != nil || requested.SortBy != nil || len(requested.ExcludedStates) != 0 {
+	if requested.UpdatedAtMin == nil || *requested.UpdatedAtMin != want || requested.CreatedAtMin != nil || requested.SortBy == nil || *requested.SortBy != faire.OrderSortByUpdatedAt || len(requested.ExcludedStates) != 0 {
 		t.Fatalf("incremental request = %#v, want updated_at_min %q only", requested, want)
 	}
 	state, _, err := store.SyncState(ctx, "connection-a")
@@ -95,7 +95,7 @@ func TestSyncFromCreatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
 	requests := 0
 	source := SourceFunc(func(_ context.Context, options *faire.OrderListOptions) (*faire.OrderPage, error) {
 		requests++
-		if options.CreatedAtMin == nil || *options.CreatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.UpdatedAtMin != nil {
+		if options.CreatedAtMin == nil || *options.CreatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.UpdatedAtMin != nil || options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
 			t.Fatalf("history request options = %#v", options)
 		}
 		if requests == 1 {
@@ -151,6 +151,26 @@ func TestSyncRetainsCompletedWatermarkAfterPartialFailure(t *testing.T) {
 	}
 	if _, err := store.Snapshot(ctx, "connection-a", "order-1"); err != nil {
 		t.Fatalf("successful first-page snapshot was not retained: %v", err)
+	}
+}
+
+// TestSyncClassifiesBadRequestAndRetainsItsSafePhase verifies an invalid remote request is retained without response content.
+func TestSyncClassifiesBadRequestAndRetainsItsSafePhase(t *testing.T) {
+	ctx := context.Background()
+	store := openSyncStore(t)
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	source := SourceFunc(func(_ context.Context, _ *faire.OrderListOptions) (*faire.OrderPage, error) {
+		return nil, &faire.APIError{StatusCode: 400}
+	})
+	syncer := newTestSyncer(t, store, source, now)
+	_, err := syncer.Sync(ctx, "connection-a")
+	var listError *ListError
+	if !errors.As(err, &listError) || listError.Phase != ListPhaseBootstrap || listError.Cursor {
+		t.Fatalf("Sync() error = %#v, want bootstrap ListError", err)
+	}
+	state, found, stateErr := store.SyncState(ctx, "connection-a")
+	if stateErr != nil || !found || state.LastErrorKind != "invalid_request" || state.BootstrapCompletedAtUTC != nil {
+		t.Fatalf("state = %#v, found=%v, err=%v", state, found, stateErr)
 	}
 }
 

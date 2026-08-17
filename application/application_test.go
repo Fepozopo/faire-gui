@@ -421,6 +421,14 @@ func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
 	}
 }
 
+// TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe verifies invalid sync feedback identifies only a safe phase.
+func TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe(t *testing.T) {
+	message := ordersLoadErrorMessage(&orderssync.ListError{Phase: orderssync.ListPhaseHistory, Cursor: true, Err: &faire.APIError{StatusCode: 400, Body: "private response"}})
+	if !strings.Contains(message, "older order-history synchronization follow-up page") || strings.Contains(message, "private response") {
+		t.Fatalf("ordersLoadErrorMessage() = %q", message)
+	}
+}
+
 // TestDrainOrderResultsRestoresPersistedHistoryBoundary verifies a selected connection restores its retained initial-history date in the local filter editor.
 func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
