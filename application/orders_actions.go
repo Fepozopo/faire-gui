@@ -531,6 +531,11 @@ func (ui *DesktopUI) startOrdersDataAction(connectionID string, rebuild bool) {
 	requestID := ui.ordersRequestID
 	ui.ordersDataStatusRequestID = requestID
 	store, manager, state := ui.ordersStore, ui.manager, ui.ordersState
+	if rebuild {
+		// Rebuild intentionally starts from the current default window rather than silently preserving an older retained-history expansion.
+		state.Query.UpdatedAtMin = orders.NewStateAt(time.Now(), time.Local).Query.UpdatedAtMin
+		ui.ordersHistoryBoundaryKnown = false
+	}
 	state.Cursor = ""
 	ui.ordersState.Rows = nil
 	ui.ordersState.Cursor = ""

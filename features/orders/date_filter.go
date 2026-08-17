@@ -6,9 +6,12 @@ import (
 	"time"
 )
 
-const dateInputLayout = "1/2/2006"
+const (
+	dateInputLayout              = "1/2/2006"
+	defaultUpdatedAtLookbackDays = 90
+)
 
-// DefaultUpdatedAtMinimum returns the one-year lookback as a date-field value and
+// DefaultUpdatedAtMinimum returns the 90-day lookback as a date-field value and
 // its equivalent RFC 3339 start-of-day timestamp in location. now supplies the
 // reference time; a nil location uses the local timezone, matching date filters
 // submitted from the desktop UI.
@@ -16,7 +19,7 @@ func DefaultUpdatedAtMinimum(now time.Time, location *time.Location) (string, st
 	if location == nil {
 		location = time.Local
 	}
-	date := now.In(location).AddDate(-1, 0, 0)
+	date := now.In(location).AddDate(0, 0, -defaultUpdatedAtLookbackDays)
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, location)
 	return date.Format(dateInputLayout), startOfDay.Format(time.RFC3339)
 }

@@ -303,7 +303,7 @@ func (ui *DesktopUI) layoutOrdersDataModal(gtx layout.Context) layout.Dimensions
 	description := "This removes locally stored order details, including customer and shipping information, for the selected connection only. It never deletes data at Faire."
 	if ui.ordersDataDialog.rebuild {
 		action = "Delete and rebuild local order data"
-		description += " A new one-year local history download will begin after deletion."
+		description += " A new 90-day local history download will begin after deletion."
 	}
 	return modalPanel(gtx, ui, action, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,

@@ -12,7 +12,7 @@ The Orders feature provides:
 
 - a connection-scoped SQLite cache at `<os.UserConfigDir()>/faire-gui/orders.sqlite3`;
 - complete serialized `faire.Order` snapshots plus indexed table projections;
-- initial one-year history synchronization using `updated_at_min`;
+- initial 90-day history synchronization using `updated_at_min`;
 - cursor traversal of every remote page, with cursor-only follow-up requests;
 - five-minute-overlap incremental polling based on the last completed `updated_at` watermark;
 - hourly synchronization for the active connection while the application is open;
@@ -90,7 +90,7 @@ Owns non-secret saved connection metadata and operating-system credential storag
 
 ### Bootstrap and history expansion
 
-A connection without a completed bootstrap synchronizes every cursor page beginning at the one-year `updated_at_min` boundary. A user can enter an earlier **Updated At Minimum** date and refresh to expand retained history; the earlier boundary is saved for future sessions.
+A connection without a completed bootstrap synchronizes every cursor page beginning at the 90-day `updated_at_min` boundary. A user can enter an earlier **Updated At Minimum** date and refresh to expand retained history; the earlier boundary is saved for future sessions. Rebuilding local data always returns to the 120-day default window.
 
 No status-tab or other local table filter is sent to the synchronization request. Every state returned by Faire is eligible for storage.
 

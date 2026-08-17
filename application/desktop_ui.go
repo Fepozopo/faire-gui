@@ -231,7 +231,7 @@ func (ui *DesktopUI) configureEditors() {
 }
 
 // resetOrdersState creates a fresh default order query and synchronizes its
-// one-year updated-order lookback with the visible date editor.
+// 90-day updated-order lookback with the visible date editor.
 func (ui *DesktopUI) resetOrdersState() {
 	ui.ordersHistoryBoundaryKnown = false
 	now := time.Now()

@@ -19,11 +19,13 @@ var ErrRepeatedCursor = errors.New("orders sync: repeated cursor")
 // ErrInvalidRemoteOrder indicates a remote order cannot safely participate in checkpointed synchronization.
 var ErrInvalidRemoteOrder = errors.New("orders sync: invalid remote order")
 
+const defaultBootstrapLookbackDays = 90
+
 // ListPhase identifies the non-sensitive synchronization request category that failed.
 type ListPhase string
 
 const (
-	// ListPhaseBootstrap identifies a first one-year historical synchronization request.
+	// ListPhaseBootstrap identifies a first 90-day historical synchronization request.
 	ListPhaseBootstrap ListPhase = "bootstrap"
 	// ListPhaseHistory identifies an explicit earlier-history expansion request.
 	ListPhaseHistory ListPhase = "history"
@@ -56,7 +58,7 @@ type Config struct {
 	Overlap time.Duration
 	// Now supplies the current time and makes checkpoint behavior deterministic in tests.
 	Now func() time.Time
-	// Location defines the start-of-day boundary used for the one-year initial bootstrap window.
+	// Location defines the start-of-day boundary used for the 90-day initial bootstrap window.
 	Location *time.Location
 }
 
@@ -102,7 +104,7 @@ func New(store ordersstore.Store, source Source, config Config) (*Syncer, error)
 	return &Syncer{store: store, source: source, pageSize: config.PageSize, overlap: config.Overlap, now: config.Now, location: config.Location}, nil
 }
 
-// Sync performs either an initial one-year bootstrap or an overlap-safe incremental refresh for connectionID.
+// Sync performs either an initial 9--day bootstrap or an overlap-safe incremental refresh for connectionID.
 func (s *Syncer) Sync(ctx context.Context, connectionID string) (Summary, error) {
 	return s.sync(ctx, connectionID, nil)
 }
@@ -197,9 +199,9 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 	return summary, nil
 }
 
-// bootstrapUpdatedAtBoundary returns the Orders UI's one-year start-of-day local update boundary in UTC.
+// bootstrapUpdatedAtBoundary returns the Orders UI's 90-day start-of-day local update boundary in UTC.
 func bootstrapUpdatedAtBoundary(now time.Time, location *time.Location) time.Time {
-	local := now.In(location).AddDate(-1, 0, 0)
+	local := now.In(location).AddDate(0, 0, -defaultBootstrapLookbackDays)
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location).UTC()
 }
 

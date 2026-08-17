@@ -106,7 +106,7 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
 	if !ui.updatedAtMinEditor.SingleLine || ui.updatedAtMinEditor.Text() == "" || ui.ordersState.Query.UpdatedAtMin == "" {
-		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
+		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 90-day lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
 	}
 }
 
