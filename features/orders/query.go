@@ -7,7 +7,7 @@ import "github.com/Fepozopo/faire-gui/faire"
 // API controls such as page and original-order IDs.
 func BuildOrderListOptions(query ServerQuery, includedStates map[faire.OrderState]struct{}, cursor string) faire.OrderListOptions {
 	options := faire.OrderListOptions{
-		CreatedAtMin:   optionalString(query.CreatedAtMin),
+		UpdatedAtMin:   optionalString(query.UpdatedAtMin),
 		ExcludedStates: ExcludedStates(includedStates),
 		Cursor:         optionalString(cursor),
 	}

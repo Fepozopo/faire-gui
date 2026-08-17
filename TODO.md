@@ -22,18 +22,18 @@ This document is an implementation handoff. Read it together with:
 
 These are settled for version 1. Do not reopen or silently change them during implementation.
 
-| Decision | Approved behavior |
-| --- | --- |
-| Initial sync window | Bootstrap the same one-year `created_at_min` window currently used by the Orders UI. |
-| Incremental sync | Use Faire `updated_at_min` with a configurable five-minute overlap and cursor pagination. |
-| Automatic refresh | While the app is open, sync only the active connection at most once per hour. No synchronization while the app is closed. |
-| Manual refresh | Always available; uses the exact same incremental-sync path as scheduled refresh. |
-| Local data | Persist complete `faire.Order` snapshots plus indexed list columns. |
-| Detail experience | Open local detail data first; a future explicit per-order refresh calls `GET /orders/{id}`. |
-| Retention | Retain snapshots until a user deletes/rebuilds a connection cache, deletes the saved connection, or deletes all local data. No automatic age/size eviction. |
-| Corruption recovery | Offer only explicit delete-and-rebuild. Do not retain, rename, upload, export, or back up corrupt private data. |
-| Encryption | Owner-only application files and supported OS account/device encryption are sufficient. Do not add application-level SQLite encryption. |
-| Exports | Keep CSV exports API-backed in this slice. Do not change export freshness/fidelity behavior. |
+| Decision            | Approved behavior                                                                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial sync window | Bootstrap the same one-year `updated_at_min` window used by the Orders UI.                                                                                  |
+| Incremental sync    | Use Faire `updated_at_min` with a configurable five-minute overlap and cursor pagination.                                                                   |
+| Automatic refresh   | While the app is open, sync only the active connection at most once per hour. No synchronization while the app is closed.                                   |
+| Manual refresh      | Always available; uses the exact same incremental-sync path as scheduled refresh.                                                                           |
+| Local data          | Persist complete `faire.Order` snapshots plus indexed list columns.                                                                                         |
+| Detail experience   | Open local detail data first; a future explicit per-order refresh calls `GET /orders/{id}`.                                                                 |
+| Retention           | Retain snapshots until a user deletes/rebuilds a connection cache, deletes the saved connection, or deletes all local data. No automatic age/size eviction. |
+| Corruption recovery | Offer only explicit delete-and-rebuild. Do not retain, rename, upload, export, or back up corrupt private data.                                             |
+| Encryption          | Owner-only application files and supported OS account/device encryption are sufficient. Do not add application-level SQLite encryption.                     |
+| Exports             | Keep CSV exports API-backed in this slice. Do not change export freshness/fidelity behavior.                                                                |
 
 ## Non-negotiable architectural rules
 
@@ -131,7 +131,8 @@ One row per `connection_id`:
 
 ```text
 connection_id TEXT PRIMARY KEY
-bootstrap_created_at_min_utc INTEGER NOT NULL
+bootstrap_updated_at_min_utc INTEGER NOT NULL
+bootstrap_created_at_min_utc INTEGER NOT NULL (legacy v1 migration compatibility only)
 bootstrap_completed_at_utc INTEGER NULL
 high_watermark_updated_at_utc INTEGER NULL
 last_successful_sync_at_utc INTEGER NULL
@@ -200,7 +201,7 @@ CREATE INDEX orders_by_connection_updated
 4. Apply existing state/date filters and deterministic ordering in SQLite.
 5. Replace Faire page cursors in the visible table with local keyset pagination; use a stable final tie-breaker such as `order_id`.
 6. Keep remote pagination cursors strictly inside the sync worker. Do not persist them as UI or checkpoint state.
-7. Treat the existing one-year `created_at_min` as a local view filter after bootstrap. Do not include it in later incremental sync requests, or old orders updated later could be omitted.
+7. Treat the retained one-year `updated_at_min` boundary as the local update-time view filter after bootstrap. An earlier manual value expands retained history; later incremental requests use the overlap-safe watermark boundary.
 
 ### Search and detail
 
@@ -220,15 +221,15 @@ Before finalizing the sync algorithm, verify Faire’s current behavior/document
 
 - `updated_at_min` inclusion semantics (`>=` versus `>`);
 - timestamp precision and timezone format;
-- interaction between `created_at_min` and `updated_at_min`;
+- `updated_at_min` inclusion semantics for both bootstrap and incremental traversal;
 - cursor lifetime/concurrency behavior;
 - maximum practical page size/rate limits; and
-- whether the documented default ascending `updated_at` ordering is sufficient without explicitly specifying `sort_by`.
+- whether `sort_by=UPDATED_AT` remains the recommended explicit cursor-traversal ordering.
 
 ### Bootstrap
 
-1. If a connection has no completed bootstrap, create/update its sync state with the current one-year `created_at_min` boundary and attempt timestamp.
-2. Request `/orders` with that `created_at_min`, the approved page limit, no excluded-state filter, and documented ascending `updated_at` ordering.
+1. If a connection has no completed bootstrap, create/update its sync state with the current one-year `updated_at_min` boundary and attempt timestamp.
+2. Request `/orders` with that `updated_at_min`, the approved page limit, no excluded-state filter, and explicit `sort_by=UPDATED_AT` ordering.
 3. Follow every cursor; reject a repeated non-empty cursor.
 4. Validate and atomically upsert each page’s full order snapshots.
 5. Track the maximum valid `updated_at` in memory.
@@ -243,10 +244,10 @@ Do not apply status tabs, date filters, or other view-specific exclusions to the
 2. Calculate:
 
    ```text
-   updated_at_min = max(bootstrap_created_at_min, high_watermark_updated_at - 5 minutes)
+   updated_at_min = max(bootstrap_updated_at_min, high_watermark_updated_at - 5 minutes)
    ```
 
-3. Call `/orders` using `updated_at_min`, default ascending `updated_at` ordering, cursor pagination, and no view-specific filters.
+3. Call `/orders` using `updated_at_min`, `sort_by=UPDATED_AT`, cursor pagination, and no view-specific filters.
 4. Validate and atomically upsert each page.
 5. Track the greatest remote `updated_at` seen.
 6. After the terminal page only, write:

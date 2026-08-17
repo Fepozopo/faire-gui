@@ -2,6 +2,7 @@ package ordersstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,52 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	}
 	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" {
 		t.Fatalf("List() = %#v, want durable order-1", page.Rows)
+	}
+}
+
+// TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap verifies a v1 cache retains its date while requiring a full updated-at traversal.
+func TestMigrationTwoCarriesForwardBoundaryAndRequiresUpdatedBootstrap(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "orders.sqlite3")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	boundary := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, statement := range []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc INTEGER NOT NULL)`,
+		`INSERT INTO schema_migrations(version, applied_at_utc) VALUES (1, 0)`,
+		`CREATE TABLE order_sync_state (
+			connection_id TEXT PRIMARY KEY,
+			bootstrap_created_at_min_utc INTEGER NOT NULL,
+			bootstrap_completed_at_utc INTEGER NULL,
+			high_watermark_updated_at_utc INTEGER NULL,
+			last_successful_sync_at_utc INTEGER NULL,
+			last_attempt_at_utc INTEGER NULL,
+			last_error_kind TEXT NULL,
+			last_error_at_utc INTEGER NULL
+		)`,
+	} {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			_ = database.Close()
+			t.Fatalf("prepare v1 database error = %v", err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO order_sync_state(connection_id, bootstrap_created_at_min_utc, bootstrap_completed_at_utc, high_watermark_updated_at_utc, last_successful_sync_at_utc) VALUES (?, ?, ?, ?, ?)`, "connection-a", boundary.UnixMicro(), boundary.UnixMicro(), boundary.UnixMicro(), boundary.UnixMicro()); err != nil {
+		_ = database.Close()
+		t.Fatalf("insert v1 state error = %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close v1 database error = %v", err)
+	}
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() migration error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	state, found, err := store.SyncState(ctx, "connection-a")
+	if err != nil || !found || !state.BootstrapUpdatedAtMinUTC.Equal(boundary) || state.BootstrapCompletedAtUTC != nil || state.HighWatermarkUpdatedAtUTC != nil || state.LastSuccessfulSyncAtUTC != nil {
+		t.Fatalf("migrated state = %#v, found=%v, err=%v", state, found, err)
 	}
 }
 
@@ -151,6 +198,32 @@ func TestCompleteSyncOnlyAdvancesCompletedWatermark(t *testing.T) {
 	state, found, err := store.SyncState(ctx, "connection-a")
 	if err != nil || !found || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(first) {
 		t.Fatalf("SyncState() = %#v, found=%v, err=%v; want original watermark", state, found, err)
+	}
+}
+
+// TestRecordFailureCannotOverwriteANewerCompletedSync verifies a stale worker cannot reintroduce an invalid-request marker after rebuild or later success.
+func TestRecordFailureCannotOverwriteANewerCompletedSync(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	boundary := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
+	firstAttempt := boundary.Add(time.Hour)
+	secondAttempt := firstAttempt.Add(time.Hour)
+	watermark := secondAttempt.Add(time.Hour)
+	if err := store.BeginBootstrap(ctx, "connection-a", boundary, firstAttempt); err != nil {
+		t.Fatalf("first BeginBootstrap() error = %v", err)
+	}
+	if err := store.BeginBootstrap(ctx, "connection-a", boundary, secondAttempt); err != nil {
+		t.Fatalf("second BeginBootstrap() error = %v", err)
+	}
+	if err := store.CompleteSync(ctx, "connection-a", true, &watermark, watermark); err != nil {
+		t.Fatalf("CompleteSync() error = %v", err)
+	}
+	if err := store.RecordFailure(ctx, "connection-a", "invalid_request", firstAttempt, watermark.Add(time.Minute)); err != nil {
+		t.Fatalf("stale RecordFailure() error = %v", err)
+	}
+	state, found, err := store.SyncState(ctx, "connection-a")
+	if err != nil || !found || state.LastSuccessfulSyncAtUTC == nil || state.LastErrorKind != "" || state.LastErrorAtUTC != nil {
+		t.Fatalf("state after stale failure = %#v, found=%v, err=%v", state, found, err)
 	}
 }
 

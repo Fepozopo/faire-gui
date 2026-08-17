@@ -86,14 +86,14 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.invalidate()
 	}
 	if ui.refreshOrdersButton.Clicked(gtx) {
-		createdAtMin, err := orders.NormalizeDateFilter(ui.createdAtMinEditor.Text(), false, time.Local)
+		updatedAtMin, err := orders.NormalizeDateFilter(ui.updatedAtMinEditor.Text(), false, time.Local)
 		if err != nil {
-			ui.ordersState.Status = "Enter the created-at minimum as month/day/year, for example 3/21/2026."
+			ui.ordersState.Status = "Enter the updated-at minimum as month/day/year, for example 3/21/2026."
 			ui.invalidate()
 			return
 		}
 		// An earlier value expands retained history after a complete all-pages refresh; a later value remains a local view boundary.
-		ui.ordersState.Query.CreatedAtMin = createdAtMin
+		ui.ordersState.Query.UpdatedAtMin = updatedAtMin
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
 		ui.startOrdersLoad(false, true, true)
@@ -493,10 +493,10 @@ func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions 
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
 		layout.Rigid(primaryButton(ui.theme, &ui.refreshOrdersButton, "Refresh")),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (earlier date adds history)").Layout),
+		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Updated At Minimum (earlier date adds history)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.createdAtMinEditor, "M/D/YYYY")
+			return ui.dateFilterField(gtx, &ui.updatedAtMinEditor, "M/D/YYYY")
 		}),
 	)
 }

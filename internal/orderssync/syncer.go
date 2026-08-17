@@ -107,9 +107,9 @@ func (s *Syncer) Sync(ctx context.Context, connectionID string) (Summary, error)
 	return s.sync(ctx, connectionID, nil)
 }
 
-// SyncFromCreatedAt expands the connection's retained history when boundary is earlier than the completed bootstrap boundary.
+// SyncFromUpdatedAt expands the connection's retained update history when boundary is earlier than the completed bootstrap boundary.
 // A later boundary remains a local view filter and follows the normal incremental synchronization path.
-func (s *Syncer) SyncFromCreatedAt(ctx context.Context, connectionID string, boundary time.Time) (Summary, error) {
+func (s *Syncer) SyncFromUpdatedAt(ctx context.Context, connectionID string, boundary time.Time) (Summary, error) {
 	if boundary.IsZero() {
 		return Summary{}, fmt.Errorf("history boundary: %w", ErrInvalidRemoteOrder)
 	}
@@ -129,12 +129,12 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 		return summary, err
 	}
 	bootstrap := !found || state.BootstrapCompletedAtUTC == nil
-	historyExpansion := !bootstrap && requestedBoundary != nil && requestedBoundary.Before(state.BootstrapCreatedAtMinUTC)
+	historyExpansion := !bootstrap && requestedBoundary != nil && requestedBoundary.Before(state.BootstrapUpdatedAtMinUTC)
 	var options faire.OrderListOptions
 	if bootstrap || historyExpansion {
-		boundary := bootstrapBoundary(startedAt, s.location)
+		boundary := bootstrapUpdatedAtBoundary(startedAt, s.location)
 		if found {
-			boundary = state.BootstrapCreatedAtMinUTC
+			boundary = state.BootstrapUpdatedAtMinUTC
 		}
 		if requestedBoundary != nil && requestedBoundary.Before(boundary) {
 			boundary = *requestedBoundary
@@ -147,13 +147,13 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 			return summary, err
 		}
 		formatted := boundary.Format(time.RFC3339Nano)
-		options.CreatedAtMin = &formatted
-		state.BootstrapCreatedAtMinUTC = boundary
+		options.UpdatedAtMin = &formatted
+		state.BootstrapUpdatedAtMinUTC = boundary
 	} else {
 		if err := s.store.RecordAttempt(ctx, connectionID, startedAt); err != nil {
 			return summary, err
 		}
-		boundary := state.BootstrapCreatedAtMinUTC
+		boundary := state.BootstrapUpdatedAtMinUTC
 		if state.HighWatermarkUpdatedAtUTC != nil {
 			overlapBoundary := state.HighWatermarkUpdatedAtUTC.Add(-s.overlap)
 			if overlapBoundary.After(boundary) {
@@ -179,17 +179,17 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 	maximumUpdatedAt, ordersCount, syncErr := s.syncPages(ctx, connectionID, options, phase)
 	if syncErr != nil {
 		// Failure metadata is deliberately a small safe category; the UI never receives the raw failure.
-		_ = s.store.RecordFailure(context.Background(), connectionID, errorKind(syncErr), s.now().UTC())
+		_ = s.store.RecordFailure(context.Background(), connectionID, errorKind(syncErr), startedAt, s.now().UTC())
 		return summary, syncErr
 	}
 	finishedAt := s.now().UTC()
 	if historyExpansion {
-		err = s.store.CompleteHistoricalSync(ctx, connectionID, state.BootstrapCreatedAtMinUTC, maximumUpdatedAt, finishedAt)
+		err = s.store.CompleteHistoricalSync(ctx, connectionID, state.BootstrapUpdatedAtMinUTC, maximumUpdatedAt, finishedAt)
 	} else {
 		err = s.store.CompleteSync(ctx, connectionID, bootstrap, maximumUpdatedAt, finishedAt)
 	}
 	if err != nil {
-		_ = s.store.RecordFailure(context.Background(), connectionID, "storage", s.now().UTC())
+		_ = s.store.RecordFailure(context.Background(), connectionID, "storage", startedAt, s.now().UTC())
 		return summary, err
 	}
 	summary.Orders = ordersCount
@@ -197,8 +197,8 @@ func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundar
 	return summary, nil
 }
 
-// bootstrapBoundary returns the existing Orders UI's one-year start-of-day local historical boundary in UTC.
-func bootstrapBoundary(now time.Time, location *time.Location) time.Time {
+// bootstrapUpdatedAtBoundary returns the Orders UI's one-year start-of-day local update boundary in UTC.
+func bootstrapUpdatedAtBoundary(now time.Time, location *time.Location) time.Time {
 	local := now.In(location).AddDate(-1, 0, 0)
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location).UTC()
 }

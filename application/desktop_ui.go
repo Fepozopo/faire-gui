@@ -79,7 +79,7 @@ type DesktopUI struct {
 	ordersList                      widget.List
 	connectionPickerList            widget.List
 	orderSearchEditor               widget.Editor
-	createdAtMinEditor              widget.Editor
+	updatedAtMinEditor              widget.Editor
 	tabButtons                      [3]widget.Clickable
 	orderStatusTabs                 [5]widget.Clickable
 	activeConnectionButton          widget.Clickable
@@ -210,7 +210,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 	ui.ordersList.Axis = layout.Vertical
 	ui.connectionPickerList.Axis = layout.Vertical
 	ui.orderSearchEditor.SingleLine = true
-	ui.createdAtMinEditor.SingleLine = true
+	ui.updatedAtMinEditor.SingleLine = true
 	ui.startOrdersScheduler()
 	return ui
 }
@@ -226,13 +226,13 @@ func (ui *DesktopUI) configureEditors() {
 }
 
 // resetOrdersState creates a fresh default order query and synchronizes its
-// one-year created-order lookback with the visible date editor.
+// one-year updated-order lookback with the visible date editor.
 func (ui *DesktopUI) resetOrdersState() {
 	ui.ordersHistoryBoundaryKnown = false
 	now := time.Now()
-	createdAtMinimumInput, _ := orders.DefaultCreatedAtMinimum(now, time.Local)
+	updatedAtMinimumInput, _ := orders.DefaultUpdatedAtMinimum(now, time.Local)
 	ui.ordersState = orders.NewStateAt(now, time.Local)
-	ui.createdAtMinEditor.SetText(createdAtMinimumInput)
+	ui.updatedAtMinEditor.SetText(updatedAtMinimumInput)
 }
 
 // Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.

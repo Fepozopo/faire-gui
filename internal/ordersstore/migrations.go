@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -17,6 +17,7 @@ type migration struct {
 
 var migrations = []migration{
 	{version: 1, apply: applyMigrationOne},
+	{version: 2, apply: applyMigrationTwo},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -56,6 +57,22 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationTwo adds the updated-at history boundary and requires one safe updated-at re-bootstrap for existing caches.
+func applyMigrationTwo(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE order_sync_state ADD COLUMN bootstrap_updated_at_min_utc INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	// Existing rows remain private cached snapshots, but their created-at checkpoint cannot prove an updated-at traversal completed.
+	_, err := tx.ExecContext(ctx, `UPDATE order_sync_state SET
+		bootstrap_updated_at_min_utc = bootstrap_created_at_min_utc,
+		bootstrap_completed_at_utc = NULL,
+		high_watermark_updated_at_utc = NULL,
+		last_successful_sync_at_utc = NULL,
+		last_error_kind = NULL,
+		last_error_at_utc = NULL`)
+	return err
 }
 
 // applyMigrationOne creates the initial connection-scoped Orders schema and indexes.

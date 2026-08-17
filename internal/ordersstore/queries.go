@@ -30,9 +30,9 @@ func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, erro
 		}
 		where = append(where, "state IN ("+strings.Join(placeholders, ",")+")")
 	}
-	if query.CreatedAtMin != nil {
-		where = append(where, "created_at_utc >= ?")
-		args = append(args, query.CreatedAtMin.UTC().UnixMicro())
+	if query.UpdatedAtMin != nil {
+		where = append(where, "updated_at_utc >= ?")
+		args = append(args, query.UpdatedAtMin.UTC().UnixMicro())
 	}
 	if query.After != nil {
 		if query.After.SortAtUTC == nil {
@@ -165,14 +165,14 @@ func (s *SQLiteStore) SyncState(ctx context.Context, connectionID string) (SyncS
 	var state SyncState
 	var bootstrap, completed, watermark, successful, attempt, errorAt sql.NullInt64
 	var errorKind sql.NullString
-	err := s.database.QueryRowContext(ctx, `SELECT connection_id, bootstrap_created_at_min_utc, bootstrap_completed_at_utc, high_watermark_updated_at_utc, last_successful_sync_at_utc, last_attempt_at_utc, last_error_kind, last_error_at_utc FROM order_sync_state WHERE connection_id = ?`, connectionID).Scan(&state.ConnectionID, &bootstrap, &completed, &watermark, &successful, &attempt, &errorKind, &errorAt)
+	err := s.database.QueryRowContext(ctx, `SELECT connection_id, bootstrap_updated_at_min_utc, bootstrap_completed_at_utc, high_watermark_updated_at_utc, last_successful_sync_at_utc, last_attempt_at_utc, last_error_kind, last_error_at_utc FROM order_sync_state WHERE connection_id = ?`, connectionID).Scan(&state.ConnectionID, &bootstrap, &completed, &watermark, &successful, &attempt, &errorKind, &errorAt)
 	if err == sql.ErrNoRows {
 		return SyncState{}, false, nil
 	}
 	if err != nil {
 		return SyncState{}, false, classifyError(err)
 	}
-	state.BootstrapCreatedAtMinUTC = time.UnixMicro(bootstrap.Int64).UTC()
+	state.BootstrapUpdatedAtMinUTC = time.UnixMicro(bootstrap.Int64).UTC()
 	state.BootstrapCompletedAtUTC = nullableTimeFromInt(completed)
 	state.HighWatermarkUpdatedAtUTC = nullableTimeFromInt(watermark)
 	state.LastSuccessfulSyncAtUTC = nullableTimeFromInt(successful)
@@ -186,10 +186,10 @@ func (s *SQLiteStore) SyncState(ctx context.Context, connectionID string) (SyncS
 
 // BeginBootstrap creates a connection checkpoint or refreshes its attempted-at timestamp while retaining the earliest explicitly requested boundary.
 func (s *SQLiteStore) BeginBootstrap(ctx context.Context, connectionID string, boundary, attemptedAt time.Time) error {
-	_, err := s.database.ExecContext(ctx, `INSERT INTO order_sync_state(connection_id, bootstrap_created_at_min_utc, last_attempt_at_utc) VALUES (?, ?, ?)
+	_, err := s.database.ExecContext(ctx, `INSERT INTO order_sync_state(connection_id, bootstrap_created_at_min_utc, bootstrap_updated_at_min_utc, last_attempt_at_utc) VALUES (?, ?, ?, ?)
 		ON CONFLICT(connection_id) DO UPDATE SET
-		bootstrap_created_at_min_utc = MIN(order_sync_state.bootstrap_created_at_min_utc, excluded.bootstrap_created_at_min_utc),
-		last_attempt_at_utc = excluded.last_attempt_at_utc`, connectionID, boundary.UTC().UnixMicro(), attemptedAt.UTC().UnixMicro())
+		bootstrap_updated_at_min_utc = MIN(order_sync_state.bootstrap_updated_at_min_utc, excluded.bootstrap_updated_at_min_utc),
+		last_attempt_at_utc = excluded.last_attempt_at_utc`, connectionID, boundary.UTC().UnixMicro(), boundary.UTC().UnixMicro(), attemptedAt.UTC().UnixMicro())
 	return classifyError(err)
 }
 
@@ -243,7 +243,7 @@ func (s *SQLiteStore) CompleteHistoricalSync(ctx context.Context, connectionID s
 		watermark = sql.NullInt64{Int64: maximumUpdatedAt.UTC().UnixMicro(), Valid: true}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE order_sync_state SET
-		bootstrap_created_at_min_utc = MIN(bootstrap_created_at_min_utc, ?),
+		bootstrap_updated_at_min_utc = MIN(bootstrap_updated_at_min_utc, ?),
 		high_watermark_updated_at_utc = ?,
 		last_successful_sync_at_utc = ?,
 		last_error_kind = NULL,
@@ -255,9 +255,11 @@ func (s *SQLiteStore) CompleteHistoricalSync(ctx context.Context, connectionID s
 	return classifyError(tx.Commit())
 }
 
-// RecordFailure stores only a caller-provided non-sensitive error class while preserving the completed checkpoint.
-func (s *SQLiteStore) RecordFailure(ctx context.Context, connectionID, kind string, failedAt time.Time) error {
-	_, err := s.database.ExecContext(ctx, `UPDATE order_sync_state SET last_error_kind = ?, last_error_at_utc = ? WHERE connection_id = ?`, kind, failedAt.UTC().UnixMicro(), connectionID)
+// RecordFailure stores only a caller-provided non-sensitive error class when attemptStartedAt still identifies the active synchronization attempt.
+// A stale worker therefore cannot overwrite a later successful checkpoint or a newer attempt's error state.
+func (s *SQLiteStore) RecordFailure(ctx context.Context, connectionID, kind string, attemptStartedAt, failedAt time.Time) error {
+	_, err := s.database.ExecContext(ctx, `UPDATE order_sync_state SET last_error_kind = ?, last_error_at_utc = ?
+		WHERE connection_id = ? AND last_attempt_at_utc = ?`, kind, failedAt.UTC().UnixMicro(), connectionID, attemptStartedAt.UTC().UnixMicro())
 	return classifyError(err)
 }
 

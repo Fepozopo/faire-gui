@@ -31,12 +31,12 @@ const (
 	StatusTabPendingRetailerConfirmation StatusTab = "PENDING_RETAILER_CONFIRMATION"
 )
 
-// ServerQuery holds the Orders date boundary and legacy API sort choice.
-// CreatedAtMin contains an RFC 3339 timestamp produced from the user's local
+// ServerQuery holds the Orders update boundary and API sort choice.
+// UpdatedAtMin contains an RFC 3339 timestamp produced from the user's local
 // month/day/year input by NormalizeDateFilter. The application uses an earlier
 // value during manual refresh to expand retained local history.
 type ServerQuery struct {
-	CreatedAtMin string
+	UpdatedAtMin string
 	SortBy       faire.OrderSortBy
 }
 
@@ -59,7 +59,7 @@ type State struct {
 }
 
 // NewState returns an orders state that initially includes all supported orders,
-// starts at the one-year created-order lookback, uses Faire's supported creation-time
+// starts at the one-year updated-order lookback, uses Faire's supported update-time
 // ordering, and locally orders rows by newest order date. Its initialized maps allow
 // selection and filter updates without special handling by callers.
 func NewState() State {
@@ -67,10 +67,10 @@ func NewState() State {
 }
 
 // NewStateAt returns a new orders state using now and location for its default
-// one-year created-order lookback. It initializes local table sorting to newest
+// one-year updated-order lookback. It initializes local table sorting to newest
 // order date first, allowing callers and tests to use the same default UI state.
 func NewStateAt(now time.Time, location *time.Location) State {
-	_, createdAtMin := DefaultCreatedAtMinimum(now, location)
+	_, updatedAtMin := DefaultUpdatedAtMinimum(now, location)
 	includedStates := make(map[faire.OrderState]struct{}, len(KnownStates()))
 	for _, state := range KnownStates() {
 		includedStates[state] = struct{}{}
@@ -84,8 +84,8 @@ func NewStateAt(now time.Time, location *time.Location) State {
 			Direction: TableSortDescending,
 		},
 		Query: ServerQuery{
-			CreatedAtMin: createdAtMin,
-			SortBy:       faire.OrderSortByCreatedAt,
+			UpdatedAtMin: updatedAtMin,
+			SortBy:       faire.OrderSortByUpdatedAt,
 		},
 	}
 }

@@ -29,7 +29,7 @@ type orderLoadResult struct {
 	Status        string
 	ApplyRows     bool
 	KeepLoading   bool
-	CreatedAtMin  string
+	UpdatedAtMin  string
 	ApplyBoundary bool
 }
 
@@ -177,8 +177,8 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 			return
 		}
 		if found {
-			boundary = syncState.BootstrapCreatedAtMinUTC.Format(time.RFC3339)
-			state.Query.CreatedAtMin = boundary
+			boundary = syncState.BootstrapUpdatedAtMinUTC.Format(time.RFC3339)
+			state.Query.UpdatedAtMin = boundary
 		}
 	}
 	page, err := loadLocalPage(ui.ctx, store, connectionID, state)
@@ -187,7 +187,7 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 		return
 	}
 	localResult := func(status string, keepLoading bool) orderLoadResult {
-		return orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, CreatedAtMin: boundary, ApplyBoundary: boundary != ""}
+		return orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
 	}
 	if appendResults || !synchronize {
 		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
@@ -219,12 +219,12 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 	}
 	var summary orderssync.Summary
 	if refresh {
-		historyBoundary, err := time.Parse(time.RFC3339Nano, state.Query.CreatedAtMin)
+		historyBoundary, err := time.Parse(time.RFC3339Nano, state.Query.UpdatedAtMin)
 		if err != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Enter a valid created-at minimum before refreshing."})
+			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Enter a valid updated-at minimum before refreshing."})
 			return
 		}
-		summary, err = syncer.SyncFromCreatedAt(ui.ctx, connectionID, historyBoundary)
+		summary, err = syncer.SyncFromUpdatedAt(ui.ctx, connectionID, historyBoundary)
 	} else {
 		summary, err = syncer.Sync(ui.ctx, connectionID)
 	}
@@ -238,8 +238,8 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(stateErr)})
 			return
 		}
-		boundary = syncState.BootstrapCreatedAtMinUTC.Format(time.RFC3339)
-		state.Query.CreatedAtMin = boundary
+		boundary = syncState.BootstrapUpdatedAtMinUTC.Format(time.RFC3339)
+		state.Query.UpdatedAtMin = boundary
 	}
 	page, err = loadLocalPage(ui.ctx, store, connectionID, state)
 	if err != nil {
@@ -330,8 +330,8 @@ func (ui *DesktopUI) drainOrderResults() {
 				continue
 			}
 			if result.ApplyBoundary {
-				ui.ordersState.Query.CreatedAtMin = result.CreatedAtMin
-				ui.createdAtMinEditor.SetText(historyBoundaryInput(result.CreatedAtMin))
+				ui.ordersState.Query.UpdatedAtMin = result.UpdatedAtMin
+				ui.updatedAtMinEditor.SetText(historyBoundaryInput(result.UpdatedAtMin))
 				ui.ordersHistoryBoundaryKnown = true
 			}
 			if ui.ordersSearchActive {
@@ -516,13 +516,13 @@ func (ui *DesktopUI) startOrdersDataAction(rebuild bool) {
 
 // loadLocalPage translates UI filter state into a connection-scoped SQLite keyset query in a background worker.
 func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID string, state orders.State) (ordersstore.ListPage, error) {
-	var createdAtMin *time.Time
-	if state.Query.CreatedAtMin != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, state.Query.CreatedAtMin)
+	var updatedAtMin *time.Time
+	if state.Query.UpdatedAtMin != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, state.Query.UpdatedAtMin)
 		if err != nil {
 			return ordersstore.ListPage{}, err
 		}
-		createdAtMin = &parsed
+		updatedAtMin = &parsed
 	}
 	states := make([]string, 0, len(state.IncludedStates))
 	for orderState := range state.IncludedStates {
@@ -536,7 +536,7 @@ func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID st
 	if state.TableSort.Column == orders.TableSortColumnShipDate {
 		sortColumn = ordersstore.LocalSortExpectedShipAt
 	}
-	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, CreatedAtMin: createdAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
+	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, UpdatedAtMin: updatedAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
 }
 
 // localRows converts storage projections to the existing safe table presentation type outside the frame loop.

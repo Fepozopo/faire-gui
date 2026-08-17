@@ -33,12 +33,12 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	if !summary.Bootstrap || summary.Orders != 2 {
 		t.Fatalf("Summary = %#v, want bootstrap with two orders", summary)
 	}
-	if len(options) != 2 || options[0].CreatedAtMin == nil || options[0].UpdatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" {
+	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" {
 		t.Fatalf("sync options = %#v", options)
 	}
 	wantBoundary := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
-	if *options[0].CreatedAtMin != wantBoundary {
-		t.Fatalf("CreatedAtMin = %q, want %q", *options[0].CreatedAtMin, wantBoundary)
+	if *options[0].UpdatedAtMin != wantBoundary {
+		t.Fatalf("UpdatedAtMin = %q, want %q", *options[0].UpdatedAtMin, wantBoundary)
 	}
 	state, found, err := store.SyncState(ctx, "connection-a")
 	if err != nil || !found || state.BootstrapCompletedAtUTC == nil || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(now) {
@@ -78,8 +78,8 @@ func TestSyncUsesOverlapForIncrementalRefresh(t *testing.T) {
 	}
 }
 
-// TestSyncFromCreatedAtExpandsHistoryAcrossAllPages verifies an earlier manual boundary fetches every historical page and persists that boundary.
-func TestSyncFromCreatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
+// TestSyncFromUpdatedAtExpandsHistoryAcrossAllPages verifies an earlier manual update boundary fetches every historical page and persists that boundary.
+func TestSyncFromUpdatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
 	ctx := context.Background()
 	store := openSyncStore(t)
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -95,7 +95,7 @@ func TestSyncFromCreatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
 	requests := 0
 	source := SourceFunc(func(_ context.Context, options *faire.OrderListOptions) (*faire.OrderPage, error) {
 		requests++
-		if options.CreatedAtMin == nil || *options.CreatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.UpdatedAtMin != nil || options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
+		if options.UpdatedAtMin == nil || *options.UpdatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.CreatedAtMin != nil || options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
 			t.Fatalf("history request options = %#v", options)
 		}
 		if requests == 1 {
@@ -107,15 +107,15 @@ func TestSyncFromCreatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
 		return &faire.OrderPage{Orders: []faire.Order{syncOrder("older-2", historicalBoundary.Add(2*time.Hour))}}, nil
 	})
 	syncer := newTestSyncer(t, store, source, now)
-	summary, err := syncer.SyncFromCreatedAt(ctx, "connection-a", historicalBoundary)
+	summary, err := syncer.SyncFromUpdatedAt(ctx, "connection-a", historicalBoundary)
 	if err != nil {
-		t.Fatalf("SyncFromCreatedAt() error = %v", err)
+		t.Fatalf("SyncFromUpdatedAt() error = %v", err)
 	}
 	if !summary.HistoryExpanded || summary.Bootstrap || summary.Orders != 2 || requests != 2 {
 		t.Fatalf("summary = %#v, requests=%d", summary, requests)
 	}
 	state, found, err := store.SyncState(ctx, "connection-a")
-	if err != nil || !found || !state.BootstrapCreatedAtMinUTC.Equal(historicalBoundary) || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(watermark) {
+	if err != nil || !found || !state.BootstrapUpdatedAtMinUTC.Equal(historicalBoundary) || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(watermark) {
 		t.Fatalf("expanded state = %#v, found=%v, err=%v", state, found, err)
 	}
 }

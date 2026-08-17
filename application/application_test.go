@@ -105,8 +105,8 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
-	if !ui.createdAtMinEditor.SingleLine || ui.createdAtMinEditor.Text() == "" || ui.ordersState.Query.CreatedAtMin == "" {
-		t.Fatalf("created-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.createdAtMinEditor.SingleLine, ui.createdAtMinEditor.Text(), ui.ordersState.Query.CreatedAtMin)
+	if !ui.updatedAtMinEditor.SingleLine || ui.updatedAtMinEditor.Text() == "" || ui.ordersState.Query.UpdatedAtMin == "" {
+		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
 	}
 }
 
@@ -434,12 +434,12 @@ func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 	ui.ordersRequestID = 1
 	boundary := "2025-03-21T00:00:00Z"
-	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, CreatedAtMin: boundary, ApplyBoundary: true}
+	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, UpdatedAtMin: boundary, ApplyBoundary: true}
 
 	ui.drainOrderResults()
 
-	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.CreatedAtMin != boundary || ui.createdAtMinEditor.Text() != historyBoundaryInput(boundary) {
-		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.CreatedAtMin, ui.createdAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
+	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.UpdatedAtMin != boundary || ui.updatedAtMinEditor.Text() != historyBoundaryInput(boundary) {
+		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.UpdatedAtMin, ui.updatedAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
 	}
 }
 

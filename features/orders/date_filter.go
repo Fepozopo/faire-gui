@@ -8,10 +8,11 @@ import (
 
 const dateInputLayout = "1/2/2006"
 
-// DefaultCreatedAtMinimum returns the one-year lookback as a date-field value and
-// its equivalent RFC 3339 start-of-day timestamp in location. A nil location uses
-// the local timezone, matching date filters submitted from the desktop UI.
-func DefaultCreatedAtMinimum(now time.Time, location *time.Location) (string, string) {
+// DefaultUpdatedAtMinimum returns the one-year lookback as a date-field value and
+// its equivalent RFC 3339 start-of-day timestamp in location. now supplies the
+// reference time; a nil location uses the local timezone, matching date filters
+// submitted from the desktop UI.
+func DefaultUpdatedAtMinimum(now time.Time, location *time.Location) (string, string) {
 	if location == nil {
 		location = time.Local
 	}

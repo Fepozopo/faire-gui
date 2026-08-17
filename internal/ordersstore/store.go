@@ -72,11 +72,11 @@ type KeysetCursor struct {
 	OrderID   string
 }
 
-// ListQuery specifies a connection-scoped local list query.
+// ListQuery specifies a connection-scoped local list query filtered by an optional update-time boundary.
 type ListQuery struct {
 	ConnectionID string
 	States       []string
-	CreatedAtMin *time.Time
+	UpdatedAtMin *time.Time
 	SortColumn   LocalSortColumn
 	Descending   bool
 	After        *KeysetCursor
@@ -98,10 +98,10 @@ type Snapshot struct {
 	SyncedAtUTC           time.Time
 }
 
-// SyncState records the last fully completed synchronization checkpoint for one connection.
+// SyncState records the retained update-time boundary and last fully completed synchronization checkpoint for one connection.
 type SyncState struct {
 	ConnectionID              string
-	BootstrapCreatedAtMinUTC  time.Time
+	BootstrapUpdatedAtMinUTC  time.Time
 	BootstrapCompletedAtUTC   *time.Time
 	HighWatermarkUpdatedAtUTC *time.Time
 	LastSuccessfulSyncAtUTC   *time.Time
@@ -122,6 +122,6 @@ type Store interface {
 	RecordAttempt(context.Context, string, time.Time) error
 	CompleteSync(context.Context, string, bool, *time.Time, time.Time) error
 	CompleteHistoricalSync(context.Context, string, time.Time, *time.Time, time.Time) error
-	RecordFailure(context.Context, string, string, time.Time) error
+	RecordFailure(context.Context, string, string, time.Time, time.Time) error
 	DeleteConnectionData(context.Context, string) error
 }
