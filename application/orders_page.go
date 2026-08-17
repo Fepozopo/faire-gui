@@ -63,7 +63,7 @@ func (ui *DesktopUI) ordersConnectionText() string {
 }
 
 // handleOrdersControls processes controls before rendering so visible rows update in the same frame.
-// Refresh validates the local created-date filter and invokes the shared incremental synchronization path.
+// Refresh validates the retained-history boundary and invokes the shared synchronization path.
 func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	if ui.searchOrdersButton.Clicked(gtx) {
 		ui.loadOrderByDisplayID()
@@ -73,7 +73,7 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.orderSearchEditor.SetText("")
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.startOrdersLoad(false, false)
+		ui.startOrdersLoad(false, false, false)
 		ui.invalidate()
 	}
 	if ui.refreshOrdersButton.Clicked(gtx) {
@@ -83,15 +83,15 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 			ui.invalidate()
 			return
 		}
-		// The selected boundary filters local rows; bootstrap and incremental sync retain their own safe boundaries.
+		// An earlier value expands retained history after a complete all-pages refresh; a later value remains a local view boundary.
 		ui.ordersState.Query.CreatedAtMin = createdAtMin
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.startOrdersLoad(false, true)
+		ui.startOrdersLoad(false, true, true)
 		ui.invalidate()
 	}
 	if ui.loadMoreOrdersButton.Clicked(gtx) {
-		ui.startOrdersLoad(true, false)
+		ui.startOrdersLoad(true, false, false)
 		ui.invalidate()
 	}
 	if ui.openSelectedOrderButton.Clicked(gtx) {
@@ -145,7 +145,7 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 							ui.ordersState.SetIncludedStates([]faire.OrderState{*tab.state})
 						}
 						ui.ordersSearchActive = false
-						ui.startOrdersLoad(false, false)
+						ui.startOrdersLoad(false, false, false)
 						ui.invalidate()
 					}
 					selected := (tab.state == nil && len(ui.ordersState.IncludedStates) == len(orders.KnownStates())) || (tab.state != nil && len(ui.ordersState.IncludedStates) == 1 && stateIncluded(ui.ordersState.IncludedStates, *tab.state))
@@ -330,6 +330,20 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		}
 		ui.invalidate()
 	}
+	if ui.orderDateSortButton.Clicked(gtx) {
+		ui.ordersState.ToggleTableSort(orders.TableSortColumnOrderDate)
+		ui.ordersState.Cursor = ""
+		ui.ordersSearchActive = false
+		ui.startOrdersLoad(false, false, false)
+		ui.invalidate()
+	}
+	if ui.shipDateSortButton.Clicked(gtx) {
+		ui.ordersState.ToggleTableSort(orders.TableSortColumnShipDate)
+		ui.ordersState.Cursor = ""
+		ui.ordersSearchActive = false
+		ui.startOrdersLoad(false, false, false)
+		ui.invalidate()
+	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
@@ -403,6 +417,16 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 				return ui.orderCheckbox(gtx, selected)
 			}
 
+			if header && index == 5 {
+				return ui.orderDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnOrderDate, value))
+				})
+			}
+			if header && index == 6 {
+				return ui.shipDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnShipDate, value))
+				})
+			}
 			style := material.Body1(ui.theme, value)
 			style.MaxLines = 2
 			if header {
@@ -413,6 +437,24 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 		}))
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// orderHeaderLabel renders one interactive Orders date-header label with the shared header typography.
+func (ui *DesktopUI) orderHeaderLabel(gtx layout.Context, label string) layout.Dimensions {
+	style := material.Label(ui.theme, unit.Sp(14), label)
+	style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+	return style.Layout(gtx)
+}
+
+// sortHeaderLabel adds an arrow only to the selected local date-sort column.
+func (ui *DesktopUI) sortHeaderLabel(column orders.TableSortColumn, label string) string {
+	if ui.ordersState.TableSort.Column != column {
+		return label
+	}
+	if ui.ordersState.TableSort.Direction == orders.TableSortAscending {
+		return label + " ←"
+	}
+	return label + " →"
 }
 
 // orderCheckbox draws a larger, clipped checkbox indicator for the table header and rows.
@@ -441,13 +483,13 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 	)
 }
 
-// refreshOrdersControl renders manual synchronization and the local created-date filter.
+// refreshOrdersControl renders manual synchronization and the retained-history boundary.
 // Refresh is disabled by behavior while an incompatible Orders operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
 		layout.Rigid(primaryButton(ui.theme, &ui.refreshOrdersButton, "Refresh")),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (local view filter)").Layout),
+		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (earlier date adds history)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.dateFilterField(gtx, &ui.createdAtMinEditor, "M/D/YYYY")

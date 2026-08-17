@@ -32,10 +32,11 @@ type Config struct {
 
 // Summary reports safe synchronization facts that application code may publish to the UI.
 type Summary struct {
-	Bootstrap  bool
-	Orders     int
-	StartedAt  time.Time
-	FinishedAt time.Time
+	Bootstrap       bool
+	HistoryExpanded bool
+	Orders          int
+	StartedAt       time.Time
+	FinishedAt      time.Time
 }
 
 // Syncer coordinates connection-scoped Faire order pages and an Orders store.
@@ -72,7 +73,22 @@ func New(store ordersstore.Store, source Source, config Config) (*Syncer, error)
 }
 
 // Sync performs either an initial one-year bootstrap or an overlap-safe incremental refresh for connectionID.
-func (s *Syncer) Sync(ctx context.Context, connectionID string) (summary Summary, err error) {
+func (s *Syncer) Sync(ctx context.Context, connectionID string) (Summary, error) {
+	return s.sync(ctx, connectionID, nil)
+}
+
+// SyncFromCreatedAt expands the connection's retained history when boundary is earlier than the completed bootstrap boundary.
+// A later boundary remains a local view filter and follows the normal incremental synchronization path.
+func (s *Syncer) SyncFromCreatedAt(ctx context.Context, connectionID string, boundary time.Time) (Summary, error) {
+	if boundary.IsZero() {
+		return Summary{}, fmt.Errorf("history boundary: %w", ErrInvalidRemoteOrder)
+	}
+	boundary = boundary.UTC()
+	return s.sync(ctx, connectionID, &boundary)
+}
+
+// sync coordinates bootstrap, explicit historical expansion, and ordinary overlap-safe incremental synchronization.
+func (s *Syncer) sync(ctx context.Context, connectionID string, requestedBoundary *time.Time) (summary Summary, err error) {
 	if strings.TrimSpace(connectionID) == "" {
 		return Summary{}, fmt.Errorf("connection ID: %w", ErrInvalidRemoteOrder)
 	}
@@ -83,17 +99,26 @@ func (s *Syncer) Sync(ctx context.Context, connectionID string) (summary Summary
 		return summary, err
 	}
 	bootstrap := !found || state.BootstrapCompletedAtUTC == nil
+	historyExpansion := !bootstrap && requestedBoundary != nil && requestedBoundary.Before(state.BootstrapCreatedAtMinUTC)
 	var options faire.OrderListOptions
-	if bootstrap {
+	if bootstrap || historyExpansion {
 		boundary := bootstrapBoundary(startedAt, s.location)
 		if found {
 			boundary = state.BootstrapCreatedAtMinUTC
 		}
-		if err := s.store.BeginBootstrap(ctx, connectionID, boundary, startedAt); err != nil {
+		if requestedBoundary != nil && requestedBoundary.Before(boundary) {
+			boundary = *requestedBoundary
+		}
+		if bootstrap {
+			if err := s.store.BeginBootstrap(ctx, connectionID, boundary, startedAt); err != nil {
+				return summary, err
+			}
+		} else if err := s.store.RecordAttempt(ctx, connectionID, startedAt); err != nil {
 			return summary, err
 		}
 		formatted := boundary.Format(time.RFC3339Nano)
 		options.CreatedAtMin = &formatted
+		state.BootstrapCreatedAtMinUTC = boundary
 	} else {
 		if err := s.store.RecordAttempt(ctx, connectionID, startedAt); err != nil {
 			return summary, err
@@ -109,6 +134,7 @@ func (s *Syncer) Sync(ctx context.Context, connectionID string) (summary Summary
 		options.UpdatedAtMin = &formatted
 	}
 	summary.Bootstrap = bootstrap
+	summary.HistoryExpanded = historyExpansion
 	options.Limit = faire.Ptr(int64(s.pageSize))
 
 	maximumUpdatedAt, ordersCount, syncErr := s.syncPages(ctx, connectionID, options)
@@ -118,7 +144,12 @@ func (s *Syncer) Sync(ctx context.Context, connectionID string) (summary Summary
 		return summary, syncErr
 	}
 	finishedAt := s.now().UTC()
-	if err := s.store.CompleteSync(ctx, connectionID, bootstrap, maximumUpdatedAt, finishedAt); err != nil {
+	if historyExpansion {
+		err = s.store.CompleteHistoricalSync(ctx, connectionID, state.BootstrapCreatedAtMinUTC, maximumUpdatedAt, finishedAt)
+	} else {
+		err = s.store.CompleteSync(ctx, connectionID, bootstrap, maximumUpdatedAt, finishedAt)
+	}
+	if err != nil {
 		_ = s.store.RecordFailure(context.Background(), connectionID, "storage", s.now().UTC())
 		return summary, err
 	}

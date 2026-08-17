@@ -421,6 +421,20 @@ func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
 	}
 }
 
+// TestDrainOrderResultsRestoresPersistedHistoryBoundary verifies a selected connection restores its retained initial-history date in the local filter editor.
+func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	boundary := "2025-03-21T00:00:00Z"
+	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, CreatedAtMin: boundary, ApplyBoundary: true}
+
+	ui.drainOrderResults()
+
+	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.CreatedAtMin != boundary || ui.createdAtMinEditor.Text() != historyBoundaryInput(boundary) {
+		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.CreatedAtMin, ui.createdAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
+	}
+}
+
 // TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter verifies empty local state filters replace, rather than retain, stale rows.
 func TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")

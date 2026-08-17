@@ -104,6 +104,34 @@ func TestListUsesStateFilterAndStableKeysetPagination(t *testing.T) {
 	}
 }
 
+// TestListSortsExpectedShipDateInBothDirections verifies local ship-date sorting and keyset pagination remain deterministic.
+func TestListSortsExpectedShipDateInBothDirections(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	updated := time.Date(2026, 2, 3, 12, 0, 0, 0, time.UTC)
+	earlyShip, lateShip := updated.Add(24*time.Hour), updated.Add(72*time.Hour)
+	first := testRecord("connection-a", "order-a", "DISPLAY-A", updated)
+	first.ExpectedShipAtUTC = &earlyShip
+	second := testRecord("connection-a", "order-b", "DISPLAY-B", updated)
+	second.ExpectedShipAtUTC = &lateShip
+	third := testRecord("connection-a", "order-c", "DISPLAY-C", updated)
+	if err := store.UpsertOrders(ctx, []OrderRecord{first, second, third}); err != nil {
+		t.Fatalf("UpsertOrders() error = %v", err)
+	}
+	descending, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", SortColumn: LocalSortExpectedShipAt, Descending: true, Limit: 1})
+	if err != nil || len(descending.Rows) != 1 || descending.Rows[0].OrderID != "order-b" || descending.NextCursor == nil {
+		t.Fatalf("descending List() = %#v, err=%v", descending, err)
+	}
+	descending, err = store.List(ctx, ListQuery{ConnectionID: "connection-a", SortColumn: LocalSortExpectedShipAt, Descending: true, After: descending.NextCursor, Limit: 2})
+	if err != nil || len(descending.Rows) != 2 || descending.Rows[0].OrderID != "order-a" || descending.Rows[1].OrderID != "order-c" {
+		t.Fatalf("descending next List() = %#v, err=%v", descending, err)
+	}
+	ascending, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", SortColumn: LocalSortExpectedShipAt, Descending: false, Limit: 3})
+	if err != nil || len(ascending.Rows) != 3 || ascending.Rows[0].OrderID != "order-a" || ascending.Rows[1].OrderID != "order-b" || ascending.Rows[2].OrderID != "order-c" {
+		t.Fatalf("ascending List() = %#v, err=%v", ascending, err)
+	}
+}
+
 // TestCompleteSyncOnlyAdvancesCompletedWatermark verifies final checkpoints never move backwards.
 func TestCompleteSyncOnlyAdvancesCompletedWatermark(t *testing.T) {
 	ctx := context.Background()

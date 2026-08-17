@@ -22,13 +22,15 @@ import (
 // orderLoadResult carries one credential-safe local Orders query or synchronization result to the frame loop.
 // It never holds a client, credentials, raw API response, snapshot, address, or order notes.
 type orderLoadResult struct {
-	RequestID   uint64
-	Append      bool
-	Rows        []orders.Row
-	Cursor      string
-	Status      string
-	ApplyRows   bool
-	KeepLoading bool
+	RequestID     uint64
+	Append        bool
+	Rows          []orders.Row
+	Cursor        string
+	Status        string
+	ApplyRows     bool
+	KeepLoading   bool
+	CreatedAtMin  string
+	ApplyBoundary bool
 }
 
 // orderDetailResult carries one typed local-detail result to the frame loop without exposing its serialized snapshot.
@@ -42,8 +44,8 @@ type orderDetailResult struct {
 
 // localCursorPayload is the non-sensitive worker-only encoding of a local SQLite keyset cursor.
 type localCursorPayload struct {
-	CreatedAtUTC *time.Time `json:"created_at_utc,omitempty"`
-	OrderID      string     `json:"order_id"`
+	SortAtUTC *time.Time `json:"sort_at_utc,omitempty"`
+	OrderID   string     `json:"order_id"`
 }
 
 // orderExportKind identifies the server-defined set of orders written to a CSV file.
@@ -107,13 +109,13 @@ func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
 	ui.ordersList.Position.First = 0
 	ui.ordersList.Position.Offset = 0
 	ui.selectedTab = ordersTab
-	ui.startOrdersLoad(false, false)
+	ui.startOrdersLoad(false, false, true)
 	ui.invalidate()
 }
 
-// startOrdersLoad loads a local Orders page first, then conditionally runs the shared synchronization coordinator in a worker.
+// startOrdersLoad loads a local Orders page and, when requested by selection, manual refresh, or the scheduler, runs synchronization in a worker.
 // A request sequence number ensures late results never overwrite newer filters or connections.
-func (ui *DesktopUI) startOrdersLoad(appendResults, refresh bool) {
+func (ui *DesktopUI) startOrdersLoad(appendResults, refresh, synchronize bool) {
 	if ui.ordersStore == nil {
 		ui.ordersState.Status = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
 		return
@@ -135,51 +137,86 @@ func (ui *DesktopUI) startOrdersLoad(appendResults, refresh bool) {
 	if !appendResults {
 		state.Cursor = ""
 	}
+	restoreBoundary := !ui.ordersHistoryBoundaryKnown && !refresh
 	ui.ordersState.Loading = true
 	ui.ordersState.Status = "Loading locally stored orders…"
 	store, manager := ui.ordersStore, ui.manager
-	go ui.loadOrders(requestID, connectionID, state, appendResults, refresh, store, manager)
+	go ui.loadOrders(requestID, connectionID, state, appendResults, refresh, synchronize, restoreBoundary, store, manager)
 }
 
-// loadOrders performs local SQLite reads, conditional Faire synchronization, and final local re-queries outside the Gio frame loop.
-func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state orders.State, appendResults, refresh bool, store ordersstore.Store, manager *connections.Manager) {
+// loadOrders performs local SQLite reads, optional Faire synchronization, and final local re-queries outside the Gio frame loop.
+func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state orders.State, appendResults, refresh, synchronize, restoreBoundary bool, store ordersstore.Store, manager *connections.Manager) {
+	boundary := ""
+	if restoreBoundary {
+		syncState, found, err := store.SyncState(ui.ctx, connectionID)
+		if err != nil {
+			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
+			return
+		}
+		if found {
+			boundary = syncState.BootstrapCreatedAtMinUTC.Format(time.RFC3339)
+			state.Query.CreatedAtMin = boundary
+		}
+	}
 	page, err := loadLocalPage(ui.ctx, store, connectionID, state)
 	if err != nil {
 		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
 		return
 	}
-	if appendResults {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Append: true, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: "Showing locally stored orders.", ApplyRows: true})
+	localResult := func(status string, keepLoading bool) orderLoadResult {
+		return orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, CreatedAtMin: boundary, ApplyBoundary: boundary != ""}
+	}
+	if appendResults || !synchronize {
+		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
 		return
 	}
 	shouldSync, err := ordersNeedSync(ui.ctx, store, connectionID, time.Now().UTC())
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: ordersStorageErrorMessage(err), ApplyRows: true})
+		ui.publishOrderResult(localResult(ordersStorageErrorMessage(err), false))
 		return
 	}
 	if !refresh && !shouldSync {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: localStatus(store, ui.ctx, connectionID), ApplyRows: true})
+		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
 		return
 	}
-	ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: "Checking Faire for updated orders…", ApplyRows: true, KeepLoading: true})
+	ui.publishOrderResult(localResult("Checking Faire for updated orders…", true))
 	if manager == nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: "Showing locally stored orders. Saved connections are unavailable.", ApplyRows: true})
+		ui.publishOrderResult(localResult("Showing locally stored orders. Saved connections are unavailable.", false))
 		return
 	}
 	client, _, err := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: ordersLoadErrorMessage(err)})
+		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(err)})
 		return
 	}
 	syncer, err := orderssync.New(store, orderssync.SourceFunc(client.Orders.List), orderssync.Config{})
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: "Orders could not be synchronized. Try refreshing later."})
+		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Orders could not be synchronized. Try refreshing later."})
 		return
 	}
-	summary, err := syncer.Sync(ui.ctx, connectionID)
+	var summary orderssync.Summary
+	if refresh {
+		historyBoundary, err := time.Parse(time.RFC3339Nano, state.Query.CreatedAtMin)
+		if err != nil {
+			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Enter a valid created-at minimum before refreshing."})
+			return
+		}
+		summary, err = syncer.SyncFromCreatedAt(ui.ctx, connectionID, historyBoundary)
+	} else {
+		summary, err = syncer.Sync(ui.ctx, connectionID)
+	}
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: ordersLoadErrorMessage(err)})
+		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(err)})
 		return
+	}
+	if summary.Bootstrap || summary.HistoryExpanded {
+		syncState, found, stateErr := store.SyncState(ui.ctx, connectionID)
+		if stateErr != nil || !found {
+			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(stateErr)})
+			return
+		}
+		boundary = syncState.BootstrapCreatedAtMinUTC.Format(time.RFC3339)
+		state.Query.CreatedAtMin = boundary
 	}
 	page, err = loadLocalPage(ui.ctx, store, connectionID, state)
 	if err != nil {
@@ -187,10 +224,12 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 		return
 	}
 	status := "Orders are up to date."
-	if summary.Orders > 0 {
+	if summary.HistoryExpanded {
+		status = "Older order history was added from Faire."
+	} else if summary.Orders > 0 {
 		status = "Orders updated from Faire."
 	}
-	ui.publishOrderResult(orderLoadResult{RequestID: requestID, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true})
+	ui.publishOrderResult(localResult(status, false))
 }
 
 // loadOrderByDisplayID searches the connection-scoped local index before using the authenticated direct-lookup fallback.
@@ -267,6 +306,11 @@ func (ui *DesktopUI) drainOrderResults() {
 				ui.ordersState.Status = result.Status
 				continue
 			}
+			if result.ApplyBoundary {
+				ui.ordersState.Query.CreatedAtMin = result.CreatedAtMin
+				ui.createdAtMinEditor.SetText(historyBoundaryInput(result.CreatedAtMin))
+				ui.ordersHistoryBoundaryKnown = true
+			}
 			if ui.ordersSearchActive {
 				ui.ordersState.Rows = result.Rows
 				ui.ordersState.Cursor = ""
@@ -283,6 +327,15 @@ func (ui *DesktopUI) drainOrderResults() {
 			return
 		}
 	}
+}
+
+// historyBoundaryInput converts a stored RFC 3339 historical boundary into the Orders date editor's local calendar input.
+func historyBoundaryInput(value string) string {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return ""
+	}
+	return parsed.In(time.Local).Format("1/2/2006")
 }
 
 // openSelectedOrder opens the locally stored snapshot for exactly one selected table row.
@@ -434,7 +487,7 @@ func (ui *DesktopUI) startOrdersDataAction(rebuild bool) {
 			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Deleted locally stored order data for this connection."})
 			return
 		}
-		ui.loadOrders(requestID, connectionID, state, false, true, store, manager)
+		ui.loadOrders(requestID, connectionID, state, false, true, true, false, store, manager)
 	}()
 }
 
@@ -456,7 +509,11 @@ func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID st
 	if err != nil {
 		return ordersstore.ListPage{}, err
 	}
-	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, CreatedAtMin: createdAtMin, After: after, Limit: 50})
+	sortColumn := ordersstore.LocalSortCreatedAt
+	if state.TableSort.Column == orders.TableSortColumnShipDate {
+		sortColumn = ordersstore.LocalSortExpectedShipAt
+	}
+	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, CreatedAtMin: createdAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
 }
 
 // localRows converts storage projections to the existing safe table presentation type outside the frame loop.
@@ -516,7 +573,7 @@ func encodeLocalCursor(cursor *ordersstore.KeysetCursor) string {
 	if cursor == nil {
 		return ""
 	}
-	encoded, err := json.Marshal(localCursorPayload{CreatedAtUTC: cursor.CreatedAtUTC, OrderID: cursor.OrderID})
+	encoded, err := json.Marshal(localCursorPayload{SortAtUTC: cursor.SortAtUTC, OrderID: cursor.OrderID})
 	if err != nil {
 		return ""
 	}
@@ -536,7 +593,7 @@ func decodeLocalCursor(value string) (*ordersstore.KeysetCursor, error) {
 	if err := json.Unmarshal(decoded, &payload); err != nil || payload.OrderID == "" {
 		return nil, fmt.Errorf("invalid local Orders cursor")
 	}
-	return &ordersstore.KeysetCursor{CreatedAtUTC: payload.CreatedAtUTC, OrderID: payload.OrderID}, nil
+	return &ordersstore.KeysetCursor{SortAtUTC: payload.SortAtUTC, OrderID: payload.OrderID}, nil
 }
 
 // ordersNeedSync determines whether the selected connection lacks a completed bootstrap or is at least one hour stale.
@@ -594,7 +651,7 @@ func (ui *DesktopUI) drainOrdersSchedule() {
 		select {
 		case <-ui.ordersSchedule:
 			if ui.activeConnectionID != "" && !ui.ordersState.Loading && !ui.orderDetailLoading {
-				ui.startOrdersLoad(false, false)
+				ui.startOrdersLoad(false, false, true)
 			}
 		default:
 			return

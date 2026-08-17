@@ -8,13 +8,17 @@ import (
 	"time"
 )
 
-// List returns a deterministic local page for exactly one connection.
+// List returns a deterministic local page for exactly one connection and selected indexed date column.
 func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, error) {
 	if query.ConnectionID == "" {
 		return ListPage{}, fmt.Errorf("connection ID: %w", ErrInvalidRecord)
 	}
 	if query.Limit <= 0 {
 		query.Limit = 50
+	}
+	sortColumn, err := localSortColumn(query.SortColumn)
+	if err != nil {
+		return ListPage{}, err
 	}
 	args := []any{query.ConnectionID}
 	where := []string{"connection_id = ?"}
@@ -31,19 +35,27 @@ func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, erro
 		args = append(args, query.CreatedAtMin.UTC().UnixMicro())
 	}
 	if query.After != nil {
-		if query.After.CreatedAtUTC == nil {
-			where = append(where, "(created_at_utc IS NULL AND order_id > ?)")
+		if query.After.SortAtUTC == nil {
+			where = append(where, "("+sortColumn+" IS NULL AND order_id > ?)")
 			args = append(args, query.After.OrderID)
 		} else {
-			where = append(where, "(created_at_utc < ? OR (created_at_utc = ? AND order_id > ?) OR created_at_utc IS NULL)")
-			created := query.After.CreatedAtUTC.UTC().UnixMicro()
-			args = append(args, created, created, query.After.OrderID)
+			comparison := "<"
+			if !query.Descending {
+				comparison = ">"
+			}
+			where = append(where, "("+sortColumn+" "+comparison+" ? OR ("+sortColumn+" = ? AND order_id > ?) OR "+sortColumn+" IS NULL)")
+			sortAt := query.After.SortAtUTC.UTC().UnixMicro()
+			args = append(args, sortAt, sortAt, query.After.OrderID)
 		}
+	}
+	direction := "ASC"
+	if query.Descending {
+		direction = "DESC"
 	}
 	args = append(args, query.Limit+1)
 	statement := `SELECT order_id, display_id, state, customer_name, total_display, commission_display, source, created_at_utc, expected_ship_at_utc, updated_at_utc, synced_at_utc
 		FROM orders WHERE ` + strings.Join(where, " AND ") + `
-		ORDER BY created_at_utc DESC NULLS LAST, order_id ASC LIMIT ?`
+		ORDER BY ` + sortColumn + ` ` + direction + ` NULLS LAST, order_id ASC LIMIT ?`
 	rows, err := s.database.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return ListPage{}, classifyError(err)
@@ -63,9 +75,29 @@ func (s *SQLiteStore) List(ctx context.Context, query ListQuery) (ListPage, erro
 	if len(page.Rows) > query.Limit {
 		last := page.Rows[query.Limit-1]
 		page.Rows = page.Rows[:query.Limit]
-		page.NextCursor = &KeysetCursor{CreatedAtUTC: last.CreatedAtUTC, OrderID: last.OrderID}
+		page.NextCursor = &KeysetCursor{SortAtUTC: rowSortTime(last, query.SortColumn), OrderID: last.OrderID}
 	}
 	return page, nil
+}
+
+// localSortColumn maps the closed storage-owned sort set to a trusted SQLite column name.
+func localSortColumn(column LocalSortColumn) (string, error) {
+	switch column {
+	case "", LocalSortCreatedAt:
+		return "created_at_utc", nil
+	case LocalSortExpectedShipAt:
+		return "expected_ship_at_utc", nil
+	default:
+		return "", fmt.Errorf("local sort column: %w", ErrInvalidRecord)
+	}
+}
+
+// rowSortTime returns the selected indexed timestamp for a local pagination cursor.
+func rowSortTime(row LocalRow, column LocalSortColumn) *time.Time {
+	if column == LocalSortExpectedShipAt {
+		return row.ExpectedShipAtUTC
+	}
+	return row.CreatedAtUTC
 }
 
 // FindByDisplayID returns one connection-scoped indexed row for a visible order number.
@@ -152,10 +184,12 @@ func (s *SQLiteStore) SyncState(ctx context.Context, connectionID string) (SyncS
 	return state, true, nil
 }
 
-// BeginBootstrap creates a connection checkpoint or refreshes its attempted-at timestamp without changing the selected boundary.
+// BeginBootstrap creates a connection checkpoint or refreshes its attempted-at timestamp while retaining the earliest explicitly requested boundary.
 func (s *SQLiteStore) BeginBootstrap(ctx context.Context, connectionID string, boundary, attemptedAt time.Time) error {
 	_, err := s.database.ExecContext(ctx, `INSERT INTO order_sync_state(connection_id, bootstrap_created_at_min_utc, last_attempt_at_utc) VALUES (?, ?, ?)
-		ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at_utc = excluded.last_attempt_at_utc`, connectionID, boundary.UTC().UnixMicro(), attemptedAt.UTC().UnixMicro())
+		ON CONFLICT(connection_id) DO UPDATE SET
+		bootstrap_created_at_min_utc = MIN(order_sync_state.bootstrap_created_at_min_utc, excluded.bootstrap_created_at_min_utc),
+		last_attempt_at_utc = excluded.last_attempt_at_utc`, connectionID, boundary.UTC().UnixMicro(), attemptedAt.UTC().UnixMicro())
 	return classifyError(err)
 }
 
@@ -187,6 +221,34 @@ func (s *SQLiteStore) CompleteSync(ctx context.Context, connectionID string, boo
 		completedValue = nil
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE order_sync_state SET bootstrap_completed_at_utc = COALESCE(?, bootstrap_completed_at_utc), high_watermark_updated_at_utc = ?, last_successful_sync_at_utc = ?, last_error_kind = NULL, last_error_at_utc = NULL WHERE connection_id = ?`, completedValue, nullableInt(watermark), completedAt.UTC().UnixMicro(), connectionID)
+	if err != nil {
+		return classifyError(err)
+	}
+	return classifyError(tx.Commit())
+}
+
+// CompleteHistoricalSync records a fully completed older-history expansion and preserves the greatest completed remote watermark.
+func (s *SQLiteStore) CompleteHistoricalSync(ctx context.Context, connectionID string, boundary time.Time, maximumUpdatedAt *time.Time, completedAt time.Time) error {
+	tx, err := s.database.BeginTx(ctx, nil)
+	if err != nil {
+		return classifyError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT high_watermark_updated_at_utc FROM order_sync_state WHERE connection_id = ?`, connectionID).Scan(&current); err != nil {
+		return classifyError(err)
+	}
+	watermark := current
+	if maximumUpdatedAt != nil && (!watermark.Valid || maximumUpdatedAt.UTC().UnixMicro() > watermark.Int64) {
+		watermark = sql.NullInt64{Int64: maximumUpdatedAt.UTC().UnixMicro(), Valid: true}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE order_sync_state SET
+		bootstrap_created_at_min_utc = MIN(bootstrap_created_at_min_utc, ?),
+		high_watermark_updated_at_utc = ?,
+		last_successful_sync_at_utc = ?,
+		last_error_kind = NULL,
+		last_error_at_utc = NULL
+		WHERE connection_id = ?`, boundary.UTC().UnixMicro(), nullableInt(watermark), completedAt.UTC().UnixMicro(), connectionID)
 	if err != nil {
 		return classifyError(err)
 	}

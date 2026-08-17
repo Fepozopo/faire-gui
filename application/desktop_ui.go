@@ -48,22 +48,23 @@ type DesktopUI struct {
 	csvExportCompletedDialogOpen bool
 	csvExportCompletedFilename   string
 
-	ordersStore             ordersstore.Store
-	ordersState             orders.State
-	ordersRequestID         uint64
-	detailRequestID         uint64
-	exportRequestID         uint64
-	ordersSearchActive      bool
-	ordersExporting         bool
-	orderDetailOpen         bool
-	orderDetailLoading      bool
-	orderDetail             orders.Detail
-	orderDetailStatus       string
-	orderDetailID           faire.OrderID
-	orderDetailConnectionID string
-	pendingStates           map[faire.OrderState]struct{}
-	editorMode              connectionEditorMode
-	editing                 connections.Connection
+	ordersStore                ordersstore.Store
+	ordersState                orders.State
+	ordersRequestID            uint64
+	detailRequestID            uint64
+	exportRequestID            uint64
+	ordersSearchActive         bool
+	ordersHistoryBoundaryKnown bool
+	ordersExporting            bool
+	orderDetailOpen            bool
+	orderDetailLoading         bool
+	orderDetail                orders.Detail
+	orderDetailStatus          string
+	orderDetailID              faire.OrderID
+	orderDetailConnectionID    string
+	pendingStates              map[faire.OrderState]struct{}
+	editorMode                 connectionEditorMode
+	editing                    connections.Connection
 
 	status           string
 	managementStatus string
@@ -100,6 +101,8 @@ type DesktopUI struct {
 	selectAllStatesButton           widget.Clickable
 	selectNoStatesButton            widget.Clickable
 	headerSelectVisibleOrdersButton widget.Clickable
+	orderDateSortButton             widget.Clickable
+	shipDateSortButton              widget.Clickable
 	exportMenuButton                widget.Clickable
 	exportNewOrdersButton           widget.Clickable
 	exportBackorderedOrdersButton   widget.Clickable
@@ -225,6 +228,7 @@ func (ui *DesktopUI) configureEditors() {
 // resetOrdersState creates a fresh default order query and synchronizes its
 // one-year created-order lookback with the visible date editor.
 func (ui *DesktopUI) resetOrdersState() {
+	ui.ordersHistoryBoundaryKnown = false
 	now := time.Now()
 	createdAtMinimumInput, _ := orders.DefaultCreatedAtMinimum(now, time.Local)
 	ui.ordersState = orders.NewStateAt(now, time.Local)
@@ -284,7 +288,7 @@ func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
 		if ui.tabButtons[index].Clicked(gtx) {
 			ui.selectedTab = index
 			if index == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
-				ui.startOrdersLoad(false, false)
+				ui.startOrdersLoad(false, false, true)
 			}
 			ui.invalidate()
 		}

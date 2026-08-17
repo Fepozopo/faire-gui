@@ -56,10 +56,20 @@ type LocalRow struct {
 	SyncedAtUTC       time.Time
 }
 
-// KeysetCursor identifies the final row of a local Orders page ordered by creation time then order ID.
+// LocalSortColumn identifies an indexed date column used for local Orders ordering.
+type LocalSortColumn string
+
+const (
+	// LocalSortCreatedAt orders rows by the order creation date.
+	LocalSortCreatedAt LocalSortColumn = "CREATED_AT"
+	// LocalSortExpectedShipAt orders rows by the expected ship date.
+	LocalSortExpectedShipAt LocalSortColumn = "EXPECTED_SHIP_AT"
+)
+
+// KeysetCursor identifies the final row of a local Orders page ordered by its selected date column then order ID.
 type KeysetCursor struct {
-	CreatedAtUTC *time.Time
-	OrderID      string
+	SortAtUTC *time.Time
+	OrderID   string
 }
 
 // ListQuery specifies a connection-scoped local list query.
@@ -67,6 +77,8 @@ type ListQuery struct {
 	ConnectionID string
 	States       []string
 	CreatedAtMin *time.Time
+	SortColumn   LocalSortColumn
+	Descending   bool
 	After        *KeysetCursor
 	Limit        int
 }
@@ -109,6 +121,7 @@ type Store interface {
 	BeginBootstrap(context.Context, string, time.Time, time.Time) error
 	RecordAttempt(context.Context, string, time.Time) error
 	CompleteSync(context.Context, string, bool, *time.Time, time.Time) error
+	CompleteHistoricalSync(context.Context, string, time.Time, *time.Time, time.Time) error
 	RecordFailure(context.Context, string, string, time.Time) error
 	DeleteConnectionData(context.Context, string) error
 }

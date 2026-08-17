@@ -59,8 +59,9 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	}
 }
 
-// TestNewStateAtUsesCreationTimeSortAndOneYearLookback verifies the initial query uses the selected server sort and default date boundary.
-func TestNewStateAtUsesCreationTimeSortAndOneYearLookback(t *testing.T) {
+// TestNewStateAtUsesCreationTimeServerSortAndOneYearLookback verifies the initial
+// server query uses the selected sort and default date boundary.
+func TestNewStateAtUsesCreationTimeServerSortAndOneYearLookback(t *testing.T) {
 	location := time.FixedZone("UTC-05", -5*60*60)
 	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
 	if state.Query.SortBy != faire.OrderSortByCreatedAt {
@@ -71,26 +72,18 @@ func TestNewStateAtUsesCreationTimeSortAndOneYearLookback(t *testing.T) {
 	}
 }
 
-// TestNewStateIncludesOnlyNewOrders verifies the initial Orders screen loads only new orders by default.
-func TestNewStateIncludesOnlyNewOrders(t *testing.T) {
+// TestNewStateIncludesAllOrders verifies the initial Orders screen shows every supported state by default.
+func TestNewStateIncludesAllOrders(t *testing.T) {
 	state := NewState()
-	wantIncluded := map[faire.OrderState]struct{}{
-		faire.OrderStateNew: {},
+	wantIncluded := make(map[faire.OrderState]struct{}, len(KnownStates()))
+	for _, orderState := range KnownStates() {
+		wantIncluded[orderState] = struct{}{}
 	}
 	if !reflect.DeepEqual(state.IncludedStates, wantIncluded) {
 		t.Fatalf("NewState().IncludedStates = %#v, want %#v", state.IncludedStates, wantIncluded)
 	}
-	wantExcluded := []faire.OrderState{
-		faire.OrderStateProcessing,
-		faire.OrderStatePreTransit,
-		faire.OrderStateInTransit,
-		faire.OrderStateDelivered,
-		faire.OrderStateCanceled,
-		faire.OrderStateBackordered,
-		faire.OrderStatePendingRetailerConfirmation,
-	}
-	if got := state.BuildOptions().ExcludedStates; !reflect.DeepEqual(got, wantExcluded) {
-		t.Fatalf("NewState().BuildOptions().ExcludedStates = %#v, want %#v", got, wantExcluded)
+	if got := state.BuildOptions().ExcludedStates; len(got) != 0 {
+		t.Fatalf("NewState().BuildOptions().ExcludedStates = %#v, want no exclusions", got)
 	}
 }
 

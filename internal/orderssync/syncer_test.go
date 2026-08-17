@@ -78,6 +78,48 @@ func TestSyncUsesOverlapForIncrementalRefresh(t *testing.T) {
 	}
 }
 
+// TestSyncFromCreatedAtExpandsHistoryAcrossAllPages verifies an earlier manual boundary fetches every historical page and persists that boundary.
+func TestSyncFromCreatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
+	ctx := context.Background()
+	store := openSyncStore(t)
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	initialBoundary := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+	historicalBoundary := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	watermark := now.Add(-time.Hour)
+	if err := store.BeginBootstrap(ctx, "connection-a", initialBoundary, now); err != nil {
+		t.Fatalf("BeginBootstrap() error = %v", err)
+	}
+	if err := store.CompleteSync(ctx, "connection-a", true, &watermark, now); err != nil {
+		t.Fatalf("CompleteSync() error = %v", err)
+	}
+	requests := 0
+	source := SourceFunc(func(_ context.Context, options *faire.OrderListOptions) (*faire.OrderPage, error) {
+		requests++
+		if options.CreatedAtMin == nil || *options.CreatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.UpdatedAtMin != nil {
+			t.Fatalf("history request options = %#v", options)
+		}
+		if requests == 1 {
+			return &faire.OrderPage{Orders: []faire.Order{syncOrder("older-1", historicalBoundary.Add(time.Hour))}, Cursor: faire.Ptr("history-next")}, nil
+		}
+		if options.Cursor == nil || *options.Cursor != "history-next" {
+			t.Fatalf("history cursor = %#v", options.Cursor)
+		}
+		return &faire.OrderPage{Orders: []faire.Order{syncOrder("older-2", historicalBoundary.Add(2*time.Hour))}}, nil
+	})
+	syncer := newTestSyncer(t, store, source, now)
+	summary, err := syncer.SyncFromCreatedAt(ctx, "connection-a", historicalBoundary)
+	if err != nil {
+		t.Fatalf("SyncFromCreatedAt() error = %v", err)
+	}
+	if !summary.HistoryExpanded || summary.Bootstrap || summary.Orders != 2 || requests != 2 {
+		t.Fatalf("summary = %#v, requests=%d", summary, requests)
+	}
+	state, found, err := store.SyncState(ctx, "connection-a")
+	if err != nil || !found || !state.BootstrapCreatedAtMinUTC.Equal(historicalBoundary) || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(watermark) {
+		t.Fatalf("expanded state = %#v, found=%v, err=%v", state, found, err)
+	}
+}
+
 // TestSyncRetainsCompletedWatermarkAfterPartialFailure verifies replay-safe page commits do not falsely complete a sync.
 func TestSyncRetainsCompletedWatermarkAfterPartialFailure(t *testing.T) {
 	ctx := context.Background()

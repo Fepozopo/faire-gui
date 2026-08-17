@@ -67,7 +67,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 	if button.Clicked(gtx) {
 		ui.selectedTab = route
 		if route == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
-			ui.startOrdersLoad(false, false)
+			ui.startOrdersLoad(false, false, true)
 		}
 		ui.invalidate()
 	}
@@ -264,7 +264,7 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
 		ui.ordersSearchActive = false
 		ui.statesDialogOpen = false
-		ui.startOrdersLoad(false, false)
+		ui.startOrdersLoad(false, false, false)
 		ui.invalidate()
 	}
 	return modalPanel(gtx, ui, "Filter states", func(gtx layout.Context) layout.Dimensions {
