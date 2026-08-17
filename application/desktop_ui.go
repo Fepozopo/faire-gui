@@ -48,24 +48,25 @@ type DesktopUI struct {
 	csvExportCompletedDialogOpen bool
 	csvExportCompletedFilename   string
 
-	ordersStore                ordersstore.Store
-	ordersState                orders.State
-	ordersRequestID            uint64
-	ordersDataStatusRequestID  uint64
-	detailRequestID            uint64
-	exportRequestID            uint64
-	ordersSearchActive         bool
-	ordersHistoryBoundaryKnown bool
-	ordersExporting            bool
-	orderDetailOpen            bool
-	orderDetailLoading         bool
-	orderDetail                orders.Detail
-	orderDetailStatus          string
-	orderDetailID              faire.OrderID
-	orderDetailConnectionID    string
-	pendingStates              map[faire.OrderState]struct{}
-	editorMode                 connectionEditorMode
-	editing                    connections.Connection
+	ordersStore                  ordersstore.Store
+	ordersState                  orders.State
+	ordersRequestID              uint64
+	ordersDataStatusRequestID    uint64
+	ordersDataActionConnectionID string
+	detailRequestID              uint64
+	exportRequestID              uint64
+	ordersSearchActive           bool
+	ordersHistoryBoundaryKnown   bool
+	ordersExporting              bool
+	orderDetailOpen              bool
+	orderDetailLoading           bool
+	orderDetail                  orders.Detail
+	orderDetailStatus            string
+	orderDetailID                faire.OrderID
+	orderDetailConnectionID      string
+	pendingStates                map[faire.OrderState]struct{}
+	editorMode                   connectionEditorMode
+	editing                      connections.Connection
 
 	status           string
 	managementStatus string
@@ -166,9 +167,11 @@ type ordersDataDialogState struct {
 	connectionID string
 }
 
-// profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.
+// profileLoadResult transports a credential-safe asynchronous profile-loading or inactive local-data result to the UI frame loop.
+// OrdersDataConnectionID is set only for a completed local-data action, never for an ordinary profile load.
 type profileLoadResult struct {
-	status string
+	status                 string
+	ordersDataConnectionID string
 }
 
 // newDesktopUI constructs a DesktopUI without persistent Orders storage for focused UI tests.

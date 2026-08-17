@@ -37,9 +37,23 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrdersStatus renders credential-safe loading, success, and error feedback above the Orders title.
+// A rebuild or delete in progress receives a bordered banner so it remains obvious after navigation from Brand Profile.
 func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
 	if ui.ordersState.Status == "" {
 		return layout.Dimensions{}
+	}
+	if ui.ordersDataActionConnectionID == ui.activeConnectionID {
+		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(material.Label(ui.theme, unit.Sp(14), "Local order data in progress").Layout),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+						layout.Rigid(bodyText(ui.theme, ui.ordersState.Status, mutedTextColor)),
+					)
+				})
+			})
+		})
 	}
 	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, bodyText(ui.theme, ui.ordersState.Status, mutedTextColor))
 }

@@ -11,13 +11,20 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// drainResults transfers completed safe profile statuses from background work into UI-owned state.
-// It never blocks a frame, and no result contains credentials, response bodies, or Gio widget state.
+// drainResults transfers completed safe profile and inactive local-data statuses into UI-owned state.
+// It refreshes an active Orders view after its matching off-screen local-data action completes, without starting duplicate synchronization.
 func (ui *DesktopUI) drainResults() {
 	for {
 		select {
 		case result := <-ui.results:
 			ui.status = result.status
+			if result.ordersDataConnectionID != "" && result.ordersDataConnectionID == ui.ordersDataActionConnectionID {
+				ui.ordersDataActionConnectionID = ""
+				if result.ordersDataConnectionID == ui.activeConnectionID {
+					ui.ordersState.Loading = false
+					ui.startOrdersLoad(false, false, false)
+				}
+			}
 		default:
 			return
 		}
@@ -57,15 +64,26 @@ func (ui *DesktopUI) loadProfile(connectionID string) {
 	ui.publishProfileResult(profileSummary(connection, profile))
 }
 
-// publishProfileResult sends a safe result unless the window has already closed.
+// publishProfileResult sends a safe profile status unless the window has already closed.
 // The buffered channel avoids holding the profile goroutine until another frame arrives.
 func (ui *DesktopUI) publishProfileResult(status string) {
+	ui.publishProfileLoadResult(profileLoadResult{status: status})
+}
+
+// publishOrdersDataResult sends a safe inactive local-data completion status for exactly one connection.
+// The result identifies only an immutable connection ID, allowing the frame loop to refresh an active Orders view safely.
+func (ui *DesktopUI) publishOrdersDataResult(connectionID, status string) {
+	ui.publishProfileLoadResult(profileLoadResult{status: status, ordersDataConnectionID: connectionID})
+}
+
+// publishProfileLoadResult publishes a credential-safe Brand Profile result unless application shutdown has begun.
+func (ui *DesktopUI) publishProfileLoadResult(result profileLoadResult) {
 	select {
-	case ui.results <- profileLoadResult{status: status}:
+	case ui.results <- result:
 	case <-ui.ctx.Done():
 		return
 	}
-	ui.window.Invalidate()
+	ui.invalidate()
 }
 
 // rowControlsFor returns stable controls for connectionID and creates them only for a newly visible row.

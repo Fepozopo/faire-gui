@@ -21,7 +21,7 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 					layout.Rigid(bodyText(ui.theme, "Select a connection to verify its read-only Faire brand profile.", mutedTextColor)),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(statusText(ui.theme, ui.status)),
+					layout.Rigid(ui.layoutBrandStatus),
 				)
 			})
 		}
@@ -59,6 +59,25 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 					)
 				})
 			})
+		})
+	})
+}
+
+// layoutBrandStatus renders Brand Profile feedback and emphasizes an in-progress local-data action.
+func (ui *DesktopUI) layoutBrandStatus(gtx layout.Context) layout.Dimensions {
+	if ui.status == "" {
+		return layout.Dimensions{}
+	}
+	if ui.ordersDataActionConnectionID == "" {
+		return statusText(ui.theme, ui.status)(gtx)
+	}
+	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(material.Label(ui.theme, unit.Sp(14), "Local order data in progress").Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+				layout.Rigid(bodyText(ui.theme, ui.status, mutedTextColor)),
+			)
 		})
 	})
 }
