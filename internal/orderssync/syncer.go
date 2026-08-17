@@ -243,8 +243,14 @@ func (s *Syncer) syncPages(ctx context.Context, connectionID string, options fai
 			return nil, ordersCount, fmt.Errorf("%w: %q", ErrRepeatedCursor, cursor)
 		}
 		seenCursors[cursor] = struct{}{}
-		options.Cursor = &cursor
+		options = cursorPageOptions(cursor)
 	}
+}
+
+// cursorPageOptions builds a follow-up Orders request from exactly the cursor Faire returned.
+// Faire embeds the original listing criteria in its opaque cursor, so replaying filters alongside it can make the request invalid.
+func cursorPageOptions(cursor string) faire.OrderListOptions {
+	return faire.OrderListOptions{Cursor: &cursor}
 }
 
 // RecordFromOrder validates one remote order, verifies its JSON round trip, and builds its atomic stored representation.

@@ -11,7 +11,7 @@ import (
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
 
-// TestSyncBootstrapsAllPagesAndFinalizesCheckpoint verifies a one-year bootstrap traverses every remote cursor.
+// TestSyncBootstrapsAllPagesAndFinalizesCheckpoint verifies a one-year bootstrap traverses every remote cursor with an exact cursor-only follow-up request.
 func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	store := openSyncStore(t)
@@ -33,7 +33,7 @@ func TestSyncBootstrapsAllPagesAndFinalizesCheckpoint(t *testing.T) {
 	if !summary.Bootstrap || summary.Orders != 2 {
 		t.Fatalf("Summary = %#v, want bootstrap with two orders", summary)
 	}
-	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" {
+	if len(options) != 2 || options[0].UpdatedAtMin == nil || options[0].CreatedAtMin != nil || options[0].SortBy == nil || *options[0].SortBy != faire.OrderSortByUpdatedAt || options[0].ExcludedStates != nil || options[1].Cursor == nil || *options[1].Cursor != "cursor-1" || options[1].Limit != nil || options[1].Page != nil || options[1].UpdatedAtMin != nil || options[1].CreatedAtMin != nil || options[1].SortBy != nil || options[1].ExcludedStates != nil || options[1].ShipAfterMax != nil || options[1].OriginalOrderID != nil {
 		t.Fatalf("sync options = %#v", options)
 	}
 	wantBoundary := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
@@ -95,14 +95,14 @@ func TestSyncFromUpdatedAtExpandsHistoryAcrossAllPages(t *testing.T) {
 	requests := 0
 	source := SourceFunc(func(_ context.Context, options *faire.OrderListOptions) (*faire.OrderPage, error) {
 		requests++
-		if options.UpdatedAtMin == nil || *options.UpdatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.CreatedAtMin != nil || options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
-			t.Fatalf("history request options = %#v", options)
-		}
 		if requests == 1 {
+			if options.UpdatedAtMin == nil || *options.UpdatedAtMin != historicalBoundary.Format(time.RFC3339Nano) || options.CreatedAtMin != nil || options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
+				t.Fatalf("initial history request options = %#v", options)
+			}
 			return &faire.OrderPage{Orders: []faire.Order{syncOrder("older-1", historicalBoundary.Add(time.Hour))}, Cursor: faire.Ptr("history-next")}, nil
 		}
-		if options.Cursor == nil || *options.Cursor != "history-next" {
-			t.Fatalf("history cursor = %#v", options.Cursor)
+		if options.Cursor == nil || *options.Cursor != "history-next" || options.Limit != nil || options.UpdatedAtMin != nil || options.CreatedAtMin != nil || options.SortBy != nil {
+			t.Fatalf("history cursor request options = %#v", options)
 		}
 		return &faire.OrderPage{Orders: []faire.Order{syncOrder("older-2", historicalBoundary.Add(2*time.Hour))}}, nil
 	})
