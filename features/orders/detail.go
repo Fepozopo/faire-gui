@@ -15,12 +15,17 @@ type Detail struct {
 	OrderID             faire.OrderID
 	DisplayID           string
 	Status              string
+	OriginalOrderID     string
 	CreatedAt           string
+	ShipAfter           string
+	RequestedShipDate   string
+	ExpectedShipDate    string
 	UpdatedAt           string
 	SyncedAt            string
 	Customer            string
 	Source              string
 	PurchaseOrderNumber string
+	SalesRepName        string
 	Notes               string
 	Items               []DetailItem
 	Shipments           []DetailShipment
@@ -71,17 +76,23 @@ type DetailAddress struct {
 	PhoneNumber string
 }
 
-// PresentDetail converts one typed Order and its local synchronization time into safe display-ready detail values.
+// PresentDetail converts order and its local synchronization time into safe display-ready detail values, including lineage, scheduling, and sales-representative data.
+// It returns a Detail containing only approved presentation fields.
 func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 	detail := Detail{
 		OrderID:             orderID(order.ID),
 		DisplayID:           safeDetailText(optionalText(order.DisplayID)),
 		Status:              displayStatus(order.State),
+		OriginalOrderID:     detailOrderID(order.OriginalOrderID),
 		CreatedAt:           formatDate(order.CreatedAt),
+		ShipAfter:           formatDate(order.ShipAfter),
+		RequestedShipDate:   formatDate(order.RequestedShipDate),
+		ExpectedShipDate:    formatDate(order.ExpectedShipDate),
 		UpdatedAt:           formatDateTime(order.UpdatedAt),
 		SyncedAt:            formatSyncedAt(syncedAt),
 		Source:              safeDetailText(optionalText(order.Source)),
 		PurchaseOrderNumber: safeDetailText(optionalText(order.PurchaseOrderNumber)),
+		SalesRepName:        safeDetailText(optionalText(order.SalesRepName)),
 		Notes:               safeMultilineDetailText(optionalText(order.Notes)),
 		Items:               presentDetailItems(order.Items),
 		Shipments:           presentDetailShipments(order.Shipments),
@@ -102,6 +113,19 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		detail.TotalPayout = "—"
 	}
 	return detail
+}
+
+// detailOrderID safely formats an optional original-order ID for presentation.
+// It returns the missing-value placeholder when value is absent or becomes empty after control-character removal.
+func detailOrderID(value *faire.OrderID) string {
+	if value == nil {
+		return "—"
+	}
+	id := safeDetailText(string(*value))
+	if id == "" {
+		return "—"
+	}
+	return id
 }
 
 // presentDetailItems maps each stored order item without retaining the raw API item in presentation state.

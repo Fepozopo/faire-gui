@@ -47,21 +47,26 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutOrderDetailContent lays out all explicitly approved detail values from a typed presentation model.
-// Each order item is rendered as a separate card so multi-item orders remain easy to scan.
+// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date.
+// It uses ui for themed controls and returns the rendered content dimensions; each order item is a separate card for scanability.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(material.H4(ui.theme, detail.DisplayID).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		layout.Rigid(detailLine(ui, "Status", detail.Status)),
-		layout.Rigid(detailLine(ui, "Created", detail.CreatedAt)),
+		layout.Rigid(detailLine(ui, "Original order ID", detail.OriginalOrderID)),
 		layout.Rigid(detailLine(ui, "Updated", detail.UpdatedAt)),
 		layout.Rigid(detailLine(ui, "Local data synced", detail.SyncedAt)),
+		layout.Rigid(detailLine(ui, "Created", detail.CreatedAt)),
+		layout.Rigid(detailLine(ui, "Ship after", detail.ShipAfter)),
+		layout.Rigid(detailLine(ui, "Requested ship date", detail.RequestedShipDate)),
+		layout.Rigid(detailLine(ui, "Expected ship date", detail.ExpectedShipDate)),
 		layout.Rigid(detailLine(ui, "Customer", detail.Customer)),
 		layout.Rigid(detailLine(ui, "Commission", detail.Commission)),
 		layout.Rigid(detailLine(ui, "Total payout", detail.TotalPayout)),
 		layout.Rigid(detailLine(ui, "Source", detail.Source)),
 		layout.Rigid(detailLine(ui, "Purchase order", detail.PurchaseOrderNumber)),
+		layout.Rigid(detailLine(ui, "Sales rep name", detail.SalesRepName)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Shipping address").Layout),
 		layout.Rigid(detailLine(ui, "Recipient", detail.ShippingAddress.Name)),
@@ -73,6 +78,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(detailLine(ui, "Postal code", detail.ShippingAddress.PostalCode)),
 		layout.Rigid(detailLine(ui, "Country", detail.ShippingAddress.Country)),
 		layout.Rigid(detailLine(ui, "Phone", detail.ShippingAddress.PhoneNumber)),
+		layout.Rigid(detailLine(ui, "Is free shipping", detail.IsFreeShipping)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Items").Layout),
 	}
