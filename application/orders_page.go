@@ -356,7 +356,7 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		ui.invalidate()
 	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, "", []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
+		return ui.layoutOrderColumns(gtx, "", []string{"", "Order", "Status", "Customer", "Total payout", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
@@ -387,7 +387,7 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 					return layout.Dimensions{Size: gtx.Constraints.Min}
 				}, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: unit.Dp(13), Right: unit.Dp(12), Bottom: unit.Dp(13), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return ui.layoutOrderColumns(gtx, row.ID, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
+						return ui.layoutOrderColumns(gtx, row.ID, []string{"", row.DisplayID, row.Status, row.Customer, row.TotalPayout, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
 					})
 				})
 			}),

@@ -9,18 +9,18 @@ import (
 )
 
 // Row is the display-ready data for one Orders table row. It includes the delivery
-// business name or shipping recipient and the commission percentage, while excluding other address details,
+// business name or shipping recipient, Faire-supplied total payout, and commission percentage while excluding other address details,
 // notes, tracking details, and raw-order fields not needed by the list.
 type Row struct {
-	ID         faire.OrderID
-	DisplayID  string
-	Status     string
-	Customer   string
-	Total      string
-	OrderDate  string
-	ShipDate   string
-	Commission string
-	Source     string
+	ID          faire.OrderID
+	DisplayID   string
+	Status      string
+	Customer    string
+	TotalPayout string
+	OrderDate   string
+	ShipDate    string
+	Commission  string
+	Source      string
 }
 
 // PresentRows converts orders into stable table rows without retaining raw API
@@ -35,19 +35,19 @@ func PresentRows(orders []faire.Order) []Row {
 }
 
 // PresentRow converts a Faire order into table values, including the delivery
-// business name or shipping recipient and Faire's commission percentage. Missing optional fields use an em dash so
+// business name or shipping recipient, Faire's total payout, and commission percentage. Missing optional fields use an em dash so
 // table columns remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
-		ID:         orderID(order.ID),
-		DisplayID:  optionalText(order.DisplayID),
-		Status:     displayStatus(order.State),
-		Customer:   displayAddressName(order.Address),
-		Total:      formatOrderTotal(order.Items),
-		OrderDate:  formatDate(order.CreatedAt),
-		ShipDate:   formatDate(firstDate(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter)),
-		Commission: FormatCommissionPercentage(commissionBPS(order.PayoutCosts)),
-		Source:     optionalText(order.Source),
+		ID:          orderID(order.ID),
+		DisplayID:   optionalText(order.DisplayID),
+		Status:      displayStatus(order.State),
+		Customer:    displayAddressName(order.Address),
+		TotalPayout: formatTotalPayout(order.PayoutCosts),
+		OrderDate:   formatDate(order.CreatedAt),
+		ShipDate:    formatDate(firstDate(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter)),
+		Commission:  FormatCommissionPercentage(commissionBPS(order.PayoutCosts)),
+		Source:      optionalText(order.Source),
 	}
 }
 
@@ -126,20 +126,29 @@ func displayCustomer(customer *faire.Customer) string {
 	return strings.Join(parts, " ")
 }
 
-// formatOrderTotal converts the shared raw item subtotal into an Orders-table total label.
+// formatOrderTotal converts the shared raw item subtotal into an order-detail total label.
 // It returns the standard missing-value placeholder when the items have no usable price or use mixed currencies.
 func formatOrderTotal(items []faire.OrderItem) string {
 	amountMinor, currency := faire.OrderItemsTotal(items)
 	return FormatTotal(amountMinor, currency)
 }
 
-// FormatTotal converts raw total minor units and currency into the Orders-table label.
+// FormatTotal converts raw total minor units and currency into a display label.
 // It returns the standard missing-value placeholder when either raw value is unavailable.
 func FormatTotal(amountMinor *int64, currency string) string {
 	if amountMinor == nil || strings.TrimSpace(currency) == "" {
 		return "—"
 	}
 	return formatTotalAmount(*amountMinor, currency)
+}
+
+// formatTotalPayout formats Faire's explicit payout value for the Orders table.
+// It returns the standard missing-value placeholder when the API does not provide a complete money value.
+func formatTotalPayout(costs *faire.PayoutCosts) string {
+	if costs == nil || costs.TotalPayout == nil || costs.TotalPayout.AmountMinor == nil || costs.TotalPayout.Currency == nil || strings.TrimSpace(*costs.TotalPayout.Currency) == "" {
+		return "—"
+	}
+	return FormatTotal(costs.TotalPayout.AmountMinor, *costs.TotalPayout.Currency)
 }
 
 // formatTotalAmount formats amountMinor for a total, using $ for USD and an ISO currency code otherwise.

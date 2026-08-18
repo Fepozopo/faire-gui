@@ -7,7 +7,7 @@ import (
 )
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
-// including the delivery business name and commission percentage in their respective table columns.
+// including the delivery business name, Faire-supplied payout, and commission percentage in their respective table columns.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
@@ -24,6 +24,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	currency := "usd"
 	commission := int64(250)
 	commissionBPS := int64(1500)
+	payout := int64(999)
 	order := faire.Order{
 		ID:               &id,
 		DisplayID:        &displayID,
@@ -33,7 +34,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ExpectedShipDate: &expectedShipDate,
 		Source:           &source,
 		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
-		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission},
+		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
 		// Both fields are present to verify the business name takes precedence over the shipping recipient in the table.
 		Address:             &faire.Address{Name: &shippingRecipientName, CompanyName: &businessName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Do not expose this"),
@@ -42,15 +43,15 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 
 	row := PresentRow(order)
 	want := Row{
-		ID:         id,
-		DisplayID:  displayID,
-		Status:     "In transit",
-		Customer:   businessName,
-		Total:      "$24.68",
-		OrderDate:  "2026-01-02",
-		ShipDate:   "2026-01-03",
-		Commission: "15.00%",
-		Source:     source,
+		ID:          id,
+		DisplayID:   displayID,
+		Status:      "In transit",
+		Customer:    businessName,
+		TotalPayout: "$9.99",
+		OrderDate:   "2026-01-02",
+		ShipDate:    "2026-01-03",
+		Commission:  "15.00%",
+		Source:      source,
 	}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
@@ -69,22 +70,19 @@ func TestPresentRowFallsBackToShippingRecipient(t *testing.T) {
 // TestPresentRowHandlesOptionalData verifies missing optional fields remain safe table placeholders.
 func TestPresentRowHandlesOptionalData(t *testing.T) {
 	row := PresentRow(faire.Order{})
-	want := Row{DisplayID: "—", Status: "—", Customer: "—", Total: "—", OrderDate: "—", ShipDate: "—", Commission: "—", Source: "—"}
+	want := Row{DisplayID: "—", Status: "—", Customer: "—", TotalPayout: "—", OrderDate: "—", ShipDate: "—", Commission: "—", Source: "—"}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
 	}
 }
 
-// TestPresentRowUsesDateFallbackAndLegacyItemPrice verifies useful legacy API fields are presented consistently.
-func TestPresentRowUsesDateFallbackAndLegacyItemPrice(t *testing.T) {
+// TestPresentRowUsesDateFallbackAndMissingTotalPayout verifies date fallbacks and missing API payout values remain safe.
+func TestPresentRowUsesDateFallbackAndMissingTotalPayout(t *testing.T) {
 	requestedShipDate := "2026-04-05"
-	priceCents := int64(999)
-	quantity := int64(3)
 	unknownState := faire.OrderState("ON_HOLD")
 	row := PresentRow(faire.Order{
 		State:             &unknownState,
 		RequestedShipDate: &requestedShipDate,
-		Items:             []faire.OrderItem{{PriceCents: &priceCents, Quantity: &quantity}},
 	})
 	if row.Status != "On Hold" {
 		t.Fatalf("Status = %q, want %q", row.Status, "On Hold")
@@ -92,12 +90,12 @@ func TestPresentRowUsesDateFallbackAndLegacyItemPrice(t *testing.T) {
 	if row.ShipDate != requestedShipDate {
 		t.Fatalf("ShipDate = %q, want %q", row.ShipDate, requestedShipDate)
 	}
-	if row.Total != "$29.97" {
-		t.Fatalf("Total = %q, want %q", row.Total, "$29.97")
+	if row.TotalPayout != "—" {
+		t.Fatalf("TotalPayout = %q, want placeholder", row.TotalPayout)
 	}
 }
 
-// TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise verifies the table's unambiguous total formatting policy.
+// TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise verifies the unambiguous currency formatting policy for displayed monetary values.
 func TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise(t *testing.T) {
 	amount := int64(1234)
 	if value := FormatTotal(&amount, "usd"); value != "$12.34" {
@@ -108,17 +106,21 @@ func TestFormatTotalUsesDollarForUSDAndCurrencyCodeOtherwise(t *testing.T) {
 	}
 }
 
-// TestPresentRowAvoidsMixedCurrencyTotal verifies totals never add incomparable currencies.
-func TestPresentRowAvoidsMixedCurrencyTotal(t *testing.T) {
+// TestPresentRowUsesAPITotalPayoutDespiteMixedItemCurrencies verifies the table never derives payout from item prices.
+func TestPresentRowUsesAPITotalPayoutDespiteMixedItemCurrencies(t *testing.T) {
 	amount := int64(100)
+	payout := int64(999)
 	usd := "USD"
 	eur := "EUR"
-	row := PresentRow(faire.Order{Items: []faire.OrderItem{
-		{Price: &faire.Money{AmountMinor: &amount, Currency: &usd}},
-		{Price: &faire.Money{AmountMinor: &amount, Currency: &eur}},
-	}})
-	if row.Total != "—" {
-		t.Fatalf("Total = %q, want placeholder", row.Total)
+	row := PresentRow(faire.Order{
+		Items: []faire.OrderItem{
+			{Price: &faire.Money{AmountMinor: &amount, Currency: &usd}},
+			{Price: &faire.Money{AmountMinor: &amount, Currency: &eur}},
+		},
+		PayoutCosts: &faire.PayoutCosts{TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &usd}},
+	})
+	if row.TotalPayout != "$9.99" {
+		t.Fatalf("TotalPayout = %q, want API payout", row.TotalPayout)
 	}
 }
 

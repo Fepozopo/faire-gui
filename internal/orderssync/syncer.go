@@ -283,36 +283,36 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		displayID = string(*order.ID)
 	}
 	return ordersstore.OrderRecord{
-		ConnectionID:          connectionID,
-		OrderID:               string(*order.ID),
-		DisplayID:             displayID,
-		State:                 row.state,
-		AddressName:           row.addressName,
-		TotalAmountMinor:      row.totalAmountMinor,
-		TotalCurrency:         row.totalCurrency,
-		CommissionBPS:         row.commissionBPS,
-		Source:                row.source,
-		CreatedAtUTC:          optionalTimestamp(order.CreatedAt),
-		ExpectedShipAtUTC:     firstTimestamp(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter),
-		UpdatedAtUTC:          updatedAt,
-		SnapshotJSON:          string(snapshot),
-		SnapshotSchemaVersion: ordersstore.SnapshotSchemaVersion,
-		SyncedAtUTC:           syncedAt,
+		ConnectionID:           connectionID,
+		OrderID:                string(*order.ID),
+		DisplayID:              displayID,
+		State:                  row.state,
+		AddressName:            row.addressName,
+		TotalPayoutAmountMinor: row.totalPayoutAmountMinor,
+		TotalPayoutCurrency:    row.totalPayoutCurrency,
+		CommissionBPS:          row.commissionBPS,
+		Source:                 row.source,
+		CreatedAtUTC:           optionalTimestamp(order.CreatedAt),
+		ExpectedShipAtUTC:      firstTimestamp(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter),
+		UpdatedAtUTC:           updatedAt,
+		SnapshotJSON:           string(snapshot),
+		SnapshotSchemaVersion:  ordersstore.SnapshotSchemaVersion,
+		SyncedAtUTC:            syncedAt,
 	}, nil
 }
 
-// projection contains storage-owned raw list values, including total minor units, commission BPS, and the delivery business or recipient name, derived atomically from a remote Order.
+// projection contains storage-owned raw list values, including Faire's total payout, commission BPS, and the delivery business or recipient name, derived atomically from a remote Order.
 type projection struct {
-	displayID        string
-	state            string
-	addressName      string
-	totalAmountMinor *int64
-	totalCurrency    string
-	commissionBPS    *int64
-	source           string
+	displayID              string
+	state                  string
+	addressName            string
+	totalPayoutAmountMinor *int64
+	totalPayoutCurrency    string
+	commissionBPS          *int64
+	source                 string
 }
 
-// projectOrder derives raw list columns, including total minor units, commission BPS, and the delivery business or recipient name, from order without exposing a raw Order outside the worker.
+// projectOrder derives raw list columns, including Faire's total payout, commission BPS, and the delivery business or recipient name, from order without exposing a raw Order outside the worker.
 // It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
@@ -323,7 +323,7 @@ func projectOrder(order faire.Order) projection {
 		value.state = string(*order.State)
 	}
 	value.addressName = shippingBusinessOrRecipientName(order.Address)
-	value.totalAmountMinor, value.totalCurrency = faire.OrderItemsTotal(order.Items)
+	value.totalPayoutAmountMinor, value.totalPayoutCurrency = totalPayout(order.PayoutCosts)
 	value.commissionBPS = commissionBPS(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
@@ -341,6 +341,20 @@ func shippingBusinessOrRecipientName(address *faire.Address) string {
 		return companyName
 	}
 	return optionalString(address.Name)
+}
+
+// totalPayout copies Faire's total_payout money field from costs for the Orders table projection.
+// It returns nil and an empty currency when the API does not provide a complete amount.
+func totalPayout(costs *faire.PayoutCosts) (*int64, string) {
+	if costs == nil || costs.TotalPayout == nil || costs.TotalPayout.AmountMinor == nil || costs.TotalPayout.Currency == nil {
+		return nil, ""
+	}
+	currency := strings.TrimSpace(*costs.TotalPayout.Currency)
+	if currency == "" {
+		return nil, ""
+	}
+	amount := *costs.TotalPayout.AmountMinor
+	return &amount, currency
 }
 
 // commissionBPS copies Faire's raw commission_bps field from costs for the Orders table projection.

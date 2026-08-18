@@ -48,6 +48,7 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrderDetailContent lays out all explicitly approved detail values from a typed presentation model.
+// Each order item is rendered as a separate card so multi-item orders remain easy to scan.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(material.H4(ui.theme, detail.DisplayID).Layout),
@@ -76,16 +77,13 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Items").Layout),
 	}
-	for _, item := range detail.Items {
-		item := item
-		children = append(children,
-			layout.Rigid(detailLine(ui, "Item", item.ProductName+" · "+item.VariantName)),
-			layout.Rigid(detailLine(ui, "Quantity / price", item.Quantity+" · "+item.Price)),
-			layout.Rigid(detailLine(ui, "SKU / status", item.SKU+" · "+item.Status)),
-		)
-		for _, customization := range item.Customizations {
-			customization := customization
-			children = append(children, layout.Rigid(detailLine(ui, "Customization: "+customization.Type, customization.Value)))
+	for index, item := range detail.Items {
+		item, itemIndex := item, index
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutOrderItem(gtx, ui, item, itemIndex, len(detail.Items))
+		}))
+		if itemIndex < len(detail.Items)-1 {
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout))
 		}
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Shipments").Layout))
@@ -95,6 +93,47 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Order notes").Layout), layout.Rigid(bodyText(ui.theme, detail.Notes, mutedTextColor)))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// layoutOrderItem renders one product or variant in a lightly tinted, bordered card.
+// The SKU is the card heading, while the item index and total provide a position label only for multi-item orders.
+func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, index, total int) layout.Dimensions {
+	positionLabel := "Item"
+	if total > 1 {
+		positionLabel += " " + itoa(index+1) + " of " + itoa(total)
+	}
+	productLabel := item.ProductName
+	if item.VariantName != "" {
+		productLabel += " · " + item.VariantName
+	}
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			style := material.Label(ui.theme, unit.Sp(12), positionLabel)
+			style.Color = mutedTextColor
+			return style.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(material.H6(ui.theme, item.SKU).Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(detailLine(ui, "Product / variant", productLabel)),
+		layout.Rigid(detailLine(ui, "Quantity / price", item.Quantity+" · "+item.Price)),
+		layout.Rigid(detailLine(ui, "Status", item.Status)),
+	}
+	if len(item.Customizations) > 0 {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Customizations").Layout),
+		)
+		for _, customization := range item.Customizations {
+			customization := customization
+			children = append(children, layout.Rigid(detailLine(ui, customization.Type, customization.Value)))
+		}
+	}
+	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(14), Bottom: unit.Dp(14), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		})
+	})
 }
 
 // detailLine renders one compact detail label and value supplied by the typed detail model.

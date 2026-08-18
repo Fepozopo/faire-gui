@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 8
+const currentSchemaVersion = 9
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -24,6 +24,7 @@ var migrations = []migration{
 	{version: 6, apply: applyMigrationSix},
 	{version: 7, apply: applyMigrationSeven},
 	{version: 8, apply: applyMigrationEight},
+	{version: 9, apply: applyMigrationNine},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -60,6 +61,33 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit migration %d: %w", migration.version, err)
+		}
+	}
+	return nil
+}
+
+// applyMigrationNine replaces item-derived totals with Faire's explicit total-payout projection and backfills valid cached snapshots.
+// It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationNine(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range []string{
+		`ALTER TABLE orders ADD COLUMN total_payout_amount_minor INTEGER NULL`,
+		`ALTER TABLE orders ADD COLUMN total_payout_currency TEXT NULL`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE orders SET
+		total_payout_amount_minor = CASE WHEN json_valid(order_snapshot_json) THEN json_extract(order_snapshot_json, '$.payout_costs.total_payout.amount_minor') END,
+		total_payout_currency = CASE WHEN json_valid(order_snapshot_json) THEN NULLIF(TRIM(json_extract(order_snapshot_json, '$.payout_costs.total_payout.currency')), '') END`); err != nil {
+		return err
+	}
+	for _, statement := range []string{
+		`ALTER TABLE orders DROP COLUMN total_amount_minor`,
+		`ALTER TABLE orders DROP COLUMN total_currency`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
 		}
 	}
 	return nil

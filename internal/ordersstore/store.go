@@ -22,43 +22,43 @@ var ErrCorruptData = errors.New("orders store: corrupt local data")
 const SnapshotSchemaVersion = 1
 
 // OrderRecord is one atomic, connection-scoped Orders snapshot and its indexed list projection.
-// Its projection includes raw total and commission values plus the delivery business or recipient name.
+// Its projection includes Faire's raw total payout and commission values plus the delivery business or recipient name.
 // SnapshotJSON retains every supported typed Order field, including nested fulfillment,
 // payout, and retailer data, and must never contain credentials or HTTP metadata.
 type OrderRecord struct {
-	ConnectionID          string
-	OrderID               string
-	DisplayID             string
-	State                 string
-	AddressName           string
-	TotalAmountMinor      *int64
-	TotalCurrency         string
-	CommissionBPS         *int64
-	Source                string
-	CreatedAtUTC          *time.Time
-	ExpectedShipAtUTC     *time.Time
-	UpdatedAtUTC          time.Time
-	SnapshotJSON          string
-	SnapshotSchemaVersion int
-	SyncedAtUTC           time.Time
+	ConnectionID           string
+	OrderID                string
+	DisplayID              string
+	State                  string
+	AddressName            string
+	TotalPayoutAmountMinor *int64
+	TotalPayoutCurrency    string
+	CommissionBPS          *int64
+	Source                 string
+	CreatedAtUTC           *time.Time
+	ExpectedShipAtUTC      *time.Time
+	UpdatedAtUTC           time.Time
+	SnapshotJSON           string
+	SnapshotSchemaVersion  int
+	SyncedAtUTC            time.Time
 }
 
 // LocalRow is the safe indexed projection needed to present one Orders table row.
-// It includes the delivery business or recipient name, raw total values, and raw commission BPS while excluding
+// It includes the delivery business or recipient name, Faire's raw total payout, and raw commission BPS while excluding
 // the complete snapshot and the remaining private nested fields.
 type LocalRow struct {
-	OrderID           string
-	DisplayID         string
-	State             string
-	AddressName       string
-	TotalAmountMinor  *int64
-	TotalCurrency     string
-	CommissionBPS     *int64
-	Source            string
-	CreatedAtUTC      *time.Time
-	ExpectedShipAtUTC *time.Time
-	UpdatedAtUTC      time.Time
-	SyncedAtUTC       time.Time
+	OrderID                string
+	DisplayID              string
+	State                  string
+	AddressName            string
+	TotalPayoutAmountMinor *int64
+	TotalPayoutCurrency    string
+	CommissionBPS          *int64
+	Source                 string
+	CreatedAtUTC           *time.Time
+	ExpectedShipAtUTC      *time.Time
+	UpdatedAtUTC           time.Time
+	SyncedAtUTC            time.Time
 }
 
 // LocalSortColumn identifies an indexed date column used for local Orders ordering.

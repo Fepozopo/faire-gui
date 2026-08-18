@@ -405,11 +405,11 @@ func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
 	}
 }
 
-// TestLocalRowsFormatRawDeliveryAndFinancialValues verifies cached table rows format raw delivery, total, and commission values only at presentation time.
+// TestLocalRowsFormatRawDeliveryAndFinancialValues verifies cached table rows format raw delivery, API payout, and commission values only at presentation time.
 func TestLocalRowsFormatRawDeliveryAndFinancialValues(t *testing.T) {
-	total, commissionBPS := int64(1234), int64(1500)
-	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalAmountMinor: &total, TotalCurrency: "USD", CommissionBPS: &commissionBPS}})
-	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].Total != "$12.34" || rows[0].Commission != "15.00%" {
+	totalPayout, commissionBPS := int64(999), int64(1500)
+	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalPayoutAmountMinor: &totalPayout, TotalPayoutCurrency: "USD", CommissionBPS: &commissionBPS}})
+	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].TotalPayout != "$9.99" || rows[0].Commission != "15.00%" {
 		t.Fatalf("localRows() = %#v, want formatted raw values", rows)
 	}
 }

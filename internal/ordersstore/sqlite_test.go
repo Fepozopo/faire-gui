@@ -34,12 +34,12 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalAmountMinor == nil || *page.Rows[0].TotalAmountMinor != 1234 || page.Rows[0].TotalCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
-		t.Fatalf("List() = %#v, want durable order-1 with raw delivery, total, and commission values", page.Rows)
+	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
+		t.Fatalf("List() = %#v, want durable order-1 with raw delivery, API payout, and commission values", page.Rows)
 	}
 }
 
-// TestMigrationsCarryForwardBoundaryAndListProjections verifies a v1 cache retains its date while later migrations restore business names and raw financial projections from valid snapshots.
+// TestMigrationsCarryForwardBoundaryAndListProjections verifies a v1 cache retains its date while later migrations restore business names and API financial projections from valid snapshots.
 func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "orders.sqlite3")
@@ -88,7 +88,7 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		_ = database.Close()
 		t.Fatalf("insert v1 state error = %v", err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada Lovelace","company_name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500}}`, 1, boundary.UnixMicro()); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada Lovelace","company_name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500,"total_payout":{"amount_minor":999,"currency":"USD"}}}`, 1, boundary.UnixMicro()); err != nil {
 		_ = database.Close()
 		t.Fatalf("insert v1 order error = %v", err)
 	}
@@ -105,11 +105,11 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		t.Fatalf("migrated state = %#v, found=%v, err=%v", state, found, err)
 	}
 	page, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", Limit: 1})
-	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalAmountMinor == nil || *page.Rows[0].TotalAmountMinor != 2468 || page.Rows[0].TotalCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 {
 		t.Fatalf("migrated raw list projections = %#v, err=%v", page, err)
 	}
 	var legacyColumns int
-	if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name IN ('customer_name', 'total_display', 'commission_display')`).Scan(&legacyColumns); err != nil || legacyColumns != 0 {
+	if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name IN ('customer_name', 'total_display', 'commission_display', 'total_amount_minor', 'total_currency')`).Scan(&legacyColumns); err != nil || legacyColumns != 0 {
 		t.Fatalf("legacy table-only columns = %d, err=%v", legacyColumns, err)
 	}
 }
@@ -128,8 +128,8 @@ func TestUpsertOrdersKeepsConnectionDataIsolatedAndRejectsOlderVersions(t *testi
 	}
 	stale := testRecord("connection-a", "order-1", "DISPLAY-1", older)
 	stale.SnapshotJSON = `{"version":"older"}`
-	staleTotal := int64(100)
-	stale.TotalAmountMinor = &staleTotal
+	staleTotalPayout := int64(100)
+	stale.TotalPayoutAmountMinor = &staleTotalPayout
 	if err := store.UpsertOrders(ctx, []OrderRecord{stale}); err != nil {
 		t.Fatalf("stale upsert error = %v", err)
 	}
@@ -294,22 +294,22 @@ func openTestStore(t *testing.T) *SQLiteStore {
 // testRecord returns a valid private snapshot record with stable projection fields.
 func testRecord(connectionID, orderID, displayID string, updatedAt time.Time) OrderRecord {
 	created := updatedAt.Add(-time.Hour)
-	total := int64(1234)
+	totalPayout := int64(999)
 	commissionBPS := int64(1500)
 	return OrderRecord{
-		ConnectionID:          connectionID,
-		OrderID:               orderID,
-		DisplayID:             displayID,
-		State:                 "NEW",
-		AddressName:           "Ada's Antiques",
-		TotalAmountMinor:      &total,
-		TotalCurrency:         "USD",
-		CommissionBPS:         &commissionBPS,
-		Source:                "FAIRE",
-		CreatedAtUTC:          &created,
-		UpdatedAtUTC:          updatedAt,
-		SnapshotJSON:          `{"id":"order"}`,
-		SnapshotSchemaVersion: SnapshotSchemaVersion,
-		SyncedAtUTC:           updatedAt,
+		ConnectionID:           connectionID,
+		OrderID:                orderID,
+		DisplayID:              displayID,
+		State:                  "NEW",
+		AddressName:            "Ada's Antiques",
+		TotalPayoutAmountMinor: &totalPayout,
+		TotalPayoutCurrency:    "USD",
+		CommissionBPS:          &commissionBPS,
+		Source:                 "FAIRE",
+		CreatedAtUTC:           &created,
+		UpdatedAtUTC:           updatedAt,
+		SnapshotJSON:           `{"id":"order"}`,
+		SnapshotSchemaVersion:  SnapshotSchemaVersion,
+		SyncedAtUTC:            updatedAt,
 	}
 }
