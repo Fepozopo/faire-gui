@@ -234,13 +234,21 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	return nil
 }
 
-// do executes an API request, retrying only idempotent methods after transient failures.
+// do executes a JSON-oriented API request, retrying only idempotent methods after transient failures.
+// ctx scopes the request, method and path identify the endpoint, query and body provide its values, and it returns the successful HTTP response or an API error.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any) (*http.Response, error) {
+	return c.doWithAccept(ctx, method, path, query, body, "application/json")
+}
+
+// doWithAccept executes an API request with an explicit Accept header, retrying only idempotent methods after transient failures.
+// ctx scopes the request, method and path identify the endpoint, query and body provide values, accept selects the desired response media type, and it returns the successful HTTP response or an API error.
+func (c *Client) doWithAccept(ctx context.Context, method, path string, query url.Values, body any, accept string) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		request, err := c.newRequest(ctx, method, path, query, body)
 		if err != nil {
 			return nil, err
 		}
+		request.Header.Set("Accept", accept)
 
 		response, err := c.httpClient.Do(request)
 		if err != nil {

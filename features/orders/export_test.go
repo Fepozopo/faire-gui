@@ -34,7 +34,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 			{SKU: faire.Ptr("SKU-2"), Price: &faire.Money{AmountMinor: faire.Ptr(int64(3400))}, Quantity: faire.Ptr(int64(1))},
 		},
 	}
-	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{order}); err != nil {
+	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{order}, true); err != nil {
 		t.Fatalf("WriteCSV() error = %v", err)
 	}
 
@@ -53,6 +53,23 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	}
 	if got := rows[2][21]; got != "34.00" {
 		t.Fatalf("second item price = %q, want formatted Money fallback", got)
+	}
+}
+
+// TestWriteCSVOmitsHeaderWhenRequested verifies headerless exports preserve their first order row.
+func TestWriteCSVOmitsHeaderWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}, false); err != nil {
+		t.Fatalf("WriteCSV() error = %v", err)
+	}
+	rows, err := csv.NewReader(&output).ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != "order-1" {
+		t.Fatalf("rows = %#v, want one headerless order row", rows)
 	}
 }
 
@@ -105,7 +122,7 @@ func TestWriteCSVWritesBlankItemFieldsForOrdersWithoutItems(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}); err != nil {
+	if err := WriteCSV(&output, SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}, true); err != nil {
 		t.Fatalf("WriteCSV() error = %v", err)
 	}
 

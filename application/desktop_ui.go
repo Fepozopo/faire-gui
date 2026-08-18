@@ -45,10 +45,12 @@ type DesktopUI struct {
 	settingsMenuOpen             bool
 	connectionPickerOpen         bool
 	statesDialogOpen             bool
-	exportMenuOpen               bool
 	csvExportBlockedDialogOpen   bool
 	csvExportCompletedDialogOpen bool
 	csvExportCompletedFilename   string
+	packingSlipExportFolder      string
+	packingSlipExportCount       int
+	packingSlipExportFailures    int
 
 	ordersStore                  ordersstore.Store
 	ordersState                  orders.State
@@ -67,6 +69,7 @@ type DesktopUI struct {
 	orderDetailStatus            string
 	orderDetailID                faire.OrderID
 	orderDetailConnectionID      string
+	orderExportDialog            orderExportDialogState
 	pendingStates                map[faire.OrderState]struct{}
 	editorMode                   connectionEditorMode
 	editing                      connections.Connection
@@ -110,6 +113,10 @@ type DesktopUI struct {
 	exportNewOrdersButton           widget.Clickable
 	exportBackorderedOrdersButton   widget.Clickable
 	exportSelectedOrdersButton      widget.Clickable
+	exportBackButton                widget.Clickable
+	confirmExportButton             widget.Clickable
+	includeCSVHeaderButton          widget.Clickable
+	includePackingSlipsButton       widget.Clickable
 	closeExportMenuButton           widget.Clickable
 	closeCSVExportBlockedButton     widget.Clickable
 	closeCSVExportCompletedButton   widget.Clickable
@@ -289,7 +296,7 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutConnectionPicker(gtx)
 			case ui.statesDialogOpen:
 				return ui.layoutStatesDialog(gtx)
-			case ui.exportMenuOpen:
+			case ui.orderExportDialog.open:
 				return ui.layoutOrderExportMenu(gtx)
 			case ui.csvExportBlockedDialogOpen:
 				return ui.layoutCSVExportBlockedDialog(gtx)
@@ -317,7 +324,7 @@ func (ui *DesktopUI) layoutStartup(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.ordersDataDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.exportMenuOpen || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.ordersDataDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.orderExportDialog.open || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
 		return
 	}
 	for index := range ui.tabButtons {

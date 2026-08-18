@@ -124,7 +124,7 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.invalidate()
 	}
 	if ui.exportMenuButton.Clicked(gtx) {
-		ui.exportMenuOpen = true
+		ui.orderExportDialog = orderExportDialogState{open: true, includeHeader: true}
 		ui.invalidate()
 	}
 }
@@ -225,37 +225,132 @@ func (ui *DesktopUI) selectedOrdersLabel() string {
 	return itoa(len(ui.ordersState.SelectedIDs)) + " selected"
 }
 
-// layoutOrderExportMenu presents the supported full-order CSV export actions in an input-blocking modal.
+// layoutOrderExportMenu presents export scope first, then per-export CSV and packing-slip choices in the same input-blocking modal.
+// gtx supplies the current frame, and the returned dimensions render the active dialog step while its choices remain UI-owned until export begins.
 func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions {
 	if ui.closeExportMenuButton.Clicked(gtx) {
-		ui.exportMenuOpen = false
+		ui.orderExportDialog = orderExportDialogState{}
 		ui.invalidate()
 	}
-	if ui.exportNewOrdersButton.Clicked(gtx) {
-		ui.startOrderExport(orderExportNew)
+	if !ui.orderExportDialog.configuring {
+		ui.handleOrderExportScopeControls(gtx)
+		return modalPanel(gtx, ui, "Export orders", func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(bodyText(ui.theme, "Choose which orders to export.", mutedTextColor)),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.exportNewOrdersButton, "New orders")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.exportBackorderedOrdersButton, "Backordered orders")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.exportSelectedOrdersButton, "Selected orders")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+				layout.Rigid(primaryButton(ui.theme, &ui.closeExportMenuButton, "Cancel")),
+			)
+		})
+	}
+
+	if ui.exportBackButton.Clicked(gtx) {
+		ui.orderExportDialog.configuring = false
 		ui.invalidate()
 	}
-	if ui.exportBackorderedOrdersButton.Clicked(gtx) {
-		ui.startOrderExport(orderExportBackordered)
+	if ui.includeCSVHeaderButton.Clicked(gtx) {
+		ui.orderExportDialog.includeHeader = !ui.orderExportDialog.includeHeader
 		ui.invalidate()
 	}
-	if ui.exportSelectedOrdersButton.Clicked(gtx) {
-		ui.startOrderExport(orderExportSelected)
+	if ui.includePackingSlipsButton.Clicked(gtx) {
+		ui.orderExportDialog.includePackingSlips = !ui.orderExportDialog.includePackingSlips
 		ui.invalidate()
 	}
-	return modalPanel(gtx, ui, "Export orders", func(gtx layout.Context) layout.Dimensions {
+	if ui.confirmExportButton.Clicked(gtx) {
+		ui.startOrderExport(ui.orderExportDialog.kind, orderExportOptions{
+			IncludeHeader:       ui.orderExportDialog.includeHeader,
+			IncludePackingSlips: ui.orderExportDialog.includePackingSlips,
+		})
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "Configure export", func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(bodyText(ui.theme, "Exports are saved as CSV files in Downloads.", mutedTextColor)),
+			layout.Rigid(bodyText(ui.theme, "Export "+orderExportKindLabel(ui.orderExportDialog.kind)+".", mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.exportNewOrdersButton, "Export New Orders")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.exportBackorderedOrdersButton, "Export Backordered Orders")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.exportSelectedOrdersButton, "Export Selected Orders")),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(primaryButton(ui.theme, &ui.closeExportMenuButton, "Cancel")),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return ui.layoutOrderExportOption(gtx, &ui.includeCSVHeaderButton, ui.orderExportDialog.includeHeader, "Include CSV header", "Adds the column names as the first CSV row.")
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return ui.layoutOrderExportOption(gtx, &ui.includePackingSlipsButton, ui.orderExportDialog.includePackingSlips, "Download packing slips", "Saves one PDF per order alongside the CSV in a new Downloads folder. This may take longer.")
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Rigid(primaryButton(ui.theme, &ui.exportBackButton, "Back")),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.confirmExportButton, ui.orderExportActionLabel())),
+				)
+			}),
 		)
 	})
+}
+
+// handleOrderExportScopeControls advances the export dialog from scope selection to configuration without starting work yet.
+// gtx supplies the current frame; it has no return value because it updates only UI-owned dialog state.
+func (ui *DesktopUI) handleOrderExportScopeControls(gtx layout.Context) {
+	for _, choice := range []struct {
+		button *widget.Clickable
+		kind   orderExportKind
+	}{
+		{button: &ui.exportNewOrdersButton, kind: orderExportNew},
+		{button: &ui.exportBackorderedOrdersButton, kind: orderExportBackordered},
+		{button: &ui.exportSelectedOrdersButton, kind: orderExportSelected},
+	} {
+		if choice.button.Clicked(gtx) {
+			ui.orderExportDialog.kind = choice.kind
+			ui.orderExportDialog.configuring = true
+			ui.invalidate()
+			return
+		}
+	}
+}
+
+// layoutOrderExportOption renders one selectable export option with a checkbox-style indicator and explanatory copy.
+// gtx supplies the current frame, button owns the option state, selected controls the indicator, label and description are visible copy, and the returned dimensions render the option row.
+func (ui *DesktopUI) layoutOrderExportOption(gtx layout.Context, button *widget.Clickable, selected bool, label, description string) layout.Dimensions {
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.orderCheckbox(gtx, selected) }),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(material.Body1(ui.theme, label).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+					layout.Rigid(bodyText(ui.theme, description, mutedTextColor)),
+				)
+			}),
+		)
+	})
+}
+
+// orderExportKindLabel returns the human-readable scope name used by the export configuration dialog.
+// kind identifies the selected export scope, and the returned label is safe for UI presentation.
+func orderExportKindLabel(kind orderExportKind) string {
+	switch kind {
+	case orderExportNew:
+		return "new orders"
+	case orderExportBackordered:
+		return "backordered orders"
+	case orderExportSelected:
+		return "selected orders"
+	default:
+		return "orders"
+	}
+}
+
+// orderExportActionLabel returns the primary export button text for the currently selected optional packing slips.
+// It has no parameters and returns safe UI copy derived from the dialog's packing-slip choice.
+func (ui *DesktopUI) orderExportActionLabel() string {
+	if ui.orderExportDialog.includePackingSlips {
+		return "Export CSV and packing slips"
+	}
+	return "Export CSV"
 }
 
 // layoutCSVExportBlockedDialog explains why the current connection cannot produce a CSV export.
@@ -273,20 +368,38 @@ func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dim
 	})
 }
 
-// layoutCSVExportCompletedDialog confirms the export location after its CSV file is safely written.
+// layoutCSVExportCompletedDialog confirms the CSV location and any complete or partial packing-slip outcome after artifacts are safely written.
+// gtx supplies the current frame, and the returned dimensions render the safe completion summary and close action.
 func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.Dimensions {
 	if ui.closeCSVExportCompletedButton.Clicked(gtx) {
 		ui.csvExportCompletedDialogOpen = false
 		ui.csvExportCompletedFilename = ""
+		ui.packingSlipExportFolder = ""
+		ui.packingSlipExportCount = 0
+		ui.packingSlipExportFailures = 0
 		ui.invalidate()
 	}
-	return modalPanel(gtx, ui, "CSV export complete", func(gtx layout.Context) layout.Dimensions {
+	return modalPanel(gtx, ui, "Export complete", func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(bodyText(ui.theme, "Saved in Downloads as "+ui.csvExportCompletedFilename+".", mutedTextColor)),
+			layout.Rigid(bodyText(ui.theme, ui.orderExportCompletionMessage(), mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(primaryButton(ui.theme, &ui.closeCSVExportCompletedButton, "Close")),
 		)
 	})
+}
+
+// orderExportCompletionMessage returns the dialog summary for a CSV-only, complete packing-slip, or partial packing-slip export.
+// It has no parameters and returns safe text derived only from already-saved artifact names and counts.
+func (ui *DesktopUI) orderExportCompletionMessage() string {
+	message := "Saved in Downloads as " + ui.csvExportCompletedFilename + "."
+	if ui.packingSlipExportFolder == "" {
+		return message
+	}
+	message += " Saved " + packingSlipCountLabel(ui.packingSlipExportCount) + " in " + ui.packingSlipExportFolder + "."
+	if ui.packingSlipExportFailures > 0 {
+		message += " " + packingSlipCountLabel(ui.packingSlipExportFailures) + " could not be downloaded."
+	}
+	return message
 }
 
 // layoutOrdersDataModal confirms a destructive local-only cache action before any private snapshots are deleted.

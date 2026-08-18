@@ -339,7 +339,7 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	filename, err := writeOrdersCSV(directory, orderExportNew, orders.SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}})
+	filename, err := writeOrdersCSV(directory, orderExportNew, orders.SalesSource("ASC"), []faire.Order{{ID: faire.Ptr(faire.OrderID("order-1"))}}, true)
 	if err != nil {
 		t.Fatalf("writeOrdersCSV() error = %v", err)
 	}
@@ -357,6 +357,71 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(contents), "id,display_id,created_at") {
 		t.Fatalf("CSV = %q, want CSV header", contents)
+	}
+}
+
+// TestDownloadPackingSlipsRetainsSuccessfulPDFs verifies one failed PDF does not discard CSV-adjacent packing slips that were saved successfully.
+func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.RawQuery != "" {
+			t.Fatalf("query = %q, want no optional timezone", request.URL.RawQuery)
+		}
+		switch request.URL.Path {
+		case "/orders/order-a/packing-slip-pdf":
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = writer.Write([]byte("pdf-a"))
+		case "/orders/order-b/packing-slip-pdf":
+			writer.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, err := faire.NewClient(faire.Config{BaseURL: server.URL, AccessToken: "test-token"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	directory := t.TempDir()
+	summary, err := downloadPackingSlips(context.Background(), client.Orders, []faire.Order{
+		{ID: faire.Ptr(faire.OrderID("order-a")), DisplayID: faire.Ptr("DISPLAY-A")},
+		{ID: faire.Ptr(faire.OrderID("order-b")), DisplayID: faire.Ptr("DISPLAY-B")},
+	}, directory)
+	if err != nil {
+		t.Fatalf("downloadPackingSlips() error = %v", err)
+	}
+	if summary != (packingSlipSummary{downloaded: 1, failures: 1}) {
+		t.Fatalf("packing-slip summary = %#v, want one success and one failure", summary)
+	}
+	contents, err := os.ReadFile(filepath.Join(directory, "DISPLAY-A.pdf"))
+	if err != nil || string(contents) != "pdf-a" {
+		t.Fatalf("saved PDF = %q, err=%v, want pdf-a", contents, err)
+	}
+}
+
+// TestPackingSlipFilenamePrefersDisplayIDsAndAvoidsCollisions verifies saved PDFs remain easy to match without unsafe or duplicate paths.
+func TestPackingSlipFilenamePrefersDisplayIDsAndAvoidsCollisions(t *testing.T) {
+	t.Parallel()
+
+	usedNames := make(map[string]struct{})
+	first := packingSlipFilename(faire.Order{ID: faire.Ptr(faire.OrderID("order-1")), DisplayID: faire.Ptr("DISPLAY/1")}, 0, usedNames)
+	second := packingSlipFilename(faire.Order{ID: faire.Ptr(faire.OrderID("order-2")), DisplayID: faire.Ptr("DISPLAY/1")}, 1, usedNames)
+	fallback := packingSlipFilename(faire.Order{ID: faire.Ptr(faire.OrderID("order-3"))}, 2, usedNames)
+
+	if first != "DISPLAY_1.pdf" || second != "DISPLAY_1-order-2.pdf" || fallback != "order-3.pdf" {
+		t.Fatalf("packing-slip filenames = (%q, %q, %q), want display-ID, collision-safe, and ID fallback names", first, second, fallback)
+	}
+}
+
+// TestOrderExportCompletionStatusReportsPartialPackingSlipFailures verifies successful artifacts remain visible when some PDFs cannot be downloaded.
+func TestOrderExportCompletionStatusReportsPartialPackingSlipFailures(t *testing.T) {
+	t.Parallel()
+
+	message := orderExportCompletionStatus(3, "faire-new-orders-20260321142530.csv", "faire-new-orders-20260321142530", packingSlipSummary{downloaded: 2, failures: 1})
+	if !strings.Contains(message, "Saved 2 packing slips in faire-new-orders-20260321142530.") || !strings.Contains(message, "1 packing slip could not be downloaded.") {
+		t.Fatalf("completion message = %q, want saved and failed packing-slip counts", message)
 	}
 }
 

@@ -66,11 +66,10 @@ func (s *OrdersService) UpdateItemsAvailability(ctx context.Context, orderID Ord
 	return &order, nil
 }
 
-// DownloadPackingSlipPDF retrieves the order packing slip PDF in the requested IANA time zone and reports close failures.
-func (s *OrdersService) DownloadPackingSlipPDF(ctx context.Context, orderID OrderID, timezone string) (pdf []byte, err error) {
-	query := url.Values{}
-	query.Set("timezone", timezone)
-	response, err := s.client.do(ctx, http.MethodGet, orderPath(orderID)+"/packing-slip-pdf", query, nil)
+// DownloadPackingSlipPDF retrieves an order packing-slip PDF using Faire's default timezone and reports close failures.
+// ctx scopes the request, orderID identifies the brand order, and it returns raw PDF bytes or an API error.
+func (s *OrdersService) DownloadPackingSlipPDF(ctx context.Context, orderID OrderID) (pdf []byte, err error) {
+	response, err := s.client.doWithAccept(ctx, http.MethodGet, orderPath(orderID)+"/packing-slip-pdf", nil, nil, "application/pdf")
 	if err != nil {
 		return nil, err
 	}

@@ -131,6 +131,35 @@ func TestOrdersListBuildsQuery(t *testing.T) {
 	}
 }
 
+// TestDownloadPackingSlipPDFBuildsPDFRequest verifies the PDF endpoint receives its exact path and media preference without an optional timezone.
+func TestDownloadPackingSlipPDFBuildsPDFRequest(t *testing.T) {
+	client := newTestClient(t, func(request *http.Request) *http.Response {
+		if request.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", request.Method)
+		}
+		if request.URL.Path != "/orders/order-123/packing-slip-pdf" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		if request.URL.RawQuery != "" {
+			t.Fatalf("query = %q, want no optional timezone", request.URL.RawQuery)
+		}
+		if request.Header.Get("Accept") != "application/pdf" {
+			t.Fatalf("Accept = %q, want application/pdf", request.Header.Get("Accept"))
+		}
+		response := testResponse(request, http.StatusOK, "%PDF-1.7")
+		response.Header.Set("Content-Type", "application/pdf")
+		return response
+	})
+
+	pdf, err := client.Orders.DownloadPackingSlipPDF(context.Background(), OrderID("order-123"))
+	if err != nil {
+		t.Fatalf("DownloadPackingSlipPDF() error = %v", err)
+	}
+	if string(pdf) != "%PDF-1.7" {
+		t.Fatalf("PDF = %q, want PDF response bytes", pdf)
+	}
+}
+
 // TestProductUpdatePreservesExplicitFalse verifies optional pointer fields can serialize intentional false values.
 func TestProductUpdatePreservesExplicitFalse(t *testing.T) {
 	client := newTestClient(t, func(request *http.Request) *http.Response {

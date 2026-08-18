@@ -42,13 +42,14 @@ var CSVHeader = []string{
 	"item_sku", "item_price_cents", "item_quantity", "sale_source", "sales_rep_name", "notes",
 }
 
-// WriteCSV writes orders as a CSV with CSVHeader's column order and saleSource in every row.
-// Each item becomes one row so item-specific SKU, price, and quantity values remain associated
-// with their order. Orders without items produce one row with blank item fields.
-func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order) error {
+// WriteCSV writes orders as a CSV with an optional CSVHeader row and saleSource in every data row.
+// writer receives CSV bytes, saleSource identifies each row, source supplies orders, includeHeader controls the first row, and it returns the first write or flush error; each item becomes one row while orders without items produce one row with blank item fields.
+func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order, includeHeader bool) error {
 	csvWriter := csv.NewWriter(writer)
-	if err := csvWriter.Write(CSVHeader); err != nil {
-		return err
+	if includeHeader {
+		if err := csvWriter.Write(CSVHeader); err != nil {
+			return err
+		}
 	}
 	for _, order := range source {
 		if len(order.Items) == 0 {

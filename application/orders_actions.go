@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"gioui.org/layout"
@@ -75,6 +76,23 @@ type localCursorPayload struct {
 // orderExportKind identifies the server-defined set of orders written to a CSV file.
 type orderExportKind string
 
+// orderExportOptions describes the per-export CSV and packing-slip choices selected in the dialog.
+// IncludeHeader controls the CSV header row, while IncludePackingSlips controls whether one PDF is requested per exported order.
+type orderExportOptions struct {
+	IncludeHeader       bool
+	IncludePackingSlips bool
+}
+
+// orderExportDialogState preserves the two-step scope and configuration choices while the export modal is open.
+// kind is populated only after the user chooses a scope; includeHeader and includePackingSlips reset to their defaults for each newly opened dialog.
+type orderExportDialogState struct {
+	open                bool
+	configuring         bool
+	kind                orderExportKind
+	includeHeader       bool
+	includePackingSlips bool
+}
+
 const (
 	// orderExportNew writes every currently new Faire order.
 	orderExportNew orderExportKind = "new"
@@ -84,13 +102,17 @@ const (
 	orderExportSelected orderExportKind = "selected"
 )
 
-// orderExportResult carries credential-safe export completion, blocking, and filename state to the frame loop.
+// orderExportResult carries credential-safe export completion, blocking, and saved-artifact state to the frame loop.
+// PackingSlipFolder is set only for packing-slip exports, while PackingSlipFailures records safe partial-completion counts.
 type orderExportResult struct {
-	RequestID uint64
-	Status    string
-	Filename  string
-	Blocked   bool
-	Completed bool
+	RequestID           uint64
+	Status              string
+	Filename            string
+	PackingSlipFolder   string
+	PackingSlipCount    int
+	PackingSlipFailures int
+	Blocked             bool
+	Completed           bool
 }
 
 // ordersLoadErrorMessage converts an Orders request failure to a user-safe status.
@@ -823,10 +845,11 @@ func (ui *DesktopUI) invalidate() {
 	}
 }
 
-// startOrderExport validates an export request and starts the required API work without blocking Gio's frame loop.
-func (ui *DesktopUI) startOrderExport(kind orderExportKind) {
+// startOrderExport validates one configured export and starts the required API work without blocking Gio's frame loop.
+// kind identifies the order scope, options carry the per-export CSV and packing-slip choices, and it has no return value because completion is published to the frame loop.
+func (ui *DesktopUI) startOrderExport(kind orderExportKind, options orderExportOptions) {
 	// Close before validation so any actionable failure is visible on the Orders page.
-	ui.exportMenuOpen = false
+	ui.orderExportDialog = orderExportDialogState{}
 	if ui.manager == nil || ui.activeConnectionID == "" {
 		ui.ordersState.Status = "Choose an active saved connection before exporting orders."
 		return
@@ -845,11 +868,12 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind) {
 	requestID := ui.exportRequestID
 	connectionID := ui.activeConnectionID
 	ui.ordersState.Status = "Exporting orders…"
-	go ui.exportOrders(requestID, connectionID, kind, selectedIDs)
+	go ui.exportOrders(requestID, connectionID, kind, selectedIDs, options)
 }
 
-// exportOrders reads the authenticated Faire brand profile, retrieves the requested full orders, and writes their CSV file outside the frame loop.
-func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID) {
+// exportOrders reads the authenticated Faire brand profile, retrieves the requested full orders, and writes the selected CSV and packing-slip artifacts outside the frame loop.
+// requestID identifies the current worker, connectionID scopes credentials, kind and selectedIDs identify orders, and options select the CSV header and optional PDFs; it returns no value because it publishes a safe result.
+func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID, options orderExportOptions) {
 	client, _, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
@@ -880,12 +904,190 @@ func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind or
 		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
-	filename, err := writeOrdersCSVToDownloads(kind, saleSource, source)
+
+	filename, packingSlipFolder, packingSlipSummary, err := writeOrderExport(ui.ctx, client.Orders, kind, saleSource, source, options)
 	if err != nil {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Could not save the order export to Downloads. Check folder permissions and try again."})
+		status := "Could not save the order export to Downloads. Check folder permissions and try again."
+		if errors.Is(err, context.Canceled) {
+			status = ordersExportErrorMessage(err)
+		}
+		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: status})
 		return
 	}
-	ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "Exported " + itoa(len(source)) + " orders to Downloads as " + filename + ".", Filename: filename, Completed: true})
+	ui.publishOrderExportResult(orderExportResult{
+		RequestID:           requestID,
+		Status:              orderExportCompletionStatus(len(source), filename, packingSlipFolder, packingSlipSummary),
+		Filename:            filename,
+		PackingSlipFolder:   packingSlipFolder,
+		PackingSlipCount:    packingSlipSummary.downloaded,
+		PackingSlipFailures: packingSlipSummary.failures,
+		Completed:           true,
+	})
+}
+
+// packingSlipSummary records only safe successful and failed PDF counts for a completed export.
+// downloaded counts saved PDFs and failures counts skipped or failed PDFs without retaining private order or transport details.
+type packingSlipSummary struct {
+	downloaded int
+	failures   int
+}
+
+// writeOrderExport writes a CSV directly to Downloads or, when requested, writes the CSV and packing slips into one unique folder.
+// ctx cancels packing-slip work, service retrieves PDFs, kind and saleSource name and format the CSV, source is exported orders, options choose artifacts, and it returns artifact names plus a safe PDF summary.
+func writeOrderExport(ctx context.Context, service *faire.OrdersService, kind orderExportKind, saleSource orders.SalesSource, source []faire.Order, options orderExportOptions) (filename, packingSlipFolder string, summary packingSlipSummary, err error) {
+	if !options.IncludePackingSlips {
+		filename, err = writeOrdersCSVToDownloads(kind, saleSource, source, options.IncludeHeader)
+		return filename, "", packingSlipSummary{}, err
+	}
+
+	directory, folder, err := createPackingSlipExportDirectory(kind)
+	if err != nil {
+		return "", "", packingSlipSummary{}, err
+	}
+	filename, err = writeOrdersCSV(directory, kind, saleSource, source, options.IncludeHeader)
+	if err != nil {
+		// The folder contains no user-visible artifact yet, so remove it rather than leaving an empty failed export behind.
+		_ = os.Remove(directory)
+		return "", "", packingSlipSummary{}, err
+	}
+	summary, err = downloadPackingSlips(ctx, service, source, directory)
+	if err != nil {
+		return "", "", packingSlipSummary{}, err
+	}
+	return filename, folder, summary, nil
+}
+
+// downloadPackingSlips retrieves and writes one PDF per export order, retaining successful artifacts when individual requests or writes fail.
+// ctx cancels the batch, service downloads PDFs using Faire's default timezone, source identifies orders, directory receives private files, and the returned summary excludes private error details.
+func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, source []faire.Order, directory string) (packingSlipSummary, error) {
+	summary := packingSlipSummary{}
+	usedNames := make(map[string]struct{}, len(source))
+	for index, order := range source {
+		if err := ctx.Err(); err != nil {
+			return packingSlipSummary{}, err
+		}
+		if order.ID == nil || *order.ID == "" {
+			summary.failures++
+			continue
+		}
+		pdf, err := service.DownloadPackingSlipPDF(ctx, *order.ID)
+		if err != nil {
+			summary.failures++
+			continue
+		}
+		filename := packingSlipFilename(order, index, usedNames)
+		if err := os.WriteFile(filepath.Join(directory, filename), pdf, 0o600); err != nil {
+			summary.failures++
+			continue
+		}
+		summary.downloaded++
+	}
+	return summary, nil
+}
+
+// createPackingSlipExportDirectory creates one owner-only timestamped folder under Downloads for a CSV and its packing-slip PDFs.
+// kind identifies the exported scope, and it returns the absolute directory and its user-facing folder name or a filesystem error.
+func createPackingSlipExportDirectory(kind orderExportKind) (directory, folder string, err error) {
+	downloadsDirectory, err := downloadsDirectory()
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(downloadsDirectory, 0o755); err != nil {
+		return "", "", err
+	}
+	prefix := "faire-" + string(kind) + "-orders-" + time.Now().Local().Format("20060102150405")
+	for suffix := 0; ; suffix++ {
+		folder = prefix
+		if suffix > 0 {
+			folder += "-" + itoa(suffix+1)
+		}
+		directory = filepath.Join(downloadsDirectory, folder)
+		if err := os.Mkdir(directory, 0o700); err == nil {
+			return directory, folder, nil
+		} else if !errors.Is(err, os.ErrExist) {
+			return "", "", err
+		}
+	}
+}
+
+// downloadsDirectory returns the current user's Downloads directory for user-requested export artifacts.
+// It has no parameters and returns an absolute directory path or the user-home lookup error.
+func downloadsDirectory() (string, error) {
+	homeDirectory, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDirectory, "Downloads"), nil
+}
+
+// packingSlipFilename returns a display-ID-based, collision-safe PDF filename for one order.
+// order supplies display and immutable IDs, index provides a final deterministic fallback, usedNames tracks prior names, and the returned filename is safe to join beneath the export directory.
+func packingSlipFilename(order faire.Order, index int, usedNames map[string]struct{}) string {
+	base := ""
+	if order.DisplayID != nil {
+		base = safeFilenameComponent(*order.DisplayID)
+	}
+	if base == "" && order.ID != nil {
+		base = safeFilenameComponent(string(*order.ID))
+	}
+	if base == "" {
+		base = "order-" + itoa(index+1)
+	}
+	filename := base + ".pdf"
+	if _, found := usedNames[filename]; found {
+		if order.ID != nil {
+			if identifier := safeFilenameComponent(string(*order.ID)); identifier != "" {
+				filename = base + "-" + identifier + ".pdf"
+			}
+		}
+		for suffix := 2; ; suffix++ {
+			if _, found := usedNames[filename]; !found {
+				break
+			}
+			filename = base + "-" + itoa(suffix) + ".pdf"
+		}
+	}
+	usedNames[filename] = struct{}{}
+	return filename
+}
+
+// safeFilenameComponent converts an arbitrary display or order ID to a conservative cross-platform filename component.
+// value is the untrusted identifier, and the returned string contains only letters, digits, hyphens, underscores, and periods.
+func safeFilenameComponent(value string) string {
+	var builder strings.Builder
+	for _, character := range strings.TrimSpace(value) {
+		switch {
+		case character >= 'a' && character <= 'z', character >= 'A' && character <= 'Z', character >= '0' && character <= '9', character == '-', character == '_', character == '.':
+			builder.WriteRune(character)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	return strings.Trim(builder.String(), "._")
+}
+
+// orderExportCompletionStatus returns a safe completion message for CSV-only, complete packing-slip, and partial packing-slip exports.
+// orderCount identifies exported orders, filename and packingSlipFolder identify user-visible artifacts, summary contains only counts, and the returned message excludes private order details.
+func orderExportCompletionStatus(orderCount int, filename, packingSlipFolder string, summary packingSlipSummary) string {
+	status := "Exported " + itoa(orderCount) + " orders to Downloads as " + filename + "."
+	if packingSlipFolder == "" {
+		return status
+	}
+	status += " Saved " + packingSlipCountLabel(summary.downloaded) + " in " + packingSlipFolder + "."
+	if summary.failures > 0 {
+		status += " " + packingSlipCountLabel(summary.failures) + " could not be downloaded."
+	}
+	return status
+}
+
+// packingSlipCountLabel formats a count with the correct packing-slip singular or plural noun.
+// count is the number of PDFs, and the returned label is safe for user-visible export feedback.
+func packingSlipCountLabel(count int) string {
+	label := itoa(count) + " packing slip"
+	if count != 1 {
+		label += "s"
+	}
+	return label
 }
 
 // exportSalesSource derives the CSV source from the authenticated connection's current Faire brand profile.
@@ -964,17 +1166,19 @@ func selectedOrderIDs(selected map[faire.OrderID]struct{}) []faire.OrderID {
 	return ids
 }
 
-// writeOrdersCSVToDownloads atomically writes a private CSV file in the current user's Downloads directory.
-func writeOrdersCSVToDownloads(kind orderExportKind, saleSource orders.SalesSource, source []faire.Order) (string, error) {
-	homeDirectory, err := os.UserHomeDir()
+// writeOrdersCSVToDownloads atomically writes a CSV file in the current user's Downloads directory with the selected header behavior.
+// kind identifies the file, saleSource and source provide CSV values, includeHeader controls its first row, and it returns the generated filename or a filesystem error.
+func writeOrdersCSVToDownloads(kind orderExportKind, saleSource orders.SalesSource, source []faire.Order, includeHeader bool) (string, error) {
+	directory, err := downloadsDirectory()
 	if err != nil {
 		return "", err
 	}
-	return writeOrdersCSV(filepath.Join(homeDirectory, "Downloads"), kind, saleSource, source)
+	return writeOrdersCSV(directory, kind, saleSource, source, includeHeader)
 }
 
-// writeOrdersCSV atomically writes a private CSV file in directory and returns its generated filename.
-func writeOrdersCSV(directory string, kind orderExportKind, saleSource orders.SalesSource, source []faire.Order) (string, error) {
+// writeOrdersCSV atomically writes a CSV file in directory and returns its generated filename.
+// directory receives the file, kind identifies it, saleSource and source provide CSV values, includeHeader controls its first row, and it returns the filename or a filesystem error.
+func writeOrdersCSV(directory string, kind orderExportKind, saleSource orders.SalesSource, source []faire.Order, includeHeader bool) (string, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
 	}
@@ -989,7 +1193,7 @@ func writeOrdersCSV(directory string, kind orderExportKind, saleSource orders.Sa
 		// Removing the temporary file is harmless after a successful rename and prevents partial PII exports on failures.
 		_ = os.Remove(temporaryPath)
 	}()
-	if err := orders.WriteCSV(temporaryFile, saleSource, source); err != nil {
+	if err := orders.WriteCSV(temporaryFile, saleSource, source, includeHeader); err != nil {
 		_ = temporaryFile.Close()
 		return "", err
 	}
@@ -1045,6 +1249,9 @@ func (ui *DesktopUI) drainOrderExportResults() {
 			}
 			if result.Completed {
 				ui.csvExportCompletedFilename = result.Filename
+				ui.packingSlipExportFolder = result.PackingSlipFolder
+				ui.packingSlipExportCount = result.PackingSlipCount
+				ui.packingSlipExportFailures = result.PackingSlipFailures
 				ui.csvExportCompletedDialogOpen = true
 			}
 		default:
