@@ -27,15 +27,17 @@ const (
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, while profile, order, and update requests publish only safe results through channels.
+// Its methods run on Gio's frame goroutine, while startup, profile, order, and update work publish only safe results through channels.
 type DesktopUI struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	window *app.Window
 	theme  *material.Theme
 
-	manager     *connections.Manager
-	connections []connections.Connection
+	manager                   *connections.Manager
+	connections               []connections.Connection
+	preparingStartup          bool
+	startupPreparationStarted bool
 
 	activeConnectionID           string
 	activeConnectionLabel        string
@@ -143,6 +145,7 @@ type DesktopUI struct {
 	ordersSchedule           chan struct{}
 	updateResults            chan updateCheckResult
 	updateInstallResults     chan updateInstallResult
+	startupResults           chan startupResult
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -209,6 +212,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		orderExportResults:       make(chan orderExportResult, 1),
 		updateResults:            make(chan updateCheckResult, 1),
 		updateInstallResults:     make(chan updateInstallResult, 1),
+		startupResults:           make(chan startupResult, 1),
 		ordersSchedule:           make(chan struct{}, 1),
 	}
 	ui.configureEditors()
@@ -247,8 +251,17 @@ func (ui *DesktopUI) resetOrdersState() {
 }
 
 // Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.
-// In Gio, this function is called for every requested frame; persistent fields on DesktopUI preserve interaction state.
+// gtx supplies the current frame; while startup is pending it instead renders only preparation progress so no database-dependent action can run.
 func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
+	if ui.preparingStartup {
+		return layout.Stack{Alignment: layout.NW}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return fill(gtx, color.NRGBA{R: 250, G: 250, B: 250, A: 255})
+			}),
+			layout.Expanded(ui.layoutStartup),
+		)
+	}
+
 	ui.handleTabClicks(gtx)
 	return layout.Stack{Alignment: layout.NW}.Layout(gtx,
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
@@ -287,6 +300,18 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 			}
 		}),
 	)
+}
+
+// layoutStartup renders the non-interactive startup screen while connection metadata and local Orders data are prepared.
+// gtx supplies the current Gio frame constraints, and the returned dimensions fill those constraints with a visible progress message.
+func (ui *DesktopUI) layoutStartup(gtx layout.Context) layout.Dimensions {
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(material.H3(ui.theme, windowTitle).Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(bodyText(ui.theme, "Preparing local data…", mutedTextColor)),
+		)
+	})
 }
 
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.

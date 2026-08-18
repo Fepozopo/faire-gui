@@ -360,6 +360,25 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 }
 
+// TestDrainStartupResultsMakesTheApplicationInteractive verifies background startup data becomes UI-owned only on the frame goroutine.
+func TestDrainStartupResultsMakesTheApplicationInteractive(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "Preparing local data…")
+	ui.preparingStartup = true
+	ui.startupResults <- startupResult{
+		connections: []connections.Connection{{ID: "connection-a", Label: "Brand A"}},
+		status:      "Select a saved Faire brand connection to load its profile.",
+	}
+
+	ui.drainStartupResults()
+
+	if ui.preparingStartup {
+		t.Fatal("preparingStartup = true, want false after startup completion")
+	}
+	if len(ui.connections) != 1 || ui.connections[0].ID != "connection-a" || ui.status != "Select a saved Faire brand connection to load its profile." {
+		t.Fatalf("startup state = {connections:%#v status:%q}, want applied completion result", ui.connections, ui.status)
+	}
+}
+
 // TestShutdownReleasesOrdersPresentationState verifies window teardown dereferences visible Orders rows and cancels in-flight work without a session cache.
 func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
