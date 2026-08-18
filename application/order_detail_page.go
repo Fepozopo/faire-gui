@@ -9,6 +9,7 @@ import (
 )
 
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
+// Its detail panel scrolls independently so the header controls remain available for long orders.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	if ui.backToOrdersButton.Clicked(gtx) {
 		ui.orderDetailOpen = false
@@ -35,9 +36,11 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 			if ui.orderDetailLoading || ui.orderDetail.OrderID == "" {
 				return bodyText(ui.theme, "Order details will appear here when the local snapshot is available.", mutedTextColor)(gtx)
 			}
-			return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(20), Right: unit.Dp(20), Bottom: unit.Dp(20), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layoutOrderDetailContent(gtx, ui, ui.orderDetail)
+			return ui.orderDetailList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+				return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(20), Right: unit.Dp(20), Bottom: unit.Dp(20), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layoutOrderDetailContent(gtx, ui, ui.orderDetail)
+					})
 				})
 			})
 		}),

@@ -117,10 +117,6 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.startOrdersLoad(true, false, false)
 		ui.invalidate()
 	}
-	if ui.openSelectedOrderButton.Clicked(gtx) {
-		ui.openSelectedOrder()
-		ui.invalidate()
-	}
 
 	if ui.stateFilterButton.Clicked(gtx) {
 		ui.pendingStates = copyIncludedStates(ui.ordersState.IncludedStates)
@@ -204,7 +200,8 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders selection, dedicated detail navigation, and export actions on a muted toolbar.
+// layoutOrderActionBar renders selection context and export actions on a muted toolbar.
+// Order details are opened directly from each row's order-number control.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -214,10 +211,8 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(20), Bottom: unit.Dp(10), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
-					// The wider gap distinguishes the selection context from the action it informs.
+					// The wider gap separates selection feedback from its related bulk action.
 					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-					layout.Rigid(primaryButton(ui.theme, &ui.openSelectedOrderButton, "Open selected")),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.exportMenuButton, "Export")),
 				)
 			})
@@ -361,23 +356,27 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		ui.invalidate()
 	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
+		return ui.layoutOrderColumns(gtx, "", []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
 // layoutOrdersListItem renders selectable order rows with a full-width divider after every row.
-// The separator stays outside the selected-row fill so adjacent rows retain a clear visual boundary.
+// The nested order-number control takes precedence so opening details does not change export selection.
 func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.Dimensions {
 	if index == len(ui.ordersState.Rows) {
 		return ui.layoutOrdersFooter(gtx)
 	}
 	row := ui.ordersState.Rows[index]
-	control := ui.orderControlFor(row.ID)
-	if control.Clicked(gtx) {
+	rowControl := ui.orderControlFor(row.ID)
+	detailControl := ui.orderDetailControlFor(row.ID)
+	if detailControl.Clicked(gtx) {
+		ui.openOrder(row.ID)
+		ui.invalidate()
+	} else if rowControl.Clicked(gtx) {
 		ui.ordersState.ToggleSelection(row.ID)
 		ui.invalidate()
 	}
-	return control.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return rowControl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -388,7 +387,7 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 					return layout.Dimensions{Size: gtx.Constraints.Min}
 				}, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: unit.Dp(13), Right: unit.Dp(12), Bottom: unit.Dp(13), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return ui.layoutOrderColumns(gtx, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
+						return ui.layoutOrderColumns(gtx, row.ID, []string{"", row.DisplayID, row.Status, row.Customer, row.Total, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.ordersState.IsSelected(row.ID))
 					})
 				})
 			}),
@@ -411,7 +410,8 @@ func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrderColumns lays out a bounded desktop table row, truncating long values through Gio constraints.
-func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, header, selected bool) layout.Dimensions {
+// A non-empty order ID makes the order-number cell the dedicated detail-navigation control.
+func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderID, values []string, header, selected bool) layout.Dimensions {
 	// Wide fixed columns preserve readable separation on the desktop-only Orders screen.
 	widths := []unit.Dp{44, 150, 140, 210, 120, 125, 125, 145, 130}
 	children := make([]layout.FlexChild, 0, len(values))
@@ -426,6 +426,14 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 					})
 				}
 				return ui.orderCheckbox(gtx, selected)
+			}
+			if !header && index == 1 {
+				return ui.orderDetailControlFor(orderID).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					style := material.Body1(ui.theme, value)
+					style.MaxLines = 2
+					style.Color = color.NRGBA{R: 0, G: 91, B: 160, A: 255}
+					return style.Layout(gtx)
+				})
 			}
 
 			if header && index == 5 {
@@ -516,6 +524,17 @@ func (ui *DesktopUI) orderControlFor(id faire.OrderID) *widget.Clickable {
 	}
 	control := new(widget.Clickable)
 	ui.orderRowControls[id] = control
+	return control
+}
+
+// orderDetailControlFor returns the persistent order-number clickable for an order row.
+// Its state survives immediate-mode redraws so navigation gestures keep their identity.
+func (ui *DesktopUI) orderDetailControlFor(id faire.OrderID) *widget.Clickable {
+	if control, found := ui.orderDetailControls[id]; found {
+		return control
+	}
+	control := new(widget.Clickable)
+	ui.orderDetailControls[id] = control
 	return control
 }
 

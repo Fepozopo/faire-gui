@@ -86,7 +86,7 @@ func TestProfileLoadErrorMessageExplainsCredentialRejection(t *testing.T) {
 	}
 }
 
-// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies the persistent Gio controls, collapsed Settings group, default Orders page without an active connection, and created-at filter required by the desktop screens.
+// TestNewDesktopUIConfiguresScrollableListsAndMaskedToken verifies persistent Gio controls, including the scrollable orders and detail views, collapsed Settings group, default Orders page without an active connection, and created-at filter required by the desktop screens.
 func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 
@@ -99,8 +99,8 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	if ui.settingsMenuOpen {
 		t.Fatal("Settings submenu is open at launch, want a collapsed group")
 	}
-	if ui.brandsList.Axis != 1 || ui.connectionsList.Axis != 1 {
-		t.Fatalf("list axes = (%d, %d), want both vertical", ui.brandsList.Axis, ui.connectionsList.Axis)
+	if ui.brandsList.Axis != layout.Vertical || ui.connectionsList.Axis != layout.Vertical || ui.ordersList.Axis != layout.Vertical || ui.orderDetailList.Axis != layout.Vertical {
+		t.Fatalf("list axes = (%d, %d, %d, %d), want all vertical", ui.brandsList.Axis, ui.connectionsList.Axis, ui.ordersList.Axis, ui.orderDetailList.Axis)
 	}
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)

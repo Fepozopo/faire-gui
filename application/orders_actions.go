@@ -411,19 +411,16 @@ func historyBoundaryInput(value string) string {
 	return parsed.In(time.Local).Format("1/2/2006")
 }
 
-// openSelectedOrder opens the locally stored snapshot for exactly one selected table row.
-func (ui *DesktopUI) openSelectedOrder() {
+// openOrder opens the locally stored snapshot identified by the clicked order number.
+// It resets the detail viewport so every newly opened order starts at its summary.
+func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
 	if ui.activeConnectionID == "" || ui.ordersStore == nil {
 		ui.ordersState.Status = "Choose an active saved connection before opening an order."
 		return
 	}
-	if len(ui.ordersState.SelectedIDs) != 1 {
-		ui.ordersState.Status = "Select exactly one order to open its details."
+	if orderID == "" {
+		ui.ordersState.Status = "The selected order does not have a valid identifier."
 		return
-	}
-	var orderID faire.OrderID
-	for selectedID := range ui.ordersState.SelectedIDs {
-		orderID = selectedID
 	}
 	ui.detailRequestID++
 	requestID := ui.detailRequestID
@@ -431,6 +428,8 @@ func (ui *DesktopUI) openSelectedOrder() {
 	ui.orderDetailOpen, ui.orderDetailLoading = true, true
 	ui.orderDetailID, ui.orderDetailConnectionID = orderID, connectionID
 	ui.orderDetail = orders.Detail{}
+	ui.orderDetailList.Position.First = 0
+	ui.orderDetailList.Position.Offset = 0
 	ui.orderDetailStatus = "Opening locally stored order details…"
 	go loadOrderDetail(ui.ctx, store, requestID, connectionID, orderID, ui.publishOrderDetailResult)
 }

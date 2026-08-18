@@ -80,6 +80,7 @@ type DesktopUI struct {
 	brandsList                      widget.List
 	connectionsList                 widget.List
 	ordersList                      widget.List
+	orderDetailList                 widget.List
 	connectionPickerList            widget.List
 	orderSearchEditor               widget.Editor
 	updatedAtMinEditor              widget.Editor
@@ -91,7 +92,6 @@ type DesktopUI struct {
 	refreshOrdersButton             widget.Clickable
 	confirmOrdersDataAction         widget.Clickable
 	cancelOrdersDataAction          widget.Clickable
-	openSelectedOrderButton         widget.Clickable
 	backToOrdersButton              widget.Clickable
 	refreshOrderDetailButton        widget.Clickable
 	loadMoreOrdersButton            widget.Clickable
@@ -129,6 +129,7 @@ type DesktopUI struct {
 	rowControls              map[string]*connectionRowControls
 	connectionPickerControls map[string]*widget.Clickable
 	orderRowControls         map[faire.OrderID]*widget.Clickable
+	orderDetailControls      map[faire.OrderID]*widget.Clickable
 	stateControls            map[faire.OrderState]*widget.Clickable
 	deleteDialog             deleteDialogState
 	ordersDataDialog         ordersDataDialogState
@@ -199,6 +200,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		rowControls:              make(map[string]*connectionRowControls),
 		connectionPickerControls: make(map[string]*widget.Clickable),
 		orderRowControls:         make(map[faire.OrderID]*widget.Clickable),
+		orderDetailControls:      make(map[faire.OrderID]*widget.Clickable),
 		stateControls:            make(map[faire.OrderState]*widget.Clickable),
 		results:                  make(chan profileLoadResult, 1),
 		connectionCleanupResults: make(chan connectionCleanupResult, 1),
@@ -214,6 +216,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
 	ui.ordersList.Axis = layout.Vertical
+	ui.orderDetailList.Axis = layout.Vertical
 	ui.connectionPickerList.Axis = layout.Vertical
 	ui.orderSearchEditor.SingleLine = true
 	ui.updatedAtMinEditor.SingleLine = true
