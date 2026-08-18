@@ -38,7 +38,8 @@ func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// layoutConnectionSwitcher opens the session-only saved-connection picker.
+// layoutConnectionSwitcher opens the session-only saved-connection picker with link-style pointer feedback.
+// gtx supplies the current frame, and the returned dimensions render the complete connection-switcher target.
 func (ui *DesktopUI) layoutConnectionSwitcher(gtx layout.Context) layout.Dimensions {
 	if ui.activeConnectionButton.Clicked(gtx) {
 		ui.connectionPickerOpen = true
@@ -48,7 +49,7 @@ func (ui *DesktopUI) layoutConnectionSwitcher(gtx layout.Context) layout.Dimensi
 	if ui.activeConnectionLabel != "" {
 		label = ui.activeConnectionLabel
 	}
-	return ui.activeConnectionButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, &ui.activeConnectionButton, func(gtx layout.Context) layout.Dimensions {
 		return roundedPanel(gtx, color.NRGBA{R: 244, G: 244, B: 244, A: 255}, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -61,7 +62,8 @@ func (ui *DesktopUI) layoutConnectionSwitcher(gtx layout.Context) layout.Dimensi
 	})
 }
 
-// layoutNavigationItem draws one functional route button with the shared surface for selected or hovered states.
+// layoutNavigationItem draws one functional route button with the shared surface for selected or hovered states and a pointer cursor.
+// gtx supplies the current frame, route identifies the destination, label is visible text, and the returned dimensions match the navigation target.
 func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label string) layout.Dimensions {
 	button := &ui.tabButtons[route]
 	if button.Clicked(gtx) {
@@ -71,7 +73,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 		}
 		ui.invalidate()
 	}
-	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
 		return roundedPanel(gtx, navigationHighlight(ui.selectedTab == route || button.Hovered()), func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				style := material.Body1(ui.theme, label)
@@ -103,7 +105,7 @@ func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dime
 }
 
 // layoutSettingsNavigation toggles the inline Settings submenu from the persistent left navigation.
-// Its shared highlight surface and chevron make expanded and hovered states visible without obscuring the active page.
+// gtx supplies the current frame; its shared highlight surface, chevron, and pointer cursor make expanded and hovered states visible, and the returned dimensions match the Settings target.
 func (ui *DesktopUI) layoutSettingsNavigation(gtx layout.Context) layout.Dimensions {
 	if ui.settingsButton.Clicked(gtx) {
 		ui.settingsMenuOpen = !ui.settingsMenuOpen
@@ -113,7 +115,7 @@ func (ui *DesktopUI) layoutSettingsNavigation(gtx layout.Context) layout.Dimensi
 	if ui.settingsMenuOpen {
 		chevron = "⌃"
 	}
-	return ui.settingsButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, &ui.settingsButton, func(gtx layout.Context) layout.Dimensions {
 		return roundedPanel(gtx, navigationHighlight(ui.settingsMenuOpen || ui.settingsButton.Hovered()), func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(11), Right: unit.Dp(12), Bottom: unit.Dp(11), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
@@ -155,9 +157,10 @@ func (ui *DesktopUI) layoutSettingsSubmenu(gtx layout.Context) layout.Dimensions
 	)
 }
 
-// layoutSettingsSubmenuItem renders one indented Settings destination with the shared hover surface while preserving its clickable state.
+// layoutSettingsSubmenuItem renders one indented Settings destination with the shared hover surface and pointer cursor while preserving its clickable state.
+// gtx supplies the active frame, button owns the item state, label is the visible destination, and the returned dimensions match the rendered item.
 func (ui *DesktopUI) layoutSettingsSubmenuItem(gtx layout.Context, button *widget.Clickable, label string) layout.Dimensions {
-	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
 		return roundedPanel(gtx, navigationHighlight(button.Hovered()), func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(32)}.Layout(gtx, material.Body1(ui.theme, label).Layout)
 		})

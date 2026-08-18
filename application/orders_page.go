@@ -361,7 +361,7 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrdersListItem renders selectable order rows with a full-width divider after every row.
-// The nested order-number control takes precedence so opening details does not change export selection.
+// gtx supplies the current frame, index selects a row or footer, and the returned dimensions render it; the nested order-number link underlines on hover and takes precedence so opening details does not change export selection, and the row control receives pointer feedback.
 func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.Dimensions {
 	if index == len(ui.ordersState.Rows) {
 		return ui.layoutOrdersFooter(gtx)
@@ -376,7 +376,7 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 		ui.ordersState.ToggleSelection(row.ID)
 		ui.invalidate()
 	}
-	return rowControl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, rowControl, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -410,7 +410,7 @@ func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrderColumns lays out a bounded desktop table row, truncating long values through Gio constraints.
-// A non-empty order ID makes the order-number cell the dedicated detail-navigation control.
+// gtx supplies the current frame, orderID identifies the detail link, values are cell text, header and selected control row behavior, and the returned dimensions render the columns; a non-empty order ID makes the order-number cell a detail-navigation link that underlines on hover, and every header control receives pointer feedback.
 func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderID, values []string, header, selected bool) layout.Dimensions {
 	// Wide fixed columns preserve readable separation on the desktop-only Orders screen.
 	widths := []unit.Dp{44, 150, 140, 210, 120, 125, 125, 145, 130}
@@ -421,28 +421,23 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderI
 			gtx.Constraints.Max.X = gtx.Dp(widths[index])
 			if index == 0 {
 				if header {
-					return ui.headerSelectVisibleOrdersButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return clickableWithPointer(gtx, &ui.headerSelectVisibleOrdersButton, func(gtx layout.Context) layout.Dimensions {
 						return ui.orderCheckbox(gtx, selected)
 					})
 				}
 				return ui.orderCheckbox(gtx, selected)
 			}
 			if !header && index == 1 {
-				return ui.orderDetailControlFor(orderID).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					style := material.Body1(ui.theme, value)
-					style.MaxLines = 2
-					style.Color = color.NRGBA{R: 0, G: 91, B: 160, A: 255}
-					return style.Layout(gtx)
-				})
+				return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(orderID), value)
 			}
 
 			if header && index == 5 {
-				return ui.orderDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return clickableWithPointer(gtx, &ui.orderDateSortButton, func(gtx layout.Context) layout.Dimensions {
 					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnOrderDate, value))
 				})
 			}
 			if header && index == 6 {
-				return ui.shipDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return clickableWithPointer(gtx, &ui.shipDateSortButton, func(gtx layout.Context) layout.Dimensions {
 					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnShipDate, value))
 				})
 			}
@@ -568,10 +563,10 @@ func emptyOrdersMessage(message string) string {
 	return message
 }
 
-// orderTabButton renders a low-profile tab with an underline for the selected server-state filter.
-// A non-negative count renders a compact badge beside label; a negative count omits the badge.
+// orderTabButton renders a low-profile tab with an underline for the selected server-state filter and a pointer cursor.
+// gtx supplies the current frame, theme controls styling, button owns interaction state, label and count identify the preset, selected controls emphasis, and the returned dimensions match the tab.
 func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, label string, count int, selected bool) layout.Dimensions {
-	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 				textColor := mutedTextColor

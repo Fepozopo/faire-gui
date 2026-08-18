@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -103,7 +104,7 @@ func dangerButton(theme *material.Theme, button *widget.Clickable, label string)
 }
 
 // filledButton creates a consistently sized filled button using the supplied background color.
-// The returned widget keeps the provided clickable's state and renders label text with the application foreground color.
+// theme supplies typography, button owns interaction state, label is visible text, background paints the button, and the returned widget shows a pointer cursor over its complete hit area.
 func filledButton(theme *material.Theme, button *widget.Clickable, label string, background color.NRGBA) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		style := material.Button(theme, button, label)
@@ -111,8 +112,56 @@ func filledButton(theme *material.Theme, button *widget.Clickable, label string,
 		style.Color = primaryButtonText
 		style.CornerRadius = unit.Dp(4)
 		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
-		return style.Layout(gtx)
+		return pointerCursor(gtx, style.Layout)
 	}
+}
+
+// pointerCursor adds the link-style pointer cursor to exactly the measured area of child.
+// gtx provides the active Gio operations, child renders the interactive area, and the returned dimensions match child without expanding its hit target.
+func pointerCursor(gtx layout.Context, child layout.Widget) layout.Dimensions {
+	macro := op.Record(gtx.Ops)
+	dimensions := child(gtx)
+	call := macro.Stop()
+
+	// Replay the child inside its measured clip so the pointer never leaks into adjacent non-interactive UI.
+	defer clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops).Pop()
+	pointer.CursorPointer.Add(gtx.Ops)
+	call.Add(gtx.Ops)
+	return dimensions
+}
+
+// clickableWithPointer lays out button with child and gives its measured hit target a link-style pointer cursor.
+// gtx supplies the active frame, button owns persistent interaction state, child draws its content, and the returned dimensions match the clickable target.
+func clickableWithPointer(gtx layout.Context, button *widget.Clickable, child layout.Widget) layout.Dimensions {
+	return pointerCursor(gtx, func(gtx layout.Context) layout.Dimensions {
+		return button.Layout(gtx, child)
+	})
+}
+
+// linkLabel renders text as a navigation link that underlines only while its persistent clickable target is hovered.
+// gtx supplies the current frame, theme controls text shaping, button owns interaction state, text is the visible label, and the returned dimensions preserve the caller's column width.
+func linkLabel(gtx layout.Context, theme *material.Theme, button *widget.Clickable, text string) layout.Dimensions {
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.W}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				// Measure the label naturally so the underline communicates the text link rather than the entire table column.
+				gtx.Constraints.Min.X = 0
+				style := material.Body1(theme, text)
+				style.MaxLines = 2
+				style.Color = color.NRGBA{R: 0, G: 91, B: 160, A: 255}
+				dimensions := style.Layout(gtx)
+				if button.Hovered() {
+					// Keep the normal link label compact while making its destination affordance explicit on hover.
+					underlineHeight := max(gtx.Dp(unit.Dp(1)), 1)
+					paint.FillShape(gtx.Ops, style.Color, clip.Rect(image.Rect(0, max(dimensions.Size.Y-underlineHeight, 0), dimensions.Size.X, dimensions.Size.Y)).Op())
+				}
+				return dimensions
+			}),
+		)
+	})
 }
 
 // fill paints the full available layout area with a solid color.
