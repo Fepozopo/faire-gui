@@ -58,7 +58,6 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(detailLine(ui, "Updated", detail.UpdatedAt)),
 		layout.Rigid(detailLine(ui, "Local data synced", detail.SyncedAt)),
 		layout.Rigid(detailLine(ui, "Customer", detail.Customer)),
-		layout.Rigid(detailLine(ui, "Total", detail.Total)),
 		layout.Rigid(detailLine(ui, "Commission", detail.Commission)),
 		layout.Rigid(detailLine(ui, "Total payout", detail.TotalPayout)),
 		layout.Rigid(detailLine(ui, "Source", detail.Source)),

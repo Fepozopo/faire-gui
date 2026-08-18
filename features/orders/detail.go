@@ -25,7 +25,6 @@ type Detail struct {
 	Items               []DetailItem
 	Shipments           []DetailShipment
 	ShippingAddress     DetailAddress
-	Total               string
 	Commission          string
 	TotalPayout         string
 	IsFreeShipping      string
@@ -87,7 +86,6 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		Items:               presentDetailItems(order.Items),
 		Shipments:           presentDetailShipments(order.Shipments),
 		ShippingAddress:     presentDetailAddress(order.Address),
-		Total:               formatOrderTotal(order.Items),
 		Commission:          formatCommissionAmount(order.PayoutCosts),
 		IsFreeShipping:      detailBoolean(order.IsFreeShipping),
 		PendingCancellation: detailBoolean(order.HasPendingRetailerCancellationRequest),

@@ -126,13 +126,6 @@ func displayCustomer(customer *faire.Customer) string {
 	return strings.Join(parts, " ")
 }
 
-// formatOrderTotal converts the shared raw item subtotal into an order-detail total label.
-// It returns the standard missing-value placeholder when the items have no usable price or use mixed currencies.
-func formatOrderTotal(items []faire.OrderItem) string {
-	amountMinor, currency := faire.OrderItemsTotal(items)
-	return FormatTotal(amountMinor, currency)
-}
-
 // FormatTotal converts raw total minor units and currency into a display label.
 // It returns the standard missing-value placeholder when either raw value is unavailable.
 func FormatTotal(amountMinor *int64, currency string) string {

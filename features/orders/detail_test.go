@@ -16,7 +16,7 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 	updatedAt := "2026-01-03T04:05:06Z"
 	firstName, lastName := "Ada", "Lovelace"
 	name, address1, city := "Ada Lovelace", "1 Computing Lane", "London"
-	quantity, amount, commission, payout := int64(2), int64(1234), int64(250), int64(999)
+	quantity, commission, payout := int64(2), int64(250), int64(999)
 	currency := "USD"
 	product, variant, sku := "Widget", "Large", "SKU-1"
 	customizationType, customizationValue := "Message", "Hello\x00 world"
@@ -25,13 +25,13 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 	order := faire.Order{
 		ID: &orderID, DisplayID: &displayID, State: &state, CreatedAt: &createdAt, UpdatedAt: &updatedAt,
 		Customer: &faire.Customer{FirstName: &firstName, LastName: &lastName}, Notes: &notes,
-		Items:       []faire.OrderItem{{ProductName: &product, VariantName: &variant, SKU: &sku, Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}, Customizations: []faire.Customization{{Type: &customizationType, Value: &customizationValue}}}},
+		Items:       []faire.OrderItem{{ProductName: &product, VariantName: &variant, SKU: &sku, Quantity: &quantity, Customizations: []faire.Customization{{Type: &customizationType, Value: &customizationValue}}}},
 		Shipments:   []faire.Shipment{{Carrier: &carrier, TrackingCode: &tracking}},
 		Address:     &faire.Address{Name: &name, Address1: &address1, City: &city},
 		PayoutCosts: &faire.PayoutCosts{Commission: &faire.Money{AmountMinor: &commission, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
 	}
 	detail := PresentDetail(order, time.Date(2026, 1, 4, 5, 6, 0, 0, time.UTC))
-	if detail.OrderID != orderID || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Total != "$24.68" || detail.Commission != "USD 2.50" || detail.TotalPayout != "USD 9.99" {
+	if detail.OrderID != orderID || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Commission != "USD 2.50" || detail.TotalPayout != "USD 9.99" {
 		t.Fatalf("detail = %#v", detail)
 	}
 	if detail.ShippingAddress.Address1 != address1 || len(detail.Items) != 1 || detail.Items[0].Quantity != "2" || detail.Items[0].Customizations[0].Value != "Hello world" || len(detail.Shipments) != 1 || detail.Shipments[0].TrackingCode != tracking {
@@ -46,7 +46,7 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 func TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates(t *testing.T) {
 	unknown := faire.OrderState("ON_HOLD")
 	detail := PresentDetail(faire.Order{State: &unknown}, time.Time{})
-	if detail.DisplayID != "—" || detail.Status != "On Hold" || detail.Customer != "—" || detail.Total != "—" || detail.ShippingAddress.Address1 != "—" || detail.SyncedAt != "—" {
+	if detail.DisplayID != "—" || detail.Status != "On Hold" || detail.Customer != "—" || detail.ShippingAddress.Address1 != "—" || detail.SyncedAt != "—" {
 		t.Fatalf("detail = %#v", detail)
 	}
 }
