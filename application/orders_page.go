@@ -21,6 +21,7 @@ import (
 func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 	ui.handleOrdersControls(gtx)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(ui.layoutOrdersStatus),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(material.H3(ui.theme, "Orders").Layout),
@@ -33,6 +34,28 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Flexed(1, ui.layoutOrdersWorkspace),
 	)
+}
+
+// layoutOrdersStatus renders credential-safe loading, success, and error feedback above the Orders title.
+// A rebuild or delete in progress receives a bordered banner so it remains obvious after navigation from Brand Profile.
+func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
+	if ui.ordersState.Status == "" {
+		return layout.Dimensions{}
+	}
+	if ui.ordersDataActionConnectionID == ui.activeConnectionID {
+		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(material.Label(ui.theme, unit.Sp(14), "Local order data in progress").Layout),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+						layout.Rigid(bodyText(ui.theme, ui.ordersState.Status, mutedTextColor)),
+					)
+				})
+			})
+		})
+	}
+	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, bodyText(ui.theme, ui.ordersState.Status, mutedTextColor))
 }
 
 // layoutOrdersWorkspace groups the tabs, controls, selection bar, and table in one bordered Orders surface.
@@ -63,7 +86,7 @@ func (ui *DesktopUI) ordersConnectionText() string {
 }
 
 // handleOrdersControls processes controls before rendering so visible rows update in the same frame.
-// Refresh validates the Created At Minimum value, replaces the server query, and re-fetches from Faire.
+// Refresh validates the retained-history boundary and invokes the shared synchronization path.
 func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	if ui.searchOrdersButton.Clicked(gtx) {
 		ui.loadOrderByDisplayID()
@@ -73,25 +96,29 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.orderSearchEditor.SetText("")
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.startOrdersLoad(false, false)
+		ui.startOrdersLoad(false, false, false)
 		ui.invalidate()
 	}
 	if ui.refreshOrdersButton.Clicked(gtx) {
-		createdAtMin, err := orders.NormalizeDateFilter(ui.createdAtMinEditor.Text(), false, time.Local)
+		updatedAtMin, err := orders.NormalizeDateFilter(ui.updatedAtMinEditor.Text(), false, time.Local)
 		if err != nil {
-			ui.ordersState.Status = "Enter the created-at minimum as month/day/year, for example 3/21/2026."
+			ui.ordersState.Status = "Enter the updated-at minimum as month/day/year, for example 3/21/2026."
 			ui.invalidate()
 			return
 		}
-		// Refresh deliberately bypasses the cache so the edited date always reaches Faire in a new request.
-		ui.ordersState.Query.CreatedAtMin = createdAtMin
+		// An earlier value expands retained history after a complete all-pages refresh; a later value remains a local view boundary.
+		ui.ordersState.Query.UpdatedAtMin = updatedAtMin
 		ui.ordersSearchActive = false
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.startOrdersLoad(false, true)
+		ui.startOrdersLoad(false, true, true)
 		ui.invalidate()
 	}
 	if ui.loadMoreOrdersButton.Clicked(gtx) {
-		ui.startOrdersLoad(true, false)
+		ui.startOrdersLoad(true, false, false)
+		ui.invalidate()
+	}
+	if ui.openSelectedOrderButton.Clicked(gtx) {
+		ui.openSelectedOrder()
 		ui.invalidate()
 	}
 
@@ -107,14 +134,15 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 }
 
 // layoutOrderTabs draws high-level status presets followed by an advanced state picker.
-// Selecting either control updates the supported API state filter.
+// The New preset includes the active connection's complete locally stored New-order count; selecting either control updates the supported API state filter.
 func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 	tabs := []struct {
-		label string
-		state *faire.OrderState
+		label        string
+		state        *faire.OrderState
+		showNewCount bool
 	}{
 		{label: "All"},
-		{label: "New", state: faire.Ptr(faire.OrderStateNew)},
+		{label: "New", state: faire.Ptr(faire.OrderStateNew), showNewCount: true},
 		{label: "Processing", state: faire.Ptr(faire.OrderStateProcessing)},
 		{label: "Fulfilled", state: faire.Ptr(faire.OrderStateDelivered)},
 		{label: "Canceled", state: faire.Ptr(faire.OrderStateCanceled)},
@@ -133,11 +161,15 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 							ui.ordersState.SetIncludedStates([]faire.OrderState{*tab.state})
 						}
 						ui.ordersSearchActive = false
-						ui.startOrdersLoad(false, false)
+						ui.startOrdersLoad(false, false, false)
 						ui.invalidate()
 					}
 					selected := (tab.state == nil && len(ui.ordersState.IncludedStates) == len(orders.KnownStates())) || (tab.state != nil && len(ui.ordersState.IncludedStates) == 1 && stateIncluded(ui.ordersState.IncludedStates, *tab.state))
-					return orderTabButton(gtx, ui.theme, button, tab.label, selected)
+					count := -1
+					if tab.showNewCount {
+						count = ui.newOrdersCount
+					}
+					return orderTabButton(gtx, ui.theme, button, tab.label, count, selected)
 				})
 			}))
 		}
@@ -172,7 +204,7 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders the selected-order context and primary CSV export action on a muted toolbar.
+// layoutOrderActionBar renders selection, dedicated detail navigation, and export actions on a muted toolbar.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -184,8 +216,9 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 					layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 					// The wider gap distinguishes the selection context from the action it informs.
 					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, &ui.openSelectedOrderButton, "Open selected")),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.exportMenuButton, "Export")),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				)
 			})
 		},
@@ -261,6 +294,33 @@ func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.D
 	})
 }
 
+// layoutOrdersDataModal confirms a destructive local-only cache action before any private snapshots are deleted.
+func (ui *DesktopUI) layoutOrdersDataModal(gtx layout.Context) layout.Dimensions {
+	if ui.cancelOrdersDataAction.Clicked(gtx) {
+		ui.ordersDataDialog = ordersDataDialogState{}
+		ui.invalidate()
+	}
+	if ui.confirmOrdersDataAction.Clicked(gtx) {
+		ui.startOrdersDataAction(ui.ordersDataDialog.connectionID, ui.ordersDataDialog.rebuild)
+		ui.invalidate()
+	}
+	action := "Delete local order data"
+	description := "This removes locally stored order details, including customer and shipping information, for the selected connection only. It never deletes data at Faire."
+	if ui.ordersDataDialog.rebuild {
+		action = "Delete and rebuild local order data"
+		description += " A new 30-day local history download will begin after deletion."
+	}
+	return modalPanel(gtx, ui, action, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, description, mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(dangerButton(ui.theme, &ui.confirmOrdersDataAction, action)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.cancelOrdersDataAction, "Cancel")),
+		)
+	})
+}
+
 // layoutOrdersTable creates the framed surface's order header, scrollable rows, and Load more action.
 // Before the first request, it fills the remaining panel space with the same safe message rather than nesting another card.
 func (ui *DesktopUI) layoutOrdersTable(gtx layout.Context) layout.Dimensions {
@@ -286,8 +346,22 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		}
 		ui.invalidate()
 	}
+	if ui.orderDateSortButton.Clicked(gtx) {
+		ui.ordersState.ToggleTableSort(orders.TableSortColumnOrderDate)
+		ui.ordersState.Cursor = ""
+		ui.ordersSearchActive = false
+		ui.startOrdersLoad(false, false, false)
+		ui.invalidate()
+	}
+	if ui.shipDateSortButton.Clicked(gtx) {
+		ui.ordersState.ToggleTableSort(orders.TableSortColumnShipDate)
+		ui.ordersState.Cursor = ""
+		ui.ordersSearchActive = false
+		ui.startOrdersLoad(false, false, false)
+		ui.invalidate()
+	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission", "Source"}, true, ui.allVisibleOrdersSelected())
+		return ui.layoutOrderColumns(gtx, []string{"", "Order", "Status", "Customer", "Total", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
@@ -323,16 +397,11 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 	})
 }
 
-// layoutOrdersFooter displays safe status feedback and appends another API page without clearing selection.
+// layoutOrdersFooter appends another local table page or an empty-result message without duplicating the page-level status.
 func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 	return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(12), Bottom: unit.Dp(14), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{}
-		if ui.ordersState.Status != "" {
-			children = append(children, layout.Rigid(bodyText(ui.theme, ui.ordersState.Status, mutedTextColor)))
-		}
-		if ui.ordersState.Loading {
-			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "Loading…", mutedTextColor)))
-		} else if ui.ordersState.Cursor != "" && !ui.ordersSearchActive {
+		if !ui.ordersState.Loading && ui.ordersState.Cursor != "" && !ui.ordersSearchActive {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), layout.Rigid(primaryButton(ui.theme, &ui.loadMoreOrdersButton, "Load more")))
 		} else if len(ui.ordersState.Rows) == 0 && ui.ordersState.Loaded {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bodyText(ui.theme, "No orders match these filters.", mutedTextColor)))
@@ -359,6 +428,16 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 				return ui.orderCheckbox(gtx, selected)
 			}
 
+			if header && index == 5 {
+				return ui.orderDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnOrderDate, value))
+				})
+			}
+			if header && index == 6 {
+				return ui.shipDateSortButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnShipDate, value))
+				})
+			}
 			style := material.Body1(ui.theme, value)
 			style.MaxLines = 2
 			if header {
@@ -369,6 +448,25 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, values []string, hea
 		}))
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// orderHeaderLabel renders one interactive Orders date-header label with the shared header typography.
+func (ui *DesktopUI) orderHeaderLabel(gtx layout.Context, label string) layout.Dimensions {
+	style := material.Label(ui.theme, unit.Sp(14), label)
+	style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+	return style.Layout(gtx)
+}
+
+// sortHeaderLabel adds a vertical direction arrow only to the selected local date-sort column.
+// An upward arrow places older dates first, while a downward arrow places newer dates first.
+func (ui *DesktopUI) sortHeaderLabel(column orders.TableSortColumn, label string) string {
+	if ui.ordersState.TableSort.Column != column {
+		return label
+	}
+	if ui.ordersState.TableSort.Direction == orders.TableSortAscending {
+		return label + " ↑"
+	}
+	return label + " ↓"
 }
 
 // orderCheckbox draws a larger, clipped checkbox indicator for the table header and rows.
@@ -397,16 +495,16 @@ func (ui *DesktopUI) orderCheckbox(gtx layout.Context, selected bool) layout.Dim
 	)
 }
 
-// refreshOrdersControl renders Refresh and the visible API date-filter label below it.
-// Refresh is disabled by behavior while an API operation is in flight.
+// refreshOrdersControl renders manual synchronization and the retained-history boundary.
+// Refresh is disabled by behavior while an incompatible Orders operation is in flight.
 func (ui *DesktopUI) refreshOrdersControl(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
 		layout.Rigid(primaryButton(ui.theme, &ui.refreshOrdersButton, "Refresh")),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Created At Minimum (applies on Refresh)").Layout),
+		layout.Rigid(material.Label(ui.theme, unit.Sp(12), "Updated At Minimum (earlier date adds history)").Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.dateFilterField(gtx, &ui.createdAtMinEditor, "M/D/YYYY")
+			return ui.dateFilterField(gtx, &ui.updatedAtMinEditor, "M/D/YYYY")
 		}),
 	)
 }
@@ -452,17 +550,29 @@ func emptyOrdersMessage(message string) string {
 }
 
 // orderTabButton renders a low-profile tab with an underline for the selected server-state filter.
-func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, label string, selected bool) layout.Dimensions {
+// A non-negative count renders a compact badge beside label; a negative count omits the badge.
+func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, label string, count int, selected bool) layout.Dimensions {
 	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				style := material.Body1(theme, label)
+				textColor := mutedTextColor
 				if selected {
-					style.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
-				} else {
-					style.Color = mutedTextColor
+					textColor = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
 				}
-				return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(6), Bottom: unit.Dp(10), Left: unit.Dp(6)}.Layout(gtx, style.Layout)
+				return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(6), Bottom: unit.Dp(10), Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						style := material.Body1(theme, label)
+						style.Color = textColor
+						return style.Layout(gtx)
+					})}
+					if count >= 0 {
+						children = append(children,
+							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return orderTabCountBadge(gtx, theme, count) }),
+						)
+					}
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+				})
 			}),
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				if !selected {
@@ -471,6 +581,17 @@ func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Cl
 				return bottomRule(gtx, color.NRGBA{R: 50, G: 50, B: 50, A: 255})
 			}),
 		)
+	})
+}
+
+// orderTabCountBadge renders the muted pill used to display the complete locally stored New-order count.
+func orderTabCountBadge(gtx layout.Context, theme *material.Theme, count int) layout.Dimensions {
+	return roundedPanel(gtx, selectionBarColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(2), Right: unit.Dp(7), Bottom: unit.Dp(2), Left: unit.Dp(7)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			style := material.Label(theme, unit.Sp(12), itoa(count))
+			style.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+			return style.Layout(gtx)
+		})
 	})
 }
 

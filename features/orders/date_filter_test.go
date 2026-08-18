@@ -5,14 +5,14 @@ import (
 	"time"
 )
 
-// TestDefaultCreatedAtMinimumUsesOneYearLookback verifies the default field value and API timestamp share a local-day boundary.
-func TestDefaultCreatedAtMinimumUsesOneYearLookback(t *testing.T) {
+// TestDefaultUpdatedAtMinimumUses30DayLookback verifies the default field value and API timestamp share a local-day boundary.
+func TestDefaultUpdatedAtMinimumUses30DayLookback(t *testing.T) {
 	t.Parallel()
 
 	location := time.FixedZone("UTC-05", -5*60*60)
-	input, timestamp := DefaultCreatedAtMinimum(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
-	if input != "3/21/2025" || timestamp != "2025-03-21T00:00:00-05:00" {
-		t.Fatalf("DefaultCreatedAtMinimum() = (%q, %q), want one-year local-day lookback", input, timestamp)
+	input, timestamp := DefaultUpdatedAtMinimum(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
+	if input != "2/19/2026" || timestamp != "2026-02-19T00:00:00-05:00" {
+		t.Fatalf("DefaultUpdatedAtMinimum() = (%q, %q), want 30-day local-day lookback", input, timestamp)
 	}
 }
 

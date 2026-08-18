@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,13 +11,20 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// drainResults transfers completed safe profile statuses from background work into UI-owned state.
-// It never blocks a frame, and no result contains credentials, response bodies, or Gio widget state.
+// drainResults transfers completed safe profile and inactive local-data statuses into UI-owned state.
+// It refreshes an active Orders view after its matching off-screen local-data action completes, without starting duplicate synchronization.
 func (ui *DesktopUI) drainResults() {
 	for {
 		select {
 		case result := <-ui.results:
 			ui.status = result.status
+			if result.ordersDataConnectionID != "" && result.ordersDataConnectionID == ui.ordersDataActionConnectionID {
+				ui.ordersDataActionConnectionID = ""
+				if result.ordersDataConnectionID == ui.activeConnectionID {
+					ui.ordersState.Loading = false
+					ui.startOrdersLoad(false, false, false)
+				}
+			}
 		default:
 			return
 		}
@@ -56,15 +64,26 @@ func (ui *DesktopUI) loadProfile(connectionID string) {
 	ui.publishProfileResult(profileSummary(connection, profile))
 }
 
-// publishProfileResult sends a safe result unless the window has already closed.
+// publishProfileResult sends a safe profile status unless the window has already closed.
 // The buffered channel avoids holding the profile goroutine until another frame arrives.
 func (ui *DesktopUI) publishProfileResult(status string) {
+	ui.publishProfileLoadResult(profileLoadResult{status: status})
+}
+
+// publishOrdersDataResult sends a safe inactive local-data completion status for exactly one connection.
+// The result identifies only an immutable connection ID, allowing the frame loop to refresh an active Orders view safely.
+func (ui *DesktopUI) publishOrdersDataResult(connectionID, status string) {
+	ui.publishProfileLoadResult(profileLoadResult{status: status, ordersDataConnectionID: connectionID})
+}
+
+// publishProfileLoadResult publishes a credential-safe Brand Profile result unless application shutdown has begun.
+func (ui *DesktopUI) publishProfileLoadResult(result profileLoadResult) {
 	select {
-	case ui.results <- profileLoadResult{status: status}:
+	case ui.results <- result:
 	case <-ui.ctx.Done():
 		return
 	}
-	ui.window.Invalidate()
+	ui.invalidate()
 }
 
 // rowControlsFor returns stable controls for connectionID and creates them only for a newly visible row.
@@ -240,7 +259,7 @@ func (ui *DesktopUI) requestDelete(connection connections.Connection) {
 	ui.window.Invalidate()
 }
 
-// deleteConnection removes metadata and credentials only after the modal confirm control triggers it.
+// deleteConnection removes metadata, credentials, and that connection's private local Orders cache after modal confirmation.
 // It refreshes list data on success so the deleted connection can no longer be selected.
 func (ui *DesktopUI) deleteConnection() {
 	connection := ui.deleteDialog.connection
@@ -255,6 +274,9 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.window.Invalidate()
 		return
 	}
+	if ui.ordersStore != nil {
+		go ui.deleteConnectionCache(connection.ID, connection.Label, ui.ordersStore)
+	}
 	ui.managementStatus = "Deleted connection " + connection.Label + "."
 	ui.status = "Deleted " + connection.Label + "."
 	if ui.activeConnectionID == connection.ID {
@@ -266,6 +288,38 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.orderSearchEditor.SetText("")
 	}
 	ui.refreshConnections()
+}
+
+// connectionCleanupResult carries a credential-safe result from background connection-cache cleanup.
+type connectionCleanupResult struct {
+	label  string
+	status string
+}
+
+// deleteConnectionCache removes only a deleted connection's local Orders data outside the Gio frame loop.
+func (ui *DesktopUI) deleteConnectionCache(connectionID, label string, store interface {
+	DeleteConnectionData(context.Context, string) error
+}) {
+	if err := store.DeleteConnectionData(ui.ctx, connectionID); err != nil {
+		select {
+		case ui.connectionCleanupResults <- connectionCleanupResult{label: label, status: "Deleted connection " + label + ", but its local order data could not be removed."}:
+			ui.invalidate()
+		case <-ui.ctx.Done():
+		}
+	}
+}
+
+// drainConnectionCleanupResults applies safe background cache-cleanup failure statuses on the Gio frame loop.
+func (ui *DesktopUI) drainConnectionCleanupResults() {
+	for {
+		select {
+		case result := <-ui.connectionCleanupResults:
+			ui.managementStatus = result.status
+			ui.status = "Connection deleted; local order data removal needs attention."
+		default:
+			return
+		}
+	}
 }
 
 // refreshConnections reloads metadata and discards stale per-row click state after a successful operation.

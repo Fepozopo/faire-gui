@@ -21,7 +21,7 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 					layout.Rigid(bodyText(ui.theme, "Select a connection to verify its read-only Faire brand profile.", mutedTextColor)),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(statusText(ui.theme, ui.status)),
+					layout.Rigid(ui.layoutBrandStatus),
 				)
 			})
 		}
@@ -37,6 +37,14 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 		if controls.selectProfile.Clicked(gtx) {
 			ui.selectConnection(connection.ID)
 		}
+		if controls.rebuildLocalData.Clicked(gtx) {
+			ui.requestOrdersDataAction(connection.ID, true)
+			ui.invalidate()
+		}
+		if controls.deleteLocalData.Clicked(gtx) {
+			ui.requestOrdersDataAction(connection.ID, false)
+			ui.invalidate()
+		}
 		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return card(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Top: unit.Dp(16), Right: unit.Dp(16), Bottom: unit.Dp(16), Left: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -45,10 +53,52 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 						layout.Rigid(bodyText(ui.theme, connectionDetails(connection), mutedTextColor)),
 						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-						layout.Rigid(primaryButton(ui.theme, &controls.selectProfile, "Load brand profile")),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.layoutBrandProfileActions(gtx, controls)
+						}),
 					)
 				})
 			})
 		})
 	})
+}
+
+// layoutBrandStatus renders Brand Profile feedback and emphasizes an in-progress local-data action.
+func (ui *DesktopUI) layoutBrandStatus(gtx layout.Context) layout.Dimensions {
+	if ui.status == "" {
+		return layout.Dimensions{}
+	}
+	if ui.ordersDataActionConnectionID == "" {
+		return statusText(ui.theme, ui.status)(gtx)
+	}
+	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(material.Label(ui.theme, unit.Sp(14), "Local order data in progress").Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+				layout.Rigid(bodyText(ui.theme, ui.status, mutedTextColor)),
+			)
+		})
+	})
+}
+
+// layoutBrandProfileActions renders equal-width, connection-scoped profile and local-data actions.
+// The controls remain associated with their card so destructive actions never use another connection's cached Orders data.
+func (ui *DesktopUI) layoutBrandProfileActions(gtx layout.Context, controls *connectionRowControls) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return primaryButton(ui.theme, &controls.selectProfile, "Load brand profile")(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return primaryButton(ui.theme, &controls.rebuildLocalData, "Rebuild local data")(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return dangerButton(ui.theme, &controls.deleteLocalData, "Delete local data")(gtx)
+		}),
+	)
 }

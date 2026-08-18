@@ -30,20 +30,20 @@ func TestExcludedStates(t *testing.T) {
 // TestBuildOrderListOptions verifies that only feature-supported list controls are sent.
 func TestBuildOrderListOptions(t *testing.T) {
 	query := ServerQuery{
-		CreatedAtMin: "2026-01-02T03:04:05Z",
-		SortBy:       faire.OrderSortByCreatedAt,
+		UpdatedAtMin: "2026-01-02T03:04:05Z",
+		SortBy:       faire.OrderSortByUpdatedAt,
 	}
 	options := BuildOrderListOptions(query, map[faire.OrderState]struct{}{faire.OrderStateNew: {}}, "next-page")
-	if options.CreatedAtMin == nil || *options.CreatedAtMin != query.CreatedAtMin {
-		t.Fatalf("CreatedAtMin = %#v", options.CreatedAtMin)
+	if options.UpdatedAtMin == nil || *options.UpdatedAtMin != query.UpdatedAtMin {
+		t.Fatalf("UpdatedAtMin = %#v", options.UpdatedAtMin)
 	}
-	if options.SortBy == nil || *options.SortBy != faire.OrderSortByCreatedAt {
+	if options.SortBy == nil || *options.SortBy != faire.OrderSortByUpdatedAt {
 		t.Fatalf("SortBy = %#v", options.SortBy)
 	}
 	if options.Cursor == nil || *options.Cursor != "next-page" {
 		t.Fatalf("Cursor = %#v", options.Cursor)
 	}
-	if options.Limit != nil || options.Page != nil || options.UpdatedAtMin != nil || options.ShipAfterMax != nil || options.OriginalOrderID != nil {
+	if options.Limit != nil || options.Page != nil || options.CreatedAtMin != nil || options.ShipAfterMax != nil || options.OriginalOrderID != nil {
 		t.Fatalf("unsupported options were set: %#v", options)
 	}
 }
@@ -54,43 +54,36 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	if options.SortBy != nil {
 		t.Fatalf("SortBy = %q, want nil", *options.SortBy)
 	}
-	if options.Cursor != nil || options.CreatedAtMin != nil {
+	if options.Cursor != nil || options.CreatedAtMin != nil || options.UpdatedAtMin != nil {
 		t.Fatalf("unexpected optional controls: %#v", options)
 	}
 }
 
-// TestNewStateAtUsesCreationTimeSortAndOneYearLookback verifies the initial query uses the selected server sort and default date boundary.
-func TestNewStateAtUsesCreationTimeSortAndOneYearLookback(t *testing.T) {
+// TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback verifies the initial
+// server query uses update-time sorting and the default update boundary.
+func TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback(t *testing.T) {
 	location := time.FixedZone("UTC-05", -5*60*60)
 	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
-	if state.Query.SortBy != faire.OrderSortByCreatedAt {
-		t.Fatalf("NewStateAt().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByCreatedAt)
+	if state.Query.SortBy != faire.OrderSortByUpdatedAt {
+		t.Fatalf("NewStateAt().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByUpdatedAt)
 	}
-	if state.Query.CreatedAtMin != "2025-03-21T00:00:00-05:00" {
-		t.Fatalf("NewStateAt().Query.CreatedAtMin = %q, want one-year lookback", state.Query.CreatedAtMin)
+	if state.Query.UpdatedAtMin != "2026-02-19T00:00:00-05:00" {
+		t.Fatalf("NewStateAt().Query.UpdatedAtMin = %q, want 30-day lookback", state.Query.UpdatedAtMin)
 	}
 }
 
-// TestNewStateIncludesOnlyNewOrders verifies the initial Orders screen loads only new orders by default.
-func TestNewStateIncludesOnlyNewOrders(t *testing.T) {
+// TestNewStateIncludesAllOrders verifies the initial Orders screen shows every supported state by default.
+func TestNewStateIncludesAllOrders(t *testing.T) {
 	state := NewState()
-	wantIncluded := map[faire.OrderState]struct{}{
-		faire.OrderStateNew: {},
+	wantIncluded := make(map[faire.OrderState]struct{}, len(KnownStates()))
+	for _, orderState := range KnownStates() {
+		wantIncluded[orderState] = struct{}{}
 	}
 	if !reflect.DeepEqual(state.IncludedStates, wantIncluded) {
 		t.Fatalf("NewState().IncludedStates = %#v, want %#v", state.IncludedStates, wantIncluded)
 	}
-	wantExcluded := []faire.OrderState{
-		faire.OrderStateProcessing,
-		faire.OrderStatePreTransit,
-		faire.OrderStateInTransit,
-		faire.OrderStateDelivered,
-		faire.OrderStateCanceled,
-		faire.OrderStateBackordered,
-		faire.OrderStatePendingRetailerConfirmation,
-	}
-	if got := state.BuildOptions().ExcludedStates; !reflect.DeepEqual(got, wantExcluded) {
-		t.Fatalf("NewState().BuildOptions().ExcludedStates = %#v, want %#v", got, wantExcluded)
+	if got := state.BuildOptions().ExcludedStates; len(got) != 0 {
+		t.Fatalf("NewState().BuildOptions().ExcludedStates = %#v, want no exclusions", got)
 	}
 }
 

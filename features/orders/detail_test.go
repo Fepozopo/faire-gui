@@ -1,0 +1,52 @@
+package orders
+
+import (
+	"testing"
+	"time"
+
+	"github.com/Fepozopo/faire-gui/faire"
+)
+
+// TestPresentDetailMapsApprovedNestedOrderData verifies locally stored detail data is transformed into typed display values.
+func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
+	orderID := faire.OrderID("order-1")
+	displayID := "ORDER-1"
+	state := faire.OrderStateProcessing
+	createdAt := "2026-01-02T03:04:05Z"
+	updatedAt := "2026-01-03T04:05:06Z"
+	firstName, lastName := "Ada", "Lovelace"
+	name, address1, city := "Ada Lovelace", "1 Computing Lane", "London"
+	quantity, amount, commission, payout := int64(2), int64(1234), int64(250), int64(999)
+	currency := "USD"
+	product, variant, sku := "Widget", "Large", "SKU-1"
+	customizationType, customizationValue := "Message", "Hello\x00 world"
+	carrier, tracking := "Carrier", "TRACK-1"
+	notes := "Leave at desk\x00"
+	order := faire.Order{
+		ID: &orderID, DisplayID: &displayID, State: &state, CreatedAt: &createdAt, UpdatedAt: &updatedAt,
+		Customer: &faire.Customer{FirstName: &firstName, LastName: &lastName}, Notes: &notes,
+		Items:       []faire.OrderItem{{ProductName: &product, VariantName: &variant, SKU: &sku, Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}, Customizations: []faire.Customization{{Type: &customizationType, Value: &customizationValue}}}},
+		Shipments:   []faire.Shipment{{Carrier: &carrier, TrackingCode: &tracking}},
+		Address:     &faire.Address{Name: &name, Address1: &address1, City: &city},
+		PayoutCosts: &faire.PayoutCosts{Commission: &faire.Money{AmountMinor: &commission, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
+	}
+	detail := PresentDetail(order, time.Date(2026, 1, 4, 5, 6, 0, 0, time.UTC))
+	if detail.OrderID != orderID || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Total != "$24.68" || detail.Commission != "USD 2.50" || detail.TotalPayout != "USD 9.99" {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if detail.ShippingAddress.Address1 != address1 || len(detail.Items) != 1 || detail.Items[0].Quantity != "2" || detail.Items[0].Customizations[0].Value != "Hello world" || len(detail.Shipments) != 1 || detail.Shipments[0].TrackingCode != tracking {
+		t.Fatalf("nested detail = %#v", detail)
+	}
+	if detail.Notes != "Leave at desk" || detail.UpdatedAt != "2026-01-03 04:05 UTC" || detail.SyncedAt != "2026-01-04 05:06 UTC" {
+		t.Fatalf("freshness or safety fields = %#v", detail)
+	}
+}
+
+// TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safely.
+func TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates(t *testing.T) {
+	unknown := faire.OrderState("ON_HOLD")
+	detail := PresentDetail(faire.Order{State: &unknown}, time.Time{})
+	if detail.DisplayID != "—" || detail.Status != "On Hold" || detail.Customer != "—" || detail.Total != "—" || detail.ShippingAddress.Address1 != "—" || detail.SyncedAt != "—" {
+		t.Fatalf("detail = %#v", detail)
+	}
+}

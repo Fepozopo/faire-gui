@@ -31,22 +31,25 @@ const (
 	StatusTabPendingRetailerConfirmation StatusTab = "PENDING_RETAILER_CONFIRMATION"
 )
 
-// ServerQuery holds the supported server-side order-list filter and sort choice.
-// CreatedAtMin contains an RFC 3339 timestamp produced from the user's local
-// month/day/year input by NormalizeDateFilter before the UI sends it to Faire.
+// ServerQuery holds the Orders update boundary and API sort choice.
+// UpdatedAtMin contains an RFC 3339 timestamp produced from the user's local
+// month/day/year input by NormalizeDateFilter. The application uses an earlier
+// value during manual refresh to expand retained local history.
 type ServerQuery struct {
-	CreatedAtMin string
+	UpdatedAtMin string
 	SortBy       faire.OrderSortBy
 }
 
-// State is the Gio-free state for the orders list. Rows and selection contain only
-// safe display identifiers and values, allowing callers to cache this state without
-// retaining raw API responses or sensitive order details.
+// State is the Gio-free state for the orders list. Rows, selection, and TableSort
+// contain only safe display identifiers and values, allowing callers to cache this
+// state without retaining raw API responses or sensitive order details. TableSort
+// controls local row ordering independently from the server-side Query.
 type State struct {
 	StatusTab      StatusTab
 	IncludedStates map[faire.OrderState]struct{}
 	Rows           []Row
 	SelectedIDs    map[faire.OrderID]struct{}
+	TableSort      TableSort
 	Query          ServerQuery
 	Loading        bool
 	Status         string
@@ -55,28 +58,34 @@ type State struct {
 	CacheKey       string
 }
 
-// NewState returns an orders state that initially includes only New orders,
-// starts at the one-year created-order lookback, and uses Faire's supported
-// creation-time ordering. Its initialized maps allow selection and filter updates
-// without special handling by callers.
+// NewState returns an orders state that initially includes all supported orders,
+// starts at the 30-day updated-order lookback, uses Faire's supported update-time
+// ordering, and locally orders rows by newest order date. Its initialized maps allow
+// selection and filter updates without special handling by callers.
 func NewState() State {
 	return NewStateAt(time.Now(), time.Local)
 }
 
 // NewStateAt returns a new orders state using now and location for its default
-// one-year created-order lookback. It exists so callers can initialize the UI and
-// tests can deterministically verify the date boundary.
+// 30-day updated-order lookback. It initializes local table sorting to newest
+// order date first, allowing callers and tests to use the same default UI state.
 func NewStateAt(now time.Time, location *time.Location) State {
-	_, createdAtMin := DefaultCreatedAtMinimum(now, location)
+	_, updatedAtMin := DefaultUpdatedAtMinimum(now, location)
+	includedStates := make(map[faire.OrderState]struct{}, len(KnownStates()))
+	for _, state := range KnownStates() {
+		includedStates[state] = struct{}{}
+	}
 	return State{
-		StatusTab: StatusTabAll,
-		IncludedStates: map[faire.OrderState]struct{}{
-			faire.OrderStateNew: {},
+		StatusTab:      StatusTabAll,
+		IncludedStates: includedStates,
+		SelectedIDs:    make(map[faire.OrderID]struct{}),
+		TableSort: TableSort{
+			Column:    TableSortColumnOrderDate,
+			Direction: TableSortDescending,
 		},
-		SelectedIDs: make(map[faire.OrderID]struct{}),
 		Query: ServerQuery{
-			CreatedAtMin: createdAtMin,
-			SortBy:       faire.OrderSortByCreatedAt,
+			UpdatedAtMin: updatedAtMin,
+			SortBy:       faire.OrderSortByUpdatedAt,
 		},
 	}
 }

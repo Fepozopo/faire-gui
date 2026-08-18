@@ -67,7 +67,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 	if button.Clicked(gtx) {
 		ui.selectedTab = route
 		if route == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
-			ui.startOrdersLoad(false, false)
+			ui.startOrdersLoad(false, false, true)
 		}
 		ui.invalidate()
 	}
@@ -175,6 +175,9 @@ func navigationHighlight(active bool) color.NRGBA {
 
 // layoutActivePage lays out the currently selected functional route inside the shared sidebar shell.
 func (ui *DesktopUI) layoutActivePage(gtx layout.Context) layout.Dimensions {
+	if ui.orderDetailOpen && ui.selectedTab == ordersTab {
+		return ui.layoutOrderDetail(gtx)
+	}
 	switch ui.selectedTab {
 	case connectionsTab:
 		return ui.layoutConnections(gtx)
@@ -261,7 +264,7 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
 		ui.ordersSearchActive = false
 		ui.statesDialogOpen = false
-		ui.startOrdersLoad(false, false)
+		ui.startOrdersLoad(false, false, false)
 		ui.invalidate()
 	}
 	return modalPanel(gtx, ui, "Filter states", func(gtx layout.Context) layout.Dimensions {

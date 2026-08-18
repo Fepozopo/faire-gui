@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -19,6 +20,8 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/buildinfo"
+	"github.com/Fepozopo/faire-gui/internal/ordersstore"
+	"github.com/Fepozopo/faire-gui/internal/orderssync"
 	"github.com/Fepozopo/faire-gui/updater"
 )
 
@@ -102,8 +105,8 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
-	if !ui.createdAtMinEditor.SingleLine || ui.createdAtMinEditor.Text() == "" || ui.ordersState.Query.CreatedAtMin == "" {
-		t.Fatalf("created-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured one-year lookback", ui.createdAtMinEditor.SingleLine, ui.createdAtMinEditor.Text(), ui.ordersState.Query.CreatedAtMin)
+	if !ui.updatedAtMinEditor.SingleLine || ui.updatedAtMinEditor.Text() == "" || ui.ordersState.Query.UpdatedAtMin == "" {
+		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 30-day lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
 	}
 }
 
@@ -357,20 +360,16 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 }
 
-// TestShutdownReleasesOrdersCache verifies window teardown dereferences all cached and visible Orders rows and cancels in-flight work.
-func TestShutdownReleasesOrdersCache(t *testing.T) {
+// TestShutdownReleasesOrdersPresentationState verifies window teardown dereferences visible Orders rows and cancels in-flight work without a session cache.
+func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ui := newDesktopUI(ctx, cancel, nil, nil, nil, "")
-	ui.ordersCache["query"] = ordersCacheEntry{Rows: []orders.Row{{DisplayID: "ABCD123456"}}, Cursor: "next-page"}
 	ui.ordersState.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
 	ui.ordersState.Cursor = "next-page"
 
 	ui.shutdown()
 	ui.shutdown()
 
-	if ui.ordersCache != nil {
-		t.Fatalf("ordersCache = %#v, want nil", ui.ordersCache)
-	}
 	if ui.ordersState.Rows != nil || ui.ordersState.Cursor != "" {
 		t.Fatalf("orders state = %#v, want rows and cursor cleared", ui.ordersState)
 	}
@@ -378,6 +377,138 @@ func TestShutdownReleasesOrdersCache(t *testing.T) {
 	case <-ctx.Done():
 	default:
 		t.Fatal("shutdown() did not cancel the application context")
+	}
+}
+
+// TestLoadOrderDetailPublishesOnlyTypedPresentation verifies a local snapshot becomes a detail model without an API call.
+func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
+	ctx := context.Background()
+	store, err := ordersstore.Open(ctx, filepath.Join(t.TempDir(), "orders.sqlite3"))
+	if err != nil {
+		t.Fatalf("ordersstore.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	orderID := faire.OrderID("order-1")
+	displayID, updatedAt, notes, addressName := "DISPLAY-1", "2026-02-03T04:05:06Z", "Private note", "Ada's Antiques"
+	order := faire.Order{ID: &orderID, DisplayID: &displayID, UpdatedAt: &updatedAt, Notes: &notes, Address: &faire.Address{Name: &addressName}}
+	record, err := orderssync.RecordFromOrder("connection-a", order, time.Date(2026, 2, 3, 5, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("RecordFromOrder() error = %v", err)
+	}
+	if err := store.UpsertOrders(ctx, []ordersstore.OrderRecord{record}); err != nil {
+		t.Fatalf("UpsertOrders() error = %v", err)
+	}
+	var result orderDetailResult
+	loadOrderDetail(ctx, store, 1, "connection-a", orderID, func(value orderDetailResult) { result = value })
+	if result.Status != "" || result.Detail.OrderID != orderID || result.Detail.DisplayID != displayID || result.Detail.Notes != notes || result.Detail.ShippingAddress.Name != addressName {
+		t.Fatalf("detail result = %#v", result)
+	}
+}
+
+// TestLocalRowsFormatRawDeliveryAndFinancialValues verifies cached table rows format raw delivery, total, and commission values only at presentation time.
+func TestLocalRowsFormatRawDeliveryAndFinancialValues(t *testing.T) {
+	total, commissionBPS := int64(1234), int64(1500)
+	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalAmountMinor: &total, TotalCurrency: "USD", CommissionBPS: &commissionBPS}})
+	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].Total != "$12.34" || rows[0].Commission != "15.00%" {
+		t.Fatalf("localRows() = %#v, want formatted raw values", rows)
+	}
+}
+
+// TestDrainOrderDetailResultsRejectsStaleSelection verifies an old snapshot worker cannot replace a newer detail selection.
+func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-b"
+	ui.orderDetailID = faire.OrderID("order-b")
+	ui.detailRequestID = 2
+	ui.orderDetailStatus = "current"
+	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "stale"}}
+
+	ui.drainOrderDetailResults()
+
+	if ui.orderDetail.DisplayID != "" || ui.orderDetailStatus != "current" {
+		t.Fatalf("stale detail result changed current state: %#v, status=%q", ui.orderDetail, ui.orderDetailStatus)
+	}
+}
+
+// TestDrainOrderDetailResultsUpdatesNewOrderCount verifies an accepted detail refresh updates the New tab badge.
+func TestDrainOrderDetailResultsUpdatesNewOrderCount(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-a"
+	ui.detailRequestID = 1
+	ui.orderDetailID = faire.OrderID("order-a")
+	ui.orderDetailLoading = true
+	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "ORDER-A"}, NewOrdersCount: 2, ApplyNewOrdersCount: true}
+
+	ui.drainOrderDetailResults()
+
+	if ui.newOrdersCount != 2 || ui.orderDetail.DisplayID != "ORDER-A" || ui.orderDetailLoading {
+		t.Fatalf("detail result application = {newOrdersCount:%d detail:%#v loading:%t}, want count 2, ORDER-A, and completed loading", ui.newOrdersCount, ui.orderDetail, ui.orderDetailLoading)
+	}
+}
+
+// TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe verifies invalid sync feedback identifies only a safe phase.
+func TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe(t *testing.T) {
+	message := ordersLoadErrorMessage(&orderssync.ListError{Phase: orderssync.ListPhaseHistory, Cursor: true, Err: &faire.APIError{StatusCode: 400, Body: "private response"}})
+	if !strings.Contains(message, "older order-history synchronization follow-up page") || strings.Contains(message, "private response") {
+		t.Fatalf("ordersLoadErrorMessage() = %q", message)
+	}
+}
+
+// TestDrainOrderResultsRestoresPersistedHistoryBoundary verifies a selected connection restores its retained initial-history date in the local filter editor.
+func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	boundary := "2025-03-21T00:00:00Z"
+	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, UpdatedAtMin: boundary, ApplyBoundary: true}
+
+	ui.drainOrderResults()
+
+	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.UpdatedAtMin != boundary || ui.updatedAtMinEditor.Text() != historyBoundaryInput(boundary) {
+		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.UpdatedAtMin, ui.updatedAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
+	}
+}
+
+// TestDrainOrderResultsUpdatesNewOrderCount verifies only the latest eligible Orders result can replace the New tab badge.
+func TestDrainOrderResultsUpdatesNewOrderCount(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 2
+	ui.newOrdersCount = 3
+	ui.orderResults <- orderLoadResult{RequestID: 1, NewOrdersCount: 99, ApplyNewOrdersCount: true}
+	ui.orderResults <- orderLoadResult{RequestID: 2, NewOrdersCount: 4, ApplyNewOrdersCount: true}
+
+	ui.drainOrderResults()
+
+	if ui.newOrdersCount != 4 {
+		t.Fatalf("newOrdersCount = %d, want 4", ui.newOrdersCount)
+	}
+}
+
+// TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter verifies empty local state filters replace, rather than retain, stale rows.
+func TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-all"), DisplayID: "ALL-ORDER"}}
+	ui.ordersState.Loaded = true
+	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "No locally stored orders match this state.", ApplyRows: true}
+
+	ui.drainOrderResults()
+
+	if len(ui.ordersState.Rows) != 0 || !ui.ordersState.Loaded || ui.ordersState.Status != "No locally stored orders match this state." {
+		t.Fatalf("orders state = %#v, want an applied empty state-filter result", ui.ordersState)
+	}
+}
+
+// TestDrainOrderResultsPreservesRowsForAFailedRefresh verifies errors do not erase a useful locally stored table.
+func TestDrainOrderResultsPreservesRowsForAFailedRefresh(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.ordersRequestID = 1
+	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-local"), DisplayID: "LOCAL-ORDER"}}
+	ui.orderResults <- orderLoadResult{RequestID: 1, Status: "Orders could not be loaded."}
+
+	ui.drainOrderResults()
+
+	if len(ui.ordersState.Rows) != 1 || ui.ordersState.Status != "Orders could not be loaded." {
+		t.Fatalf("orders state = %#v, want retained local rows and error status", ui.ordersState)
 	}
 }
 
