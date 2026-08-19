@@ -142,7 +142,8 @@ func (ui *DesktopUI) publishUpdateInstallResult(result updateInstallResult) {
 	}
 }
 
-// drainUpdateInstallResults closes the window after the Windows helper is ready, or restores the prompt after a failed installation.
+// drainUpdateInstallResults closes the window after the Windows helper is ready and forces the Windows process to exit after a brief grace period, or restores the prompt after a failed installation.
+// The forced exit releases Windows' executable lock even though Gio's app.Main intentionally does not return on that platform.
 func (ui *DesktopUI) drainUpdateInstallResults() {
 	for {
 		select {
@@ -155,6 +156,8 @@ func (ui *DesktopUI) drainUpdateInstallResults() {
 			ui.updateDialog.status = "Restarting with the updated application…"
 			if ui.window != nil {
 				ui.window.Perform(system.ActionClose)
+				// Gio keeps Windows' main goroutine alive after its window closes, so explicitly end the old process and let the helper replace its locked executable.
+				exitAfterScheduledRestart()
 			}
 		default:
 			return
