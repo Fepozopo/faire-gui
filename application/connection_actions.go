@@ -11,18 +11,31 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// drainResults transfers completed safe profile and inactive local-data statuses into UI-owned state.
-// It refreshes an active Orders view after its matching off-screen local-data action completes, without starting duplicate synchronization.
+// drainResults transfers completed safe profile statuses into UI-owned shell state.
+// Connection-scoped Orders data actions are drained separately so their cross-feature dependency remains explicit.
 func (ui *DesktopUI) drainResults() {
 	for {
 		select {
 		case result := <-ui.results:
 			ui.status = result.status
-			if result.ordersDataConnectionID != "" && result.ordersDataConnectionID == ui.ordersDataActionConnectionID {
-				ui.ordersDataActionConnectionID = ""
-				if result.ordersDataConnectionID == ui.activeConnectionID {
-					ui.ordersState.Loading = false
-					ui.startOrdersLoad(false, false, false)
+		default:
+			return
+		}
+	}
+}
+
+// drainOrdersDataActionEvents applies safe connection-scoped cache-action feedback on the frame goroutine.
+// Completion clears the connection-switch guard only for its matching action and never replaces another connection's table.
+func (ui *DesktopUI) drainOrdersDataActionEvents() {
+	for {
+		select {
+		case event := <-ui.orders.dataActionResults:
+			ui.status = event.Status
+			if event.Done && event.ConnectionID == ui.orders.dataActionConnectionID {
+				ui.orders.dataActionConnectionID = ""
+				if event.ConnectionID == ui.activeConnectionID {
+					ui.orders.view.state.Loading = false
+					ui.startOrdersLoad(ordersLoadLocalOnly)
 				}
 			}
 		default:
@@ -68,12 +81,6 @@ func (ui *DesktopUI) loadProfile(connectionID string) {
 // The buffered channel avoids holding the profile goroutine until another frame arrives.
 func (ui *DesktopUI) publishProfileResult(status string) {
 	ui.publishProfileLoadResult(profileLoadResult{status: status})
-}
-
-// publishOrdersDataResult sends a safe inactive local-data completion status for exactly one connection.
-// The result identifies only an immutable connection ID, allowing the frame loop to refresh an active Orders view safely.
-func (ui *DesktopUI) publishOrdersDataResult(connectionID, status string) {
-	ui.publishProfileLoadResult(profileLoadResult{status: status, ordersDataConnectionID: connectionID})
 }
 
 // publishProfileLoadResult publishes a credential-safe Brand Profile result unless application shutdown has begun.
@@ -274,8 +281,8 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.window.Invalidate()
 		return
 	}
-	if ui.ordersStore != nil {
-		go ui.deleteConnectionCache(connection.ID, connection.Label, ui.ordersStore)
+	if ui.orders.store != nil {
+		go ui.deleteConnectionCache(connection.ID, connection.Label, ui.orders.store)
 	}
 	ui.managementStatus = "Deleted connection " + connection.Label + "."
 	ui.status = "Deleted " + connection.Label + "."
@@ -284,8 +291,8 @@ func (ui *DesktopUI) deleteConnection() {
 		ui.activeConnectionID = ""
 		ui.activeConnectionLabel = ""
 		ui.resetOrdersState()
-		ui.ordersSearchActive = false
-		ui.orderSearchEditor.SetText("")
+		ui.orders.view.searchActive = false
+		ui.orders.view.search.SetText("")
 	}
 	ui.refreshConnections()
 }

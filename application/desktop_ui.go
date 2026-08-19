@@ -12,7 +12,6 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/Fepozopo/faire-gui/connections"
-	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
@@ -39,40 +38,16 @@ type DesktopUI struct {
 	preparingStartup          bool
 	startupPreparationStarted bool
 
-	activeConnectionID           string
-	activeConnectionLabel        string
-	selectedTab                  int
-	settingsMenuOpen             bool
-	connectionPickerOpen         bool
-	statesDialogOpen             bool
-	csvExportBlockedDialogOpen   bool
-	csvExportCompletedDialogOpen bool
-	csvExportCompletedFilename   string
-	packingSlipExportFolder      string
-	packingSlipExportCount       int
-	packingSlipExportFailures    int
+	activeConnectionID    string
+	activeConnectionLabel string
+	selectedTab           int
+	settingsMenuOpen      bool
+	connectionPickerOpen  bool
 
-	ordersStore                  ordersstore.Store
-	ordersState                  orders.State
-	newOrdersCount               int
-	ordersRequestID              uint64
-	ordersDataStatusRequestID    uint64
-	ordersDataActionConnectionID string
-	detailRequestID              uint64
-	exportRequestID              uint64
-	ordersSearchActive           bool
-	ordersHistoryBoundaryKnown   bool
-	ordersExporting              bool
-	orderDetailOpen              bool
-	orderDetailLoading           bool
-	orderDetail                  orders.Detail
-	orderDetailStatus            string
-	orderDetailID                faire.OrderID
-	orderDetailConnectionID      string
-	orderExportDialog            orderExportDialogState
-	pendingStates                map[faire.OrderState]struct{}
-	editorMode                   connectionEditorMode
-	editing                      connections.Connection
+	// orders is the feature-owned Orders component. The shell supplies only immutable connection scope and handles cross-feature status.
+	orders     *ordersController
+	editorMode connectionEditorMode
+	editing    connections.Connection
 
 	status           string
 	managementStatus string
@@ -82,74 +57,34 @@ type DesktopUI struct {
 	environmentEditor widget.Editor
 	accessTokenEditor widget.Editor
 
-	brandsList                      widget.List
-	connectionsList                 widget.List
-	ordersList                      widget.List
-	orderDetailList                 widget.List
-	connectionPickerList            widget.List
-	orderSearchEditor               widget.Editor
-	updatedAtMinEditor              widget.Editor
-	tabButtons                      [3]widget.Clickable
-	orderStatusTabs                 [5]widget.Clickable
-	activeConnectionButton          widget.Clickable
-	closeConnectionPicker           widget.Clickable
-	addConnectionButton             widget.Clickable
-	refreshOrdersButton             widget.Clickable
-	confirmOrdersDataAction         widget.Clickable
-	cancelOrdersDataAction          widget.Clickable
-	backToOrdersButton              widget.Clickable
-	refreshOrderDetailButton        widget.Clickable
-	loadMoreOrdersButton            widget.Clickable
-	clearOrderSearchButton          widget.Clickable
-	stateFilterButton               widget.Clickable
-	applyStatesButton               widget.Clickable
-	cancelStatesButton              widget.Clickable
-	selectAllStatesButton           widget.Clickable
-	selectNoStatesButton            widget.Clickable
-	headerSelectVisibleOrdersButton widget.Clickable
-	orderDateSortButton             widget.Clickable
-	shipDateSortButton              widget.Clickable
-	exportMenuButton                widget.Clickable
-	exportNewOrdersButton           widget.Clickable
-	exportBackorderedOrdersButton   widget.Clickable
-	exportSelectedOrdersButton      widget.Clickable
-	exportBackButton                widget.Clickable
-	confirmExportButton             widget.Clickable
-	includeCSVHeaderButton          widget.Clickable
-	includePackingSlipsButton       widget.Clickable
-	closeExportMenuButton           widget.Clickable
-	closeCSVExportBlockedButton     widget.Clickable
-	closeCSVExportCompletedButton   widget.Clickable
-	searchOrdersButton              widget.Clickable
-	saveButton                      widget.Clickable
-	importButton                    widget.Clickable
-	cancelButton                    widget.Clickable
-	confirmDelete                   widget.Clickable
-	cancelDelete                    widget.Clickable
-	settingsButton                  widget.Clickable
-	settingsBrandProfile            widget.Clickable
-	settingsConnections             widget.Clickable
-	checkForUpdates                 widget.Clickable
-	updateLater                     widget.Clickable
-	installUpdate                   widget.Clickable
-	closeUpdateCheckStatus          widget.Clickable
-	modalBlocker                    widget.Clickable
+	brandsList             widget.List
+	connectionsList        widget.List
+	connectionPickerList   widget.List
+	tabButtons             [3]widget.Clickable
+	activeConnectionButton widget.Clickable
+	closeConnectionPicker  widget.Clickable
+	addConnectionButton    widget.Clickable
+	saveButton             widget.Clickable
+	importButton           widget.Clickable
+	cancelButton           widget.Clickable
+	confirmDelete          widget.Clickable
+	cancelDelete           widget.Clickable
+	settingsButton         widget.Clickable
+	settingsBrandProfile   widget.Clickable
+	settingsConnections    widget.Clickable
+	checkForUpdates        widget.Clickable
+	updateLater            widget.Clickable
+	installUpdate          widget.Clickable
+	closeUpdateCheckStatus widget.Clickable
+	modalBlocker           widget.Clickable
 
 	rowControls              map[string]*connectionRowControls
 	connectionPickerControls map[string]*widget.Clickable
-	orderRowControls         map[faire.OrderID]*widget.Clickable
-	orderDetailControls      map[faire.OrderID]*widget.Clickable
-	stateControls            map[faire.OrderState]*widget.Clickable
 	deleteDialog             deleteDialogState
-	ordersDataDialog         ordersDataDialogState
 	updateDialog             updateDialogState
 	updateCheckDialog        updateCheckDialogState
 	results                  chan profileLoadResult
 	connectionCleanupResults chan connectionCleanupResult
-	orderResults             chan orderLoadResult
-	orderDetailResults       chan orderDetailResult
-	orderExportResults       chan orderExportResult
-	ordersSchedule           chan struct{}
 	updateResults            chan updateCheckResult
 	updateInstallResults     chan updateInstallResult
 	startupResults           chan startupResult
@@ -179,11 +114,10 @@ type ordersDataDialogState struct {
 	connectionID string
 }
 
-// profileLoadResult transports a credential-safe asynchronous profile-loading or inactive local-data result to the UI frame loop.
-// OrdersDataConnectionID is set only for a completed local-data action, never for an ordinary profile load.
+// profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.
+// It contains user-safe profile status only; Orders cache actions use ordersDataActionEvent instead.
 type profileLoadResult struct {
-	status                 string
-	ordersDataConnectionID string
+	status string
 }
 
 // newDesktopUI constructs a DesktopUI without persistent Orders storage for focused UI tests.
@@ -196,41 +130,33 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 // The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
 func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, store ordersstore.Store, startupStatus string) *DesktopUI {
 	ui := &DesktopUI{
-		ctx:                      ctx,
-		cancel:                   cancel,
-		window:                   window,
-		theme:                    material.NewTheme(),
-		manager:                  manager,
-		connections:              savedConnections,
-		ordersStore:              store,
+		ctx:         ctx,
+		cancel:      cancel,
+		window:      window,
+		theme:       material.NewTheme(),
+		manager:     manager,
+		connections: savedConnections,
+		orders: newOrdersController(ctx, store, manager, func() {
+			if window != nil {
+				window.Invalidate()
+			}
+		}),
 		status:                   startupStatus,
 		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
 		selectedTab:              ordersTab,
-		pendingStates:            make(map[faire.OrderState]struct{}),
 		rowControls:              make(map[string]*connectionRowControls),
 		connectionPickerControls: make(map[string]*widget.Clickable),
-		orderRowControls:         make(map[faire.OrderID]*widget.Clickable),
-		orderDetailControls:      make(map[faire.OrderID]*widget.Clickable),
-		stateControls:            make(map[faire.OrderState]*widget.Clickable),
 		results:                  make(chan profileLoadResult, 1),
 		connectionCleanupResults: make(chan connectionCleanupResult, 1),
-		orderResults:             make(chan orderLoadResult, 4),
-		orderDetailResults:       make(chan orderDetailResult, 2),
-		orderExportResults:       make(chan orderExportResult, 1),
 		updateResults:            make(chan updateCheckResult, 1),
 		updateInstallResults:     make(chan updateInstallResult, 1),
 		startupResults:           make(chan startupResult, 1),
-		ordersSchedule:           make(chan struct{}, 1),
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
-	ui.ordersList.Axis = layout.Vertical
-	ui.orderDetailList.Axis = layout.Vertical
 	ui.connectionPickerList.Axis = layout.Vertical
-	ui.orderSearchEditor.SingleLine = true
-	ui.updatedAtMinEditor.SingleLine = true
 	ui.startOrdersScheduler()
 	return ui
 }
@@ -248,13 +174,13 @@ func (ui *DesktopUI) configureEditors() {
 // resetOrdersState creates a fresh default order query, clears the connection-scoped New-order count,
 // and synchronizes its 30-day updated-order lookback with the visible date editor.
 func (ui *DesktopUI) resetOrdersState() {
-	ui.ordersHistoryBoundaryKnown = false
+	ui.orders.view.historyBoundaryKnown = false
 	// Counts are connection-scoped, so avoid showing the prior connection's New badge during the next load.
-	ui.newOrdersCount = 0
+	ui.orders.view.newCount = 0
 	now := time.Now()
 	updatedAtMinimumInput, _ := orders.DefaultUpdatedAtMinimum(now, time.Local)
-	ui.ordersState = orders.NewStateAt(now, time.Local)
-	ui.updatedAtMinEditor.SetText(updatedAtMinimumInput)
+	ui.orders.view.state = orders.NewStateAt(now, time.Local)
+	ui.orders.view.updatedAt.SetText(updatedAtMinimumInput)
 }
 
 // Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.
@@ -290,17 +216,17 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutUpdateCheckStatusModal(gtx)
 			case ui.deleteDialog.open:
 				return ui.layoutDeleteModal(gtx)
-			case ui.ordersDataDialog.open:
+			case ui.orders.view.dataDialog.open:
 				return ui.layoutOrdersDataModal(gtx)
 			case ui.connectionPickerOpen:
 				return ui.layoutConnectionPicker(gtx)
-			case ui.statesDialogOpen:
+			case ui.orders.view.statesDialogOpen:
 				return ui.layoutStatesDialog(gtx)
-			case ui.orderExportDialog.open:
+			case ui.orders.view.exportDialog.open:
 				return ui.layoutOrderExportMenu(gtx)
-			case ui.csvExportBlockedDialogOpen:
+			case ui.orders.view.csvExportBlockedOpen:
 				return ui.layoutCSVExportBlockedDialog(gtx)
-			case ui.csvExportCompletedDialogOpen:
+			case ui.orders.view.csvExportCompletedOpen:
 				return ui.layoutCSVExportCompletedDialog(gtx)
 			default:
 				return layout.Dimensions{}
@@ -324,14 +250,14 @@ func (ui *DesktopUI) layoutStartup(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.ordersDataDialog.open || ui.connectionPickerOpen || ui.statesDialogOpen || ui.orderExportDialog.open || ui.csvExportBlockedDialogOpen || ui.csvExportCompletedDialogOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.orders.view.dataDialog.open || ui.connectionPickerOpen || ui.orders.view.statesDialogOpen || ui.orders.view.exportDialog.open || ui.orders.view.csvExportBlockedOpen || ui.orders.view.csvExportCompletedOpen {
 		return
 	}
 	for index := range ui.tabButtons {
 		if ui.tabButtons[index].Clicked(gtx) {
 			ui.selectedTab = index
-			if index == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
-				ui.startOrdersLoad(false, false, true)
+			if index == ordersTab && ui.activeConnectionID != "" && !ui.orders.view.state.Loaded {
+				ui.startOrdersLoad(ordersLoadInitial)
 			}
 			ui.invalidate()
 		}

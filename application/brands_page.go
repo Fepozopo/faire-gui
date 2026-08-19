@@ -68,7 +68,7 @@ func (ui *DesktopUI) layoutBrandStatus(gtx layout.Context) layout.Dimensions {
 	if ui.status == "" {
 		return layout.Dimensions{}
 	}
-	if ui.ordersDataActionConnectionID == "" {
+	if ui.orders.dataActionConnectionID == "" {
 		return statusText(ui.theme, ui.status)(gtx)
 	}
 	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {

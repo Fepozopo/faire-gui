@@ -11,35 +11,35 @@ import (
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
 // Its detail panel scrolls independently so the header controls remain available for long orders.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
-	if ui.backToOrdersButton.Clicked(gtx) {
-		ui.orderDetailOpen = false
+	if ui.orders.view.backToOrdersButton.Clicked(gtx) {
+		ui.orders.view.orderDetailOpen = false
 		ui.invalidate()
 	}
-	if ui.refreshOrderDetailButton.Clicked(gtx) {
+	if ui.orders.view.refreshDetailButton.Clicked(gtx) {
 		ui.refreshOrderDetail()
 		ui.invalidate()
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(primaryButton(ui.theme, &ui.backToOrdersButton, "Back to Orders")),
+				layout.Rigid(primaryButton(ui.theme, &ui.orders.view.backToOrdersButton, "Back to Orders")),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 				layout.Rigid(material.H3(ui.theme, "Order details").Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
-				layout.Rigid(primaryButton(ui.theme, &ui.refreshOrderDetailButton, "Refresh order")),
+				layout.Rigid(primaryButton(ui.theme, &ui.orders.view.refreshDetailButton, "Refresh order")),
 			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-		layout.Rigid(statusText(ui.theme, ui.orderDetailStatus)),
+		layout.Rigid(statusText(ui.theme, ui.orders.view.orderDetailStatus)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if ui.orderDetailLoading || ui.orderDetail.OrderID == "" {
+			if ui.orders.view.orderDetailLoading || ui.orders.view.orderDetail.OrderID == "" {
 				return bodyText(ui.theme, "Order details will appear here when the local snapshot is available.", mutedTextColor)(gtx)
 			}
-			return ui.orderDetailList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+			return ui.orders.view.detailList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 				return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: unit.Dp(20), Right: unit.Dp(20), Bottom: unit.Dp(20), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layoutOrderDetailContent(gtx, ui, ui.orderDetail)
+						return layoutOrderDetailContent(gtx, ui, ui.orders.view.orderDetail)
 					})
 				})
 			})

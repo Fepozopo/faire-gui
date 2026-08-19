@@ -99,14 +99,14 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	if ui.settingsMenuOpen {
 		t.Fatal("Settings submenu is open at launch, want a collapsed group")
 	}
-	if ui.brandsList.Axis != layout.Vertical || ui.connectionsList.Axis != layout.Vertical || ui.ordersList.Axis != layout.Vertical || ui.orderDetailList.Axis != layout.Vertical {
-		t.Fatalf("list axes = (%d, %d, %d, %d), want all vertical", ui.brandsList.Axis, ui.connectionsList.Axis, ui.ordersList.Axis, ui.orderDetailList.Axis)
+	if ui.brandsList.Axis != layout.Vertical || ui.connectionsList.Axis != layout.Vertical || ui.orders.view.list.Axis != layout.Vertical || ui.orders.view.detailList.Axis != layout.Vertical {
+		t.Fatalf("list axes = (%d, %d, %d, %d), want all vertical", ui.brandsList.Axis, ui.connectionsList.Axis, ui.orders.view.list.Axis, ui.orders.view.detailList.Axis)
 	}
 	if !ui.accessTokenEditor.SingleLine || ui.accessTokenEditor.Mask != '•' {
 		t.Fatalf("access-token editor configuration = {SingleLine:%t Mask:%q}, want single-line bullet mask", ui.accessTokenEditor.SingleLine, ui.accessTokenEditor.Mask)
 	}
-	if !ui.updatedAtMinEditor.SingleLine || ui.updatedAtMinEditor.Text() == "" || ui.ordersState.Query.UpdatedAtMin == "" {
-		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 30-day lookback", ui.updatedAtMinEditor.SingleLine, ui.updatedAtMinEditor.Text(), ui.ordersState.Query.UpdatedAtMin)
+	if !ui.orders.view.updatedAt.SingleLine || ui.orders.view.updatedAt.Text() == "" || ui.orders.view.state.Query.UpdatedAtMin == "" {
+		t.Fatalf("updated-at minimum defaults = {singleLine:%t input:%q timestamp:%q}, want configured 30-day lookback", ui.orders.view.updatedAt.SingleLine, ui.orders.view.updatedAt.Text(), ui.orders.view.state.Query.UpdatedAtMin)
 	}
 }
 
@@ -200,7 +200,7 @@ func TestSelectedOrdersLabelReportsCurrentSelectionCount(t *testing.T) {
 		t.Fatalf("selectedOrdersLabel() = %q, want %q", got, "0 selected")
 	}
 
-	ui.ordersState.SelectedIDs = map[faire.OrderID]struct{}{
+	ui.orders.view.state.SelectedIDs = map[faire.OrderID]struct{}{
 		"order-1": {},
 		"order-2": {},
 		"order-3": {},
@@ -235,9 +235,9 @@ func TestBlockedOrderExportOpensDialog(t *testing.T) {
 	t.Parallel()
 
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.exportRequestID = 1
-	ui.ordersExporting = true
-	ui.orderExportResults <- orderExportResult{
+	ui.orders.exportRequestID = 1
+	ui.orders.view.exporting = true
+	ui.orders.exportResults <- orderExportResult{
 		RequestID: 1,
 		Status:    "CSV export is not configured for this connection's Faire brand.",
 		Blocked:   true,
@@ -245,11 +245,11 @@ func TestBlockedOrderExportOpensDialog(t *testing.T) {
 
 	ui.drainOrderExportResults()
 
-	if !ui.csvExportBlockedDialogOpen {
+	if !ui.orders.view.csvExportBlockedOpen {
 		t.Fatal("csvExportBlockedDialogOpen = false, want true")
 	}
-	if ui.ordersExporting || ui.ordersState.Status != "CSV export is not configured for this connection's Faire brand." {
-		t.Fatalf("export state = {exporting:%t status:%q}, want completed blocking status", ui.ordersExporting, ui.ordersState.Status)
+	if ui.orders.view.exporting || ui.orders.view.state.Status != "CSV export is not configured for this connection's Faire brand." {
+		t.Fatalf("export state = {exporting:%t status:%q}, want completed blocking status", ui.orders.view.exporting, ui.orders.view.state.Status)
 	}
 }
 
@@ -258,9 +258,9 @@ func TestCompletedOrderExportOpensDialog(t *testing.T) {
 	t.Parallel()
 
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.exportRequestID = 1
-	ui.ordersExporting = true
-	ui.orderExportResults <- orderExportResult{
+	ui.orders.exportRequestID = 1
+	ui.orders.view.exporting = true
+	ui.orders.exportResults <- orderExportResult{
 		RequestID: 1,
 		Status:    "Exported 1 orders to Downloads as faire-new-orders-20260321142530.csv.",
 		Filename:  "faire-new-orders-20260321142530.csv",
@@ -269,8 +269,38 @@ func TestCompletedOrderExportOpensDialog(t *testing.T) {
 
 	ui.drainOrderExportResults()
 
-	if !ui.csvExportCompletedDialogOpen || ui.csvExportCompletedFilename != "faire-new-orders-20260321142530.csv" {
-		t.Fatalf("completed dialog = {open:%t filename:%q}, want saved export filename", ui.csvExportCompletedDialogOpen, ui.csvExportCompletedFilename)
+	if !ui.orders.view.csvExportCompletedOpen || ui.orders.view.csvExportCompletedFile != "faire-new-orders-20260321142530.csv" {
+		t.Fatalf("completed dialog = {open:%t filename:%q}, want saved export filename", ui.orders.view.csvExportCompletedOpen, ui.orders.view.csvExportCompletedFile)
+	}
+}
+
+// TestDrainOrderExportResultsRejectsStaleRequest verifies an older export completion cannot replace a newer export's in-progress state.
+func TestDrainOrderExportResultsRejectsStaleRequest(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.orders.exportRequestID = 2
+	ui.orders.view.exporting = true
+	ui.orders.view.state.Status = "Exporting orders…"
+	ui.orders.exportResults <- orderExportResult{RequestID: 1, Status: "Exported stale orders.", Filename: "stale.csv", Completed: true}
+
+	ui.drainOrderExportResults()
+
+	if !ui.orders.view.exporting || ui.orders.view.csvExportCompletedOpen || ui.orders.view.state.Status != "Exporting orders…" {
+		t.Fatalf("stale export result changed current state: %#v", ui.orders.view)
+	}
+}
+
+// TestDrainOrdersDataActionEventsKeepsUnrelatedActionGuard verifies an inactive completion cannot release the active action's connection-switch guard.
+func TestDrainOrdersDataActionEventsKeepsUnrelatedActionGuard(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-a"
+	ui.orders.dataActionConnectionID = "connection-a"
+	ui.orders.view.state.Loading = true
+	ui.orders.dataActionResults <- ordersDataActionEvent{ConnectionID: "connection-b", Status: "Local order data was rebuilt for this connection.", Done: true}
+
+	ui.drainOrdersDataActionEvents()
+
+	if ui.orders.dataActionConnectionID != "connection-a" || !ui.orders.view.state.Loading {
+		t.Fatalf("unrelated data event changed active action state: guard=%q loading=%t", ui.orders.dataActionConnectionID, ui.orders.view.state.Loading)
 	}
 }
 
@@ -448,14 +478,14 @@ func TestDrainStartupResultsMakesTheApplicationInteractive(t *testing.T) {
 func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ui := newDesktopUI(ctx, cancel, nil, nil, nil, "")
-	ui.ordersState.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
-	ui.ordersState.Cursor = "next-page"
+	ui.orders.view.state.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
+	ui.orders.view.state.Cursor = "next-page"
 
 	ui.shutdown()
 	ui.shutdown()
 
-	if ui.ordersState.Rows != nil || ui.ordersState.Cursor != "" {
-		t.Fatalf("orders state = %#v, want rows and cursor cleared", ui.ordersState)
+	if ui.orders.view.state.Rows != nil || ui.orders.view.state.Cursor != "" {
+		t.Fatalf("orders state = %#v, want rows and cursor cleared", ui.orders.view.state)
 	}
 	select {
 	case <-ctx.Done():
@@ -502,15 +532,15 @@ func TestLocalRowsFormatRawDeliveryAndFinancialValues(t *testing.T) {
 func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 	ui.activeConnectionID = "connection-b"
-	ui.orderDetailID = faire.OrderID("order-b")
-	ui.detailRequestID = 2
-	ui.orderDetailStatus = "current"
-	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "stale"}}
+	ui.orders.view.orderDetailID = faire.OrderID("order-b")
+	ui.orders.detailRequestID = 2
+	ui.orders.view.orderDetailStatus = "current"
+	ui.orders.detailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "stale"}}
 
 	ui.drainOrderDetailResults()
 
-	if ui.orderDetail.DisplayID != "" || ui.orderDetailStatus != "current" {
-		t.Fatalf("stale detail result changed current state: %#v, status=%q", ui.orderDetail, ui.orderDetailStatus)
+	if ui.orders.view.orderDetail.DisplayID != "" || ui.orders.view.orderDetailStatus != "current" {
+		t.Fatalf("stale detail result changed current state: %#v, status=%q", ui.orders.view.orderDetail, ui.orders.view.orderDetailStatus)
 	}
 }
 
@@ -518,15 +548,15 @@ func TestDrainOrderDetailResultsRejectsStaleSelection(t *testing.T) {
 func TestDrainOrderDetailResultsUpdatesNewOrderCount(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
 	ui.activeConnectionID = "connection-a"
-	ui.detailRequestID = 1
-	ui.orderDetailID = faire.OrderID("order-a")
-	ui.orderDetailLoading = true
-	ui.orderDetailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "ORDER-A"}, NewOrdersCount: 2, ApplyNewOrdersCount: true}
+	ui.orders.detailRequestID = 1
+	ui.orders.view.orderDetailID = faire.OrderID("order-a")
+	ui.orders.view.orderDetailLoading = true
+	ui.orders.detailResults <- orderDetailResult{RequestID: 1, ConnectionID: "connection-a", OrderID: faire.OrderID("order-a"), Detail: orders.Detail{DisplayID: "ORDER-A"}, NewOrdersCount: 2, ApplyNewOrdersCount: true}
 
 	ui.drainOrderDetailResults()
 
-	if ui.newOrdersCount != 2 || ui.orderDetail.DisplayID != "ORDER-A" || ui.orderDetailLoading {
-		t.Fatalf("detail result application = {newOrdersCount:%d detail:%#v loading:%t}, want count 2, ORDER-A, and completed loading", ui.newOrdersCount, ui.orderDetail, ui.orderDetailLoading)
+	if ui.orders.view.newCount != 2 || ui.orders.view.orderDetail.DisplayID != "ORDER-A" || ui.orders.view.orderDetailLoading {
+		t.Fatalf("detail result application = {newOrdersCount:%d detail:%#v loading:%t}, want count 2, ORDER-A, and completed loading", ui.orders.view.newCount, ui.orders.view.orderDetail, ui.orders.view.orderDetailLoading)
 	}
 }
 
@@ -541,58 +571,58 @@ func TestOrdersLoadErrorMessageKeepsBadRequestFeedbackSafe(t *testing.T) {
 // TestDrainOrderResultsRestoresPersistedHistoryBoundary verifies a selected connection restores its retained initial-history date in the local filter editor.
 func TestDrainOrderResultsRestoresPersistedHistoryBoundary(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.ordersRequestID = 1
+	ui.orders.loadRequestID = 1
 	boundary := "2025-03-21T00:00:00Z"
-	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, UpdatedAtMin: boundary, ApplyBoundary: true}
+	ui.orders.loadResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "Showing locally stored orders.", ApplyRows: true, UpdatedAtMin: boundary, ApplyBoundary: true}
 
 	ui.drainOrderResults()
 
-	if !ui.ordersHistoryBoundaryKnown || ui.ordersState.Query.UpdatedAtMin != boundary || ui.updatedAtMinEditor.Text() != historyBoundaryInput(boundary) {
-		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.ordersState.Query.UpdatedAtMin, ui.updatedAtMinEditor.Text(), ui.ordersHistoryBoundaryKnown)
+	if !ui.orders.view.historyBoundaryKnown || ui.orders.view.state.Query.UpdatedAtMin != boundary || ui.orders.view.updatedAt.Text() != historyBoundaryInput(boundary) {
+		t.Fatalf("restored history boundary = %q, editor=%q, known=%v", ui.orders.view.state.Query.UpdatedAtMin, ui.orders.view.updatedAt.Text(), ui.orders.view.historyBoundaryKnown)
 	}
 }
 
 // TestDrainOrderResultsUpdatesNewOrderCount verifies only the latest eligible Orders result can replace the New tab badge.
 func TestDrainOrderResultsUpdatesNewOrderCount(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.ordersRequestID = 2
-	ui.newOrdersCount = 3
-	ui.orderResults <- orderLoadResult{RequestID: 1, NewOrdersCount: 99, ApplyNewOrdersCount: true}
-	ui.orderResults <- orderLoadResult{RequestID: 2, NewOrdersCount: 4, ApplyNewOrdersCount: true}
+	ui.orders.loadRequestID = 2
+	ui.orders.view.newCount = 3
+	ui.orders.loadResults <- orderLoadResult{RequestID: 1, NewOrdersCount: 99, ApplyNewOrdersCount: true}
+	ui.orders.loadResults <- orderLoadResult{RequestID: 2, NewOrdersCount: 4, ApplyNewOrdersCount: true}
 
 	ui.drainOrderResults()
 
-	if ui.newOrdersCount != 4 {
-		t.Fatalf("newOrdersCount = %d, want 4", ui.newOrdersCount)
+	if ui.orders.view.newCount != 4 {
+		t.Fatalf("newOrdersCount = %d, want 4", ui.orders.view.newCount)
 	}
 }
 
 // TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter verifies empty local state filters replace, rather than retain, stale rows.
 func TestDrainOrderResultsClearsRowsForAnEmptySuccessfulFilter(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.ordersRequestID = 1
-	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-all"), DisplayID: "ALL-ORDER"}}
-	ui.ordersState.Loaded = true
-	ui.orderResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "No locally stored orders match this state.", ApplyRows: true}
+	ui.orders.loadRequestID = 1
+	ui.orders.view.state.Rows = []orders.Row{{ID: faire.OrderID("order-all"), DisplayID: "ALL-ORDER"}}
+	ui.orders.view.state.Loaded = true
+	ui.orders.loadResults <- orderLoadResult{RequestID: 1, Rows: []orders.Row{}, Status: "No locally stored orders match this state.", ApplyRows: true}
 
 	ui.drainOrderResults()
 
-	if len(ui.ordersState.Rows) != 0 || !ui.ordersState.Loaded || ui.ordersState.Status != "No locally stored orders match this state." {
-		t.Fatalf("orders state = %#v, want an applied empty state-filter result", ui.ordersState)
+	if len(ui.orders.view.state.Rows) != 0 || !ui.orders.view.state.Loaded || ui.orders.view.state.Status != "No locally stored orders match this state." {
+		t.Fatalf("orders state = %#v, want an applied empty state-filter result", ui.orders.view.state)
 	}
 }
 
 // TestDrainOrderResultsPreservesRowsForAFailedRefresh verifies errors do not erase a useful locally stored table.
 func TestDrainOrderResultsPreservesRowsForAFailedRefresh(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
-	ui.ordersRequestID = 1
-	ui.ordersState.Rows = []orders.Row{{ID: faire.OrderID("order-local"), DisplayID: "LOCAL-ORDER"}}
-	ui.orderResults <- orderLoadResult{RequestID: 1, Status: "Orders could not be loaded."}
+	ui.orders.loadRequestID = 1
+	ui.orders.view.state.Rows = []orders.Row{{ID: faire.OrderID("order-local"), DisplayID: "LOCAL-ORDER"}}
+	ui.orders.loadResults <- orderLoadResult{RequestID: 1, Status: "Orders could not be loaded."}
 
 	ui.drainOrderResults()
 
-	if len(ui.ordersState.Rows) != 1 || ui.ordersState.Status != "Orders could not be loaded." {
-		t.Fatalf("orders state = %#v, want retained local rows and error status", ui.ordersState)
+	if len(ui.orders.view.state.Rows) != 1 || ui.orders.view.state.Status != "Orders could not be loaded." {
+		t.Fatalf("orders state = %#v, want retained local rows and error status", ui.orders.view.state)
 	}
 }
 

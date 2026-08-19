@@ -65,7 +65,9 @@ func (ui *DesktopUI) drainStartupResults() {
 		case result := <-ui.startupResults:
 			ui.manager = result.manager
 			ui.connections = result.connections
-			ui.ordersStore = result.store
+			ui.orders.manager = result.manager
+			ui.orders.store = result.store
+			ui.startOrdersScheduler()
 			ui.status = result.status
 			ui.preparingStartup = false
 		default:

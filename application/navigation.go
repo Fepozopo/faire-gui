@@ -68,8 +68,8 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 	button := &ui.tabButtons[route]
 	if button.Clicked(gtx) {
 		ui.selectedTab = route
-		if route == ordersTab && ui.activeConnectionID != "" && !ui.ordersState.Loaded {
-			ui.startOrdersLoad(false, false, true)
+		if route == ordersTab && ui.activeConnectionID != "" && !ui.orders.view.state.Loaded {
+			ui.startOrdersLoad(ordersLoadInitial)
 		}
 		ui.invalidate()
 	}
@@ -178,7 +178,7 @@ func navigationHighlight(active bool) color.NRGBA {
 
 // layoutActivePage lays out the currently selected functional route inside the shared sidebar shell.
 func (ui *DesktopUI) layoutActivePage(gtx layout.Context) layout.Dimensions {
-	if ui.orderDetailOpen && ui.selectedTab == ordersTab {
+	if ui.orders.view.orderDetailOpen && ui.selectedTab == ordersTab {
 		return ui.layoutOrderDetail(gtx)
 	}
 	switch ui.selectedTab {
@@ -247,27 +247,27 @@ func (ui *DesktopUI) connectionPickerControlFor(connectionID string) *widget.Cli
 // layoutStatesDialog applies a multi-select state filter by expressing unselected known states as API exclusions.
 // Its state controls are presented alphabetically by their user-facing labels for quick scanning.
 func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
-	if ui.cancelStatesButton.Clicked(gtx) {
-		ui.statesDialogOpen = false
+	if ui.orders.view.cancelStatesButton.Clicked(gtx) {
+		ui.orders.view.statesDialogOpen = false
 		ui.invalidate()
 	}
-	if ui.selectAllStatesButton.Clicked(gtx) {
-		ui.pendingStates = make(map[faire.OrderState]struct{}, len(ordersKnownStates()))
+	if ui.orders.view.selectAllStatesButton.Clicked(gtx) {
+		ui.orders.view.pendingStates = make(map[faire.OrderState]struct{}, len(ordersKnownStates()))
 		for _, state := range ordersKnownStates() {
-			ui.pendingStates[state] = struct{}{}
+			ui.orders.view.pendingStates[state] = struct{}{}
 		}
 		ui.invalidate()
 	}
-	if ui.selectNoStatesButton.Clicked(gtx) {
-		ui.pendingStates = make(map[faire.OrderState]struct{})
+	if ui.orders.view.selectNoStatesButton.Clicked(gtx) {
+		ui.orders.view.pendingStates = make(map[faire.OrderState]struct{})
 		ui.invalidate()
 	}
-	if ui.applyStatesButton.Clicked(gtx) {
-		ui.ordersState.SetIncludedStates(mapKeys(ui.pendingStates))
-		ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-		ui.ordersSearchActive = false
-		ui.statesDialogOpen = false
-		ui.startOrdersLoad(false, false, false)
+	if ui.orders.view.applyStatesButton.Clicked(gtx) {
+		ui.orders.view.state.SetIncludedStates(mapKeys(ui.orders.view.pendingStates))
+		ui.orders.view.state.SelectedIDs = make(map[faire.OrderID]struct{})
+		ui.orders.view.searchActive = false
+		ui.orders.view.statesDialogOpen = false
+		ui.startOrdersLoad(ordersLoadLocalOnly)
 		ui.invalidate()
 	}
 	return modalPanel(gtx, ui, "Filter states", func(gtx layout.Context) layout.Dimensions {
@@ -276,9 +276,9 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(primaryButton(ui.theme, &ui.selectAllStatesButton, "Select all")),
+					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.selectAllStatesButton, "Select all")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					layout.Rigid(primaryButton(ui.theme, &ui.selectNoStatesButton, "Select none")),
+					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.selectNoStatesButton, "Select none")),
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
@@ -288,15 +288,15 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				control := ui.stateControlFor(state)
 				if control.Clicked(gtx) {
-					if _, selected := ui.pendingStates[state]; selected {
-						delete(ui.pendingStates, state)
+					if _, selected := ui.orders.view.pendingStates[state]; selected {
+						delete(ui.orders.view.pendingStates, state)
 					} else {
-						ui.pendingStates[state] = struct{}{}
+						ui.orders.view.pendingStates[state] = struct{}{}
 					}
 					ui.invalidate()
 				}
 				label := displayOrderState(state)
-				if _, selected := ui.pendingStates[state]; selected {
+				if _, selected := ui.orders.view.pendingStates[state]; selected {
 					label = "✓ " + label
 				}
 				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, primaryButton(ui.theme, control, label))
@@ -306,9 +306,9 @@ func (ui *DesktopUI) layoutStatesDialog(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(primaryButton(ui.theme, &ui.applyStatesButton, "Apply states")),
+					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.applyStatesButton, "Apply states")),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					layout.Rigid(primaryButton(ui.theme, &ui.cancelStatesButton, "Cancel")),
+					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.cancelStatesButton, "Cancel")),
 				)
 			}),
 		)
@@ -339,11 +339,11 @@ func modalPanel(gtx layout.Context, ui *DesktopUI, title string, content layout.
 
 // stateControlFor returns the persistent multi-select control for one API state.
 func (ui *DesktopUI) stateControlFor(state faire.OrderState) *widget.Clickable {
-	if control, found := ui.stateControls[state]; found {
+	if control, found := ui.orders.view.stateControls[state]; found {
 		return control
 	}
 	control := new(widget.Clickable)
-	ui.stateControls[state] = control
+	ui.orders.view.stateControls[state] = control
 	return control
 }
 

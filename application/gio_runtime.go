@@ -43,6 +43,7 @@ func (ui *DesktopUI) runWindow() error {
 			ui.startStartupPreparation()
 			ui.drainStartupResults()
 			ui.drainResults()
+			ui.drainOrdersDataActionEvents()
 			ui.drainConnectionCleanupResults()
 			ui.drainOrderResults()
 			ui.drainOrderDetailResults()
@@ -70,11 +71,11 @@ func openOrdersStore(ctx context.Context) (ordersstore.Store, error) {
 // It is safe to call more than once because context cancellation, store closing, and assigning nil slices are idempotent.
 func (ui *DesktopUI) shutdown() {
 	ui.cancel()
-	if ui.ordersStore != nil {
-		_ = ui.ordersStore.Close()
-		ui.ordersStore = nil
+	if ui.orders.store != nil {
+		_ = ui.orders.store.Close()
+		ui.orders.store = nil
 	}
-	ui.ordersState.Rows = nil
-	ui.ordersState.Cursor = ""
-	ui.orderDetail = orders.Detail{}
+	ui.orders.view.state.Rows = nil
+	ui.orders.view.state.Cursor = ""
+	ui.orders.view.orderDetail = orders.Detail{}
 }

@@ -160,7 +160,7 @@ func invalidOrdersRequestMessage(listError *orderssync.ListError) string {
 // setActiveConnection changes the session-only active connection, clears transient Orders state, and invalidates prior detail/export completions.
 // It refuses a connection switch while any local-data action runs so a rebuild cannot race a second synchronization for the same connection.
 func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
-	if ui.ordersDataActionConnectionID != "" {
+	if ui.orders.dataActionConnectionID != "" {
 		ui.connectionPickerOpen = false
 		ui.status = "Wait for the local order-data action to finish before changing the active connection."
 		ui.invalidate()
@@ -170,66 +170,74 @@ func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
 	ui.activeConnectionLabel = connection.Label
 	ui.connectionPickerOpen = false
 	// A completion from the prior connection must not overwrite this connection's Orders status.
-	ui.exportRequestID++
-	ui.detailRequestID++
-	ui.ordersExporting = false
-	ui.orderDetailOpen = false
-	ui.orderDetailLoading = false
-	ui.orderDetail = orders.Detail{}
-	ui.orderDetailID = ""
-	ui.orderDetailConnectionID = ""
+	ui.orders.exportRequestID++
+	ui.orders.detailRequestID++
+	ui.orders.view.exporting = false
+	ui.orders.view.orderDetailOpen = false
+	ui.orders.view.orderDetailLoading = false
+	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.orderDetailID = ""
+	ui.orders.view.orderDetailConnectionID = ""
 	ui.resetOrdersState()
-	ui.ordersSearchActive = false
-	ui.orderSearchEditor.SetText("")
-	ui.ordersList.Position.First = 0
-	ui.ordersList.Position.Offset = 0
+	ui.orders.view.searchActive = false
+	ui.orders.view.search.SetText("")
+	ui.orders.view.list.Position.First = 0
+	ui.orders.view.list.Position.Offset = 0
 	ui.selectedTab = ordersTab
-	ui.startOrdersLoad(false, false, true)
+	ui.startOrdersLoad(ordersLoadInitial)
 	ui.invalidate()
 }
 
-// startOrdersLoad loads a local Orders page and, when requested by selection, manual refresh, or the scheduler, runs synchronization in a worker.
-// A request sequence number ensures late results never overwrite newer filters or connections.
-func (ui *DesktopUI) startOrdersLoad(appendResults, refresh, synchronize bool) {
-	if ui.ordersStore == nil {
-		ui.ordersState.Status = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
+// startOrdersLoad requests one named Orders operation from the feature-owned controller.
+// It captures connection-scoped presentation inputs on the frame goroutine so workers never read mutable shell state.
+func (ui *DesktopUI) startOrdersLoad(kind ordersLoadKind) {
+	if ui.orders.store == nil {
+		ui.orders.view.state.Status = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
 		return
 	}
 	if ui.activeConnectionID == "" {
-		ui.ordersState.Status = "Choose an active saved connection to load orders."
+		ui.orders.view.state.Status = "Choose an active saved connection to load orders."
 		return
 	}
-	if ui.ordersDataActionConnectionID == ui.activeConnectionID {
-		ui.ordersState.Status = "Local order data is being rebuilt. The refreshed orders will appear when it finishes."
+	if ui.orders.dataActionConnectionID == ui.activeConnectionID {
+		ui.orders.view.state.Status = "Local order data is being rebuilt. The refreshed orders will appear when it finishes."
 		return
 	}
-	if ui.ordersState.Loading || ui.orderDetailLoading {
+	if ui.orders.view.state.Loading || ui.orders.view.orderDetailLoading {
 		return
 	}
-	if appendResults && ui.ordersState.Cursor == "" {
+	if kind == ordersLoadNextPage && ui.orders.view.state.Cursor == "" {
 		return
 	}
-	ui.ordersRequestID++
-	requestID := ui.ordersRequestID
-	connectionID := ui.activeConnectionID
-	state := ui.ordersState
-	if !appendResults {
+
+	ui.orders.loadRequestID++
+	state := ui.orders.view.state
+	if kind != ordersLoadNextPage {
 		state.Cursor = ""
 	}
-	restoreBoundary := !ui.ordersHistoryBoundaryKnown && !refresh
-	ui.ordersState.Loading = true
-	ui.ordersState.Status = "Loading locally stored orders…"
-	store, manager := ui.ordersStore, ui.manager
-	go ui.loadOrders(requestID, connectionID, state, appendResults, refresh, synchronize, restoreBoundary, store, manager)
+	request := ordersLoadRequest{
+		RequestID:       ui.orders.loadRequestID,
+		ConnectionID:    ui.activeConnectionID,
+		State:           state,
+		Kind:            kind,
+		RestoreBoundary: !ui.orders.view.historyBoundaryKnown && (kind == ordersLoadInitial || kind == ordersLoadScheduledRefresh),
+	}
+	ui.orders.view.state.Loading = true
+	ui.orders.view.state.Status = "Loading locally stored orders…"
+	go ui.orders.loadAndMaybeSync(request)
 }
 
-// loadOrders performs local SQLite reads, optional Faire synchronization, final local re-queries, and New-order count reads outside the Gio frame loop.
-func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state orders.State, appendResults, refresh, synchronize, restoreBoundary bool, store ordersstore.Store, manager *connections.Manager) {
+// loadAndMaybeSync performs the Orders local-first workflow outside the Gio frame loop.
+// request is immutable and names its operation; the worker publishes only safe presentation values.
+func (controller *ordersController) loadAndMaybeSync(request ordersLoadRequest) {
+	store := controller.store
+	state := request.State
+	appendResults := request.Kind == ordersLoadNextPage
 	boundary := ""
-	if restoreBoundary {
-		syncState, found, err := store.SyncState(ui.ctx, connectionID)
+	if request.RestoreBoundary {
+		syncState, found, err := store.SyncState(controller.ctx, request.ConnectionID)
 		if err != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
+			controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
 			return
 		}
 		if found {
@@ -237,70 +245,56 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 			state.Query.UpdatedAtMin = boundary
 		}
 	}
-	page, err := loadLocalPage(ui.ctx, store, connectionID, state)
+	page, err := loadLocalPage(controller.ctx, store, request.ConnectionID, state)
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
+		controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Append: appendResults, Status: ordersStorageErrorMessage(err)})
 		return
 	}
 	localResult := func(status string, keepLoading bool) orderLoadResult {
-		result := orderLoadResult{RequestID: requestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
-		return attachNewOrdersCount(ui.ctx, store, connectionID, result)
+		result := orderLoadResult{RequestID: request.RequestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
+		return attachNewOrdersCount(controller.ctx, store, request.ConnectionID, result)
 	}
-	if appendResults || !synchronize {
-		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
+	if request.Kind == ordersLoadNextPage || request.Kind == ordersLoadLocalOnly {
+		controller.publishLoadResult(localResult(localStatus(store, controller.ctx, request.ConnectionID), false))
 		return
 	}
-	shouldSync, err := ordersNeedSync(ui.ctx, store, connectionID, time.Now().UTC())
-	if err != nil {
-		ui.publishOrderResult(localResult(ordersStorageErrorMessage(err), false))
-		return
-	}
-	if !refresh && !shouldSync {
-		ui.publishOrderResult(localResult(localStatus(store, ui.ctx, connectionID), false))
-		return
-	}
-	ui.publishOrderResult(localResult("Checking Faire for updated orders…", true))
-	if manager == nil {
-		ui.publishOrderResult(localResult("Showing locally stored orders. Saved connections are unavailable.", false))
-		return
-	}
-	client, _, err := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
-	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(err)})
-		return
-	}
-	syncer, err := orderssync.New(store, orderssync.SourceFunc(client.Orders.List), orderssync.Config{})
-	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Orders could not be synchronized. Try refreshing later."})
-		return
-	}
-	var summary orderssync.Summary
-	if refresh {
-		historyBoundary, err := time.Parse(time.RFC3339Nano, state.Query.UpdatedAtMin)
+	if request.Kind == ordersLoadInitial || request.Kind == ordersLoadScheduledRefresh {
+		shouldSync, err := ordersNeedSync(controller.ctx, store, request.ConnectionID, time.Now().UTC())
 		if err != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Enter a valid updated-at minimum before refreshing."})
+			controller.publishLoadResult(localResult(ordersStorageErrorMessage(err), false))
 			return
 		}
-		summary, err = syncer.SyncFromUpdatedAt(ui.ctx, connectionID, historyBoundary)
-	} else {
-		summary, err = syncer.Sync(ui.ctx, connectionID)
+		if !shouldSync {
+			controller.publishLoadResult(localResult(localStatus(store, controller.ctx, request.ConnectionID), false))
+			return
+		}
+	}
+	controller.publishLoadResult(localResult("Checking Faire for updated orders…", true))
+	summary, err := controller.syncConnection(request)
+	if errors.Is(err, errOrdersManagerUnavailable) {
+		controller.publishLoadResult(localResult("Showing locally stored orders. Saved connections are unavailable.", false))
+		return
+	}
+	if errors.Is(err, errInvalidHistoryBoundary) {
+		controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Status: "Enter a valid updated-at minimum before refreshing."})
+		return
 	}
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(err)})
+		controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Status: ordersLoadErrorMessage(err)})
 		return
 	}
 	if summary.Bootstrap || summary.HistoryExpanded {
-		syncState, found, stateErr := store.SyncState(ui.ctx, connectionID)
+		syncState, found, stateErr := store.SyncState(controller.ctx, request.ConnectionID)
 		if stateErr != nil || !found {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(stateErr)})
+			controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Status: ordersStorageErrorMessage(stateErr)})
 			return
 		}
 		boundary = syncState.BootstrapUpdatedAtMinUTC.Format(time.RFC3339)
 		state.Query.UpdatedAtMin = boundary
 	}
-	page, err = loadLocalPage(ui.ctx, store, connectionID, state)
+	page, err = loadLocalPage(controller.ctx, store, request.ConnectionID, state)
 	if err != nil {
-		ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(err)})
+		controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Status: ordersStorageErrorMessage(err)})
 		return
 	}
 	status := "Orders are up to date."
@@ -309,118 +303,46 @@ func (ui *DesktopUI) loadOrders(requestID uint64, connectionID string, state ord
 	} else if summary.Orders > 0 {
 		status = "Orders updated from Faire."
 	}
-	ui.publishOrderResult(localResult(status, false))
+	controller.publishLoadResult(localResult(status, false))
+}
+
+// publishLoadResult sends a safe Orders load result unless application shutdown has begun.
+func (controller *ordersController) publishLoadResult(result orderLoadResult) {
+	select {
+	case controller.loadResults <- result:
+	case <-controller.ctx.Done():
+		return
+	}
+	if controller.invalidate != nil {
+		controller.invalidate()
+	}
 }
 
 // loadOrderByDisplayID searches the connection-scoped local index before using the authenticated direct-lookup fallback.
 func (ui *DesktopUI) loadOrderByDisplayID() {
-	if ui.activeConnectionID == "" || ui.ordersStore == nil {
-		ui.ordersState.Status = "Choose an active saved connection with local order storage before searching orders."
+	if ui.activeConnectionID == "" || ui.orders.store == nil {
+		ui.orders.view.state.Status = "Choose an active saved connection with local order storage before searching orders."
 		return
 	}
-	displayID, err := orders.NormalizeDisplayID(ui.orderSearchEditor.Text())
+	displayID, err := orders.NormalizeDisplayID(ui.orders.view.search.Text())
 	if err != nil {
-		ui.ordersState.Status = "Enter a valid order number."
+		ui.orders.view.state.Status = "Enter a valid order number."
 		return
 	}
 	orderID, _ := orders.OrderIDFromDisplayID(displayID)
-	ui.ordersSearchActive = true
-	ui.ordersRequestID++
-	requestID, connectionID := ui.ordersRequestID, ui.activeConnectionID
-	ui.ordersState.Loading = true
-	ui.ordersState.Status = "Searching locally stored orders…"
-	store, manager := ui.ordersStore, ui.manager
-	go func() {
-		local, localErr := store.FindByDisplayID(ui.ctx, connectionID, displayID)
-		if localErr == nil {
-			result := orderLoadResult{RequestID: requestID, Rows: localRows([]ordersstore.LocalRow{local}), Status: "Showing the matching locally stored order.", ApplyRows: true}
-			ui.publishOrderResult(attachNewOrdersCount(ui.ctx, store, connectionID, result))
-			return
-		}
-		if !errors.Is(localErr, ordersstore.ErrNotFound) {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(localErr)})
-			return
-		}
-		if manager == nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Order was not found locally and saved connections are unavailable."})
-			return
-		}
-		client, _, clientErr := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
-		if clientErr != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(clientErr)})
-			return
-		}
-		order, getErr := client.Orders.Get(ui.ctx, orderID)
-		if getErr != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersLoadErrorMessage(getErr)})
-			return
-		}
-		record, recordErr := orderssync.RecordFromOrder(connectionID, *order, time.Now().UTC())
-		if recordErr != nil || store.UpsertOrders(ui.ctx, []ordersstore.OrderRecord{record}) != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Order was retrieved but could not be stored locally. Try again later."})
-			return
-		}
-		result := orderLoadResult{RequestID: requestID, Rows: []orders.Row{orders.PresentRow(*order)}, Status: "Showing the matching order.", ApplyRows: true}
-		ui.publishOrderResult(attachNewOrdersCount(ui.ctx, store, connectionID, result))
-	}()
+	ui.orders.view.searchActive = true
+	ui.orders.loadRequestID++
+	requestID, connectionID := ui.orders.loadRequestID, ui.activeConnectionID
+	ui.orders.view.state.Loading = true
+	ui.orders.view.state.Status = "Searching locally stored orders…"
+	go ui.orders.lookupAndPersistOrder(requestID, connectionID, displayID, orderID)
 }
 
-// publishOrderResult sends a result unless application shutdown has begun.
-func (ui *DesktopUI) publishOrderResult(result orderLoadResult) {
-	select {
-	case ui.orderResults <- result:
-	case <-ui.ctx.Done():
-		return
-	}
-	ui.invalidate()
-}
-
-// drainOrderResults applies only the latest local-query or synchronization result, including its New-order badge count, protecting current controls from stale work.
-// Rebuilds launched from Brand Profile also mirror their matching progress and completion status into that page's status area.
+// drainOrderResults delegates Orders result validation and view updates to the feature controller.
+// The shell applies only its matching cross-feature Brand Profile status.
 func (ui *DesktopUI) drainOrderResults() {
-	for {
-		select {
-		case result := <-ui.orderResults:
-			if result.RequestID != ui.ordersRequestID {
-				continue
-			}
-			if result.RequestID == ui.ordersDataStatusRequestID {
-				ui.status = result.Status
-				if !result.KeepLoading {
-					ui.ordersDataStatusRequestID = 0
-					if ui.ordersDataActionConnectionID == ui.activeConnectionID {
-						ui.ordersDataActionConnectionID = ""
-					}
-				}
-			}
-			ui.ordersState.Loading = result.KeepLoading
-			if result.ApplyNewOrdersCount {
-				ui.newOrdersCount = result.NewOrdersCount
-			}
-			if !result.ApplyRows {
-				ui.ordersState.Status = result.Status
-				continue
-			}
-			if result.ApplyBoundary {
-				ui.ordersState.Query.UpdatedAtMin = result.UpdatedAtMin
-				ui.updatedAtMinEditor.SetText(historyBoundaryInput(result.UpdatedAtMin))
-				ui.ordersHistoryBoundaryKnown = true
-			}
-			if ui.ordersSearchActive {
-				ui.ordersState.Rows = result.Rows
-				ui.ordersState.Cursor = ""
-			} else if result.Append {
-				ui.ordersState.Rows = append(ui.ordersState.Rows, result.Rows...)
-				ui.ordersState.Cursor = result.Cursor
-			} else {
-				ui.ordersState.Rows = result.Rows
-				ui.ordersState.Cursor = result.Cursor
-			}
-			ui.ordersState.Loaded = true
-			ui.ordersState.Status = result.Status
-		default:
-			return
-		}
+	if status, apply := ui.orders.drainLoadResults(ui.activeConnectionID); apply {
+		ui.status = status
 	}
 }
 
@@ -436,66 +358,41 @@ func historyBoundaryInput(value string) string {
 // openOrder opens the locally stored snapshot identified by the clicked order number.
 // It resets the detail viewport so every newly opened order starts at its summary.
 func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
-	if ui.activeConnectionID == "" || ui.ordersStore == nil {
-		ui.ordersState.Status = "Choose an active saved connection before opening an order."
+	if ui.activeConnectionID == "" || ui.orders.store == nil {
+		ui.orders.view.state.Status = "Choose an active saved connection before opening an order."
 		return
 	}
 	if orderID == "" {
-		ui.ordersState.Status = "The selected order does not have a valid identifier."
+		ui.orders.view.state.Status = "The selected order does not have a valid identifier."
 		return
 	}
-	ui.detailRequestID++
-	requestID := ui.detailRequestID
-	connectionID, store := ui.activeConnectionID, ui.ordersStore
-	ui.orderDetailOpen, ui.orderDetailLoading = true, true
-	ui.orderDetailID, ui.orderDetailConnectionID = orderID, connectionID
-	ui.orderDetail = orders.Detail{}
-	ui.orderDetailList.Position.First = 0
-	ui.orderDetailList.Position.Offset = 0
-	ui.orderDetailStatus = "Opening locally stored order details…"
-	go loadOrderDetail(ui.ctx, store, requestID, connectionID, orderID, ui.publishOrderDetailResult)
+	ui.orders.detailRequestID++
+	requestID := ui.orders.detailRequestID
+	connectionID, store := ui.activeConnectionID, ui.orders.store
+	ui.orders.view.orderDetailOpen, ui.orders.view.orderDetailLoading = true, true
+	ui.orders.view.orderDetailID, ui.orders.view.orderDetailConnectionID = orderID, connectionID
+	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.detailList.Position.First = 0
+	ui.orders.view.detailList.Position.Offset = 0
+	ui.orders.view.orderDetailStatus = "Opening locally stored order details…"
+	go loadOrderDetail(ui.ctx, store, requestID, connectionID, orderID, ui.orders.publishOrderDetailResult)
 }
 
 // refreshOrderDetail explicitly retrieves the currently open order and atomically replaces its local snapshot without advancing the feed checkpoint.
 func (ui *DesktopUI) refreshOrderDetail() {
-	if ui.orderDetailID == "" || ui.orderDetailConnectionID != ui.activeConnectionID || ui.ordersStore == nil || ui.manager == nil {
-		ui.orderDetailStatus = "Order details cannot be refreshed until an active saved connection is available."
+	if ui.orders.view.orderDetailID == "" || ui.orders.view.orderDetailConnectionID != ui.activeConnectionID || ui.orders.store == nil || ui.manager == nil {
+		ui.orders.view.orderDetailStatus = "Order details cannot be refreshed until an active saved connection is available."
 		return
 	}
-	if ui.orderDetailLoading || ui.ordersState.Loading {
+	if ui.orders.view.orderDetailLoading || ui.orders.view.state.Loading {
 		return
 	}
-	ui.detailRequestID++
-	requestID := ui.detailRequestID
-	connectionID, orderID, store, manager := ui.activeConnectionID, ui.orderDetailID, ui.ordersStore, ui.manager
-	ui.orderDetailLoading = true
-	ui.orderDetailStatus = "Refreshing order details from Faire…"
-	go func() {
-		client, _, err := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
-		if err != nil {
-			ui.publishOrderDetailResult(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersLoadErrorMessage(err)})
-			return
-		}
-		order, err := client.Orders.Get(ui.ctx, orderID)
-		if err != nil {
-			ui.publishOrderDetailResult(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersLoadErrorMessage(err)})
-			return
-		}
-		record, err := orderssync.RecordFromOrder(connectionID, *order, time.Now().UTC())
-		if err == nil {
-			err = store.UpsertOrders(ui.ctx, []ordersstore.OrderRecord{record})
-		}
-		if err != nil {
-			ui.publishOrderDetailResult(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
-			return
-		}
-		result := orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)}
-		if count, found := newOrdersCount(ui.ctx, store, connectionID); found {
-			result.NewOrdersCount = count
-			result.ApplyNewOrdersCount = true
-		}
-		ui.publishOrderDetailResult(result)
-	}()
+	ui.orders.detailRequestID++
+	requestID := ui.orders.detailRequestID
+	connectionID, orderID := ui.activeConnectionID, ui.orders.view.orderDetailID
+	ui.orders.view.orderDetailLoading = true
+	ui.orders.view.orderDetailStatus = "Refreshing order details from Faire…"
+	go ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
 }
 
 // loadOrderDetail reads and deserializes one private snapshot in a worker, publishing only its typed presentation model.
@@ -521,97 +418,58 @@ func loadOrderDetail(ctx context.Context, store ordersstore.Store, requestID uin
 	publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(order, snapshot.SyncedAtUTC)})
 }
 
-// publishOrderDetailResult sends a typed detail result unless application shutdown has begun.
-func (ui *DesktopUI) publishOrderDetailResult(result orderDetailResult) {
-	select {
-	case ui.orderDetailResults <- result:
-	case <-ui.ctx.Done():
-		return
-	}
-	ui.invalidate()
-}
-
-// drainOrderDetailResults accepts only results for the current detail request, connection, and selected order, including a refreshed New-order badge count.
+// drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller.
 func (ui *DesktopUI) drainOrderDetailResults() {
-	for {
-		select {
-		case result := <-ui.orderDetailResults:
-			if result.RequestID != ui.detailRequestID || result.ConnectionID != ui.activeConnectionID || result.OrderID != ui.orderDetailID {
-				continue
-			}
-			ui.orderDetailLoading = false
-			if result.ApplyNewOrdersCount {
-				ui.newOrdersCount = result.NewOrdersCount
-			}
-			if result.Status != "" {
-				ui.orderDetailStatus = result.Status
-				continue
-			}
-			ui.orderDetail = result.Detail
-			ui.orderDetailStatus = "Showing locally stored order details."
-		default:
-			return
-		}
-	}
+	ui.orders.drainDetailResults(ui.activeConnectionID)
 }
 
 // requestOrdersDataAction opens explicit confirmation for a connection-scoped local-data delete or rebuild operation.
 // connectionID comes from the clicked Brand Profile card, preventing an action from affecting another connection's cached orders.
 func (ui *DesktopUI) requestOrdersDataAction(connectionID string, rebuild bool) {
-	if ui.ordersDataActionConnectionID != "" {
+	if ui.orders.dataActionConnectionID != "" {
 		ui.status = "Wait for the current local order-data action to finish before starting another one."
 		return
 	}
-	if connectionID == "" || ui.ordersStore == nil {
+	if connectionID == "" || ui.orders.store == nil {
 		ui.status = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
 		return
 	}
-	ui.ordersDataDialog = ordersDataDialogState{open: true, rebuild: rebuild, connectionID: connectionID}
+	ui.orders.view.dataDialog = ordersDataDialogState{open: true, rebuild: rebuild, connectionID: connectionID}
 }
 
 // startOrdersDataAction deletes only connectionID's private cached orders and optionally starts a fresh bootstrap.
 // It marks the action connection as busy, preventing a connection switch or duplicate sync until the action has completed.
 func (ui *DesktopUI) startOrdersDataAction(connectionID string, rebuild bool) {
-	if ui.ordersStore == nil || connectionID == "" {
+	if ui.orders.store == nil || connectionID == "" {
 		return
 	}
 	// The status area is above the connection cards, so return there before the confirmation closes and background work begins.
 	ui.brandsList.Position = layout.Position{}
-	ui.ordersDataDialog = ordersDataDialogState{}
-	ui.ordersDataActionConnectionID = connectionID
+	ui.orders.view.dataDialog = ordersDataDialogState{}
+	ui.orders.dataActionConnectionID = connectionID
 	ui.status = localDataActionStatus(rebuild)
 	if connectionID != ui.activeConnectionID {
-		ui.ordersDataStatusRequestID = 0
+		ui.orders.dataStatusRequestID = 0
 		ui.startInactiveOrdersDataAction(connectionID, rebuild)
 		return
 	}
-	ui.ordersRequestID++
-	requestID := ui.ordersRequestID
-	ui.ordersDataStatusRequestID = requestID
-	store, manager, state := ui.ordersStore, ui.manager, ui.ordersState
+	ui.orders.loadRequestID++
+	requestID := ui.orders.loadRequestID
+	ui.orders.dataStatusRequestID = requestID
+	state := ui.orders.view.state
 	if rebuild {
 		// Rebuild intentionally starts from the current default window rather than silently preserving an older retained-history expansion.
 		state.Query.UpdatedAtMin = orders.NewStateAt(time.Now(), time.Local).Query.UpdatedAtMin
-		ui.ordersHistoryBoundaryKnown = false
+		ui.orders.view.historyBoundaryKnown = false
 	}
 	state.Cursor = ""
-	ui.ordersState.Rows = nil
-	ui.ordersState.Cursor = ""
-	ui.ordersState.Loaded = false
-	ui.ordersState.Loading = true
-	ui.ordersState.SelectedIDs = make(map[faire.OrderID]struct{})
-	ui.ordersState.Status = localDataActionStatus(rebuild)
-	go func() {
-		if err := store.DeleteConnectionData(ui.ctx, connectionID); err != nil {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: ordersStorageErrorMessage(err)})
-			return
-		}
-		if !rebuild {
-			ui.publishOrderResult(orderLoadResult{RequestID: requestID, Status: "Deleted locally stored order data for this connection.", ApplyNewOrdersCount: true})
-			return
-		}
-		ui.loadOrders(requestID, connectionID, state, false, true, true, false, store, manager)
-	}()
+	ui.orders.view.state.Rows = nil
+	ui.orders.view.state.Cursor = ""
+	ui.orders.view.state.Loaded = false
+	ui.orders.view.state.Loading = true
+	ui.orders.view.state.SelectedIDs = make(map[faire.OrderID]struct{})
+	ui.orders.view.state.Status = localDataActionStatus(rebuild)
+	ui.orders.startActiveDataAction(ordersLoadRequest{RequestID: requestID, ConnectionID: connectionID, State: state, Kind: ordersLoadRebuild}, rebuild)
 }
 
 // localDataActionStatus describes the connection-scoped local-data operation currently running.
@@ -622,40 +480,11 @@ func localDataActionStatus(rebuild bool) string {
 	return "Deleting locally stored order data…"
 }
 
-// startInactiveOrdersDataAction performs a local-data action for a Brand Profile card that is not currently active in Orders.
-// It reports completion through the Brand Profile result channel and avoids replacing the active Orders table.
+// startInactiveOrdersDataAction starts a controller-owned cache action for a Brand Profile card that is not active in Orders.
+// The controller reports an explicit connection-scoped event, so the active Orders table remains untouched.
 func (ui *DesktopUI) startInactiveOrdersDataAction(connectionID string, rebuild bool) {
 	ui.status = localDataActionStatus(rebuild)
-	store, manager := ui.ordersStore, ui.manager
-	go func() {
-		if err := store.DeleteConnectionData(ui.ctx, connectionID); err != nil {
-			ui.publishOrdersDataResult(connectionID, ordersStorageErrorMessage(err))
-			return
-		}
-		if !rebuild {
-			ui.publishOrdersDataResult(connectionID, "Deleted locally stored order data for this connection.")
-			return
-		}
-		if manager == nil {
-			ui.publishOrdersDataResult(connectionID, "Saved connections are unavailable. Local order data was deleted but could not be rebuilt.")
-			return
-		}
-		client, _, err := manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
-		if err != nil {
-			ui.publishOrdersDataResult(connectionID, ordersLoadErrorMessage(err))
-			return
-		}
-		syncer, err := orderssync.New(store, orderssync.SourceFunc(client.Orders.List), orderssync.Config{})
-		if err != nil {
-			ui.publishOrdersDataResult(connectionID, "Orders could not be synchronized. Try refreshing later.")
-			return
-		}
-		if _, err := syncer.Sync(ui.ctx, connectionID); err != nil {
-			ui.publishOrdersDataResult(connectionID, ordersLoadErrorMessage(err))
-			return
-		}
-		ui.publishOrdersDataResult(connectionID, "Local order data was rebuilt for this connection.")
-	}()
+	ui.orders.startInactiveDataAction(connectionID, rebuild)
 }
 
 // loadLocalPage translates UI filter state into a connection-scoped SQLite keyset query in a background worker.
@@ -800,40 +629,15 @@ func ordersStorageErrorMessage(err error) string {
 	return "Local order storage could not be read. Rebuild local order data after resolving the issue."
 }
 
-// startOrdersScheduler creates a bounded hourly wake-up channel tied to the application lifetime.
+// startOrdersScheduler starts the controller-owned hourly wake-up source when local Orders storage is available.
 func (ui *DesktopUI) startOrdersScheduler() {
-	if ui.ordersStore == nil {
-		return
-	}
-	go func(ctx context.Context, wakeups chan<- struct{}) {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				select {
-				case wakeups <- struct{}{}:
-					ui.invalidate()
-				default:
-				}
-			}
-		}
-	}(ui.ctx, ui.ordersSchedule)
+	ui.orders.startScheduler()
 }
 
-// drainOrdersSchedule starts at most one ordinary local-load/sync path for the active connection on an hourly wake-up.
+// drainOrdersSchedule delegates queued wake-ups to the controller, then asks for one scheduled operation when the visible Orders state is idle.
 func (ui *DesktopUI) drainOrdersSchedule() {
-	for {
-		select {
-		case <-ui.ordersSchedule:
-			if ui.activeConnectionID != "" && !ui.ordersState.Loading && !ui.orderDetailLoading {
-				ui.startOrdersLoad(false, false, true)
-			}
-		default:
-			return
-		}
+	if ui.orders.drainSchedule() && ui.activeConnectionID != "" && !ui.orders.view.state.Loading && !ui.orders.view.orderDetailLoading {
+		ui.startOrdersLoad(ordersLoadScheduledRefresh)
 	}
 }
 
@@ -849,72 +653,72 @@ func (ui *DesktopUI) invalidate() {
 // kind identifies the order scope, options carry the per-export CSV and packing-slip choices, and it has no return value because completion is published to the frame loop.
 func (ui *DesktopUI) startOrderExport(kind orderExportKind, options orderExportOptions) {
 	// Close before validation so any actionable failure is visible on the Orders page.
-	ui.orderExportDialog = orderExportDialogState{}
+	ui.orders.view.exportDialog = orderExportDialogState{}
 	if ui.manager == nil || ui.activeConnectionID == "" {
-		ui.ordersState.Status = "Choose an active saved connection before exporting orders."
+		ui.orders.view.state.Status = "Choose an active saved connection before exporting orders."
 		return
 	}
-	if ui.ordersState.Loading || ui.ordersExporting {
-		ui.ordersState.Status = "Wait for the current Orders operation to finish before exporting."
+	if ui.orders.view.state.Loading || ui.orders.view.exporting {
+		ui.orders.view.state.Status = "Wait for the current Orders operation to finish before exporting."
 		return
 	}
-	selectedIDs := selectedOrderIDs(ui.ordersState.SelectedIDs)
+	selectedIDs := selectedOrderIDs(ui.orders.view.state.SelectedIDs)
 	if kind == orderExportSelected && len(selectedIDs) == 0 {
-		ui.ordersState.Status = "Select one or more orders before exporting selected orders."
+		ui.orders.view.state.Status = "Select one or more orders before exporting selected orders."
 		return
 	}
-	ui.ordersExporting = true
-	ui.exportRequestID++
-	requestID := ui.exportRequestID
+	ui.orders.view.exporting = true
+	ui.orders.exportRequestID++
+	requestID := ui.orders.exportRequestID
 	connectionID := ui.activeConnectionID
-	ui.ordersState.Status = "Exporting orders…"
-	go ui.exportOrders(requestID, connectionID, kind, selectedIDs, options)
+	ui.orders.view.state.Status = "Exporting orders…"
+	go ui.orders.exportOrders(requestID, connectionID, kind, selectedIDs, options)
 }
 
 // exportOrders reads the authenticated Faire brand profile, retrieves the requested full orders, and writes the selected CSV and packing-slip artifacts outside the frame loop.
 // requestID identifies the current worker, connectionID scopes credentials, kind and selectedIDs identify orders, and options select the CSV header and optional PDFs; it returns no value because it publishes a safe result.
-func (ui *DesktopUI) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID, options orderExportOptions) {
-	client, _, err := ui.manager.Client(ui.ctx, connectionID, connections.ClientOptions{})
+func (controller *ordersController) exportOrders(requestID uint64, connectionID string, kind orderExportKind, selectedIDs []faire.OrderID, options orderExportOptions) {
+	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
-	profile, err := client.Brands.Profile(ui.ctx)
+	profile, err := client.Brands.Profile(controller.ctx)
 	if err != nil {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
 	saleSource, configured := exportSalesSource(profile)
 	if !configured {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's Faire brand.", Blocked: true})
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: "CSV export is not configured for this connection's Faire brand.", Blocked: true})
 		return
 	}
 	var source []faire.Order
 	switch kind {
 	case orderExportNew:
-		source, err = exportOrdersForState(ui.ctx, client.Orders, faire.OrderStateNew)
+		source, err = exportOrdersForState(controller.ctx, client.Orders, faire.OrderStateNew)
 	case orderExportBackordered:
-		source, err = exportOrdersForState(ui.ctx, client.Orders, faire.OrderStateBackordered)
+		source, err = exportOrdersForState(controller.ctx, client.Orders, faire.OrderStateBackordered)
 	case orderExportSelected:
-		source, err = exportSelectedOrders(ui.ctx, client.Orders, selectedIDs)
+		source, err = exportSelectedOrders(controller.ctx, client.Orders, selectedIDs)
 	default:
 		err = fmt.Errorf("unknown order export kind")
 	}
 	if err != nil {
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: ordersExportErrorMessage(err)})
 		return
 	}
 
-	filename, packingSlipFolder, packingSlipSummary, err := writeOrderExport(ui.ctx, client.Orders, kind, saleSource, source, options)
+	filename, packingSlipFolder, packingSlipSummary, err := writeOrderExport(controller.ctx, client.Orders, kind, saleSource, source, options)
 	if err != nil {
 		status := "Could not save the order export to Downloads. Check folder permissions and try again."
 		if errors.Is(err, context.Canceled) {
 			status = ordersExportErrorMessage(err)
 		}
-		ui.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: status})
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: status})
 		return
 	}
-	ui.publishOrderExportResult(orderExportResult{
+	controller.publishOrderExportResult(orderExportResult{
 		RequestID:           requestID,
 		Status:              orderExportCompletionStatus(len(source), filename, packingSlipFolder, packingSlipSummary),
 		Filename:            filename,
@@ -1225,37 +1029,18 @@ func ordersExportErrorMessage(err error) string {
 }
 
 // publishOrderExportResult sends an export result unless application shutdown has begun.
-func (ui *DesktopUI) publishOrderExportResult(result orderExportResult) {
+func (controller *ordersController) publishOrderExportResult(result orderExportResult) {
 	select {
-	case ui.orderExportResults <- result:
-	case <-ui.ctx.Done():
+	case controller.exportResults <- result:
+	case <-controller.ctx.Done():
 		return
 	}
-	ui.invalidate()
+	if controller.invalidate != nil {
+		controller.invalidate()
+	}
 }
 
-// drainOrderExportResults applies only the most recent export status to the Orders page.
+// drainOrderExportResults delegates stale-result validation and export presentation updates to the feature controller.
 func (ui *DesktopUI) drainOrderExportResults() {
-	for {
-		select {
-		case result := <-ui.orderExportResults:
-			if result.RequestID != ui.exportRequestID {
-				continue
-			}
-			ui.ordersExporting = false
-			ui.ordersState.Status = result.Status
-			if result.Blocked {
-				ui.csvExportBlockedDialogOpen = true
-			}
-			if result.Completed {
-				ui.csvExportCompletedFilename = result.Filename
-				ui.packingSlipExportFolder = result.PackingSlipFolder
-				ui.packingSlipExportCount = result.PackingSlipCount
-				ui.packingSlipExportFailures = result.PackingSlipFailures
-				ui.csvExportCompletedDialogOpen = true
-			}
-		default:
-			return
-		}
-	}
+	ui.orders.drainExportResults()
 }
