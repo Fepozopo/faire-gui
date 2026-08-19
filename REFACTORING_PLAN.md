@@ -71,20 +71,11 @@ The current implementation supports packing-slip PDFs through:
 
 The capability has privacy and filesystem-retention implications beyond ordinary CSV export. Its scope therefore needs an explicit decision, recorded in this plan, rather than being inferred solely from the existence of an API endpoint.
 
-### Decision gate
+### Product decision
 
-Before declaring this refactor complete, make one explicit product decision:
+**Packing-slip PDFs are an officially supported Orders feature.** They are user-requested export artifacts, not cached application data. Future changes to PDF retrieval, filesystem export, and retention therefore require product and privacy review.
 
-| Decision                                      | Plan record                                                                                             | Follow-up implication                                                                                      |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Packing slips are an accepted Orders workflow | Record them as an explicit user-requested export artifact and retain their privacy/failure constraints. | Treat future changes to PDF retrieval, filesystem export, and retention as product/privacy-sensitive work. |
-| Packing slips are not accepted product scope  | Record the capability as deprecated and plan its removal.                                               | Do not silently remove it; schedule removal with migration and user-impact review.                         |
-
-Based on the existing UI, private directory permissions, safe partial-failure reporting, and tests, the implementation is mature enough to support the first decision. The decision itself should still be made by the product owner rather than inferred from endpoint availability.
-
-### If the capability is accepted
-
-Record these constraints in this plan:
+The following constraints are mandatory:
 
 1. Packing slips are generated only following an explicit user export choice.
 2. PDFs are written as private user-requested artifacts under Downloads and are not stored in SQLite.
