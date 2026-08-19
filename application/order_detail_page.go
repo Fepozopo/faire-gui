@@ -47,7 +47,7 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date.
+// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date and the free-shipping reason following its eligibility.
 // It uses ui for themed controls and returns the rendered content dimensions; each order item is a separate card for scanability.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
@@ -79,6 +79,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(detailLine(ui, "Country", detail.ShippingAddress.Country)),
 		layout.Rigid(detailLine(ui, "Phone", detail.ShippingAddress.PhoneNumber)),
 		layout.Rigid(detailLine(ui, "Is free shipping", detail.IsFreeShipping)),
+		layout.Rigid(detailLine(ui, "Free shipping reason", detail.FreeShippingReason)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Items").Layout),
 	}

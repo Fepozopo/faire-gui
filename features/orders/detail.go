@@ -10,7 +10,7 @@ import (
 )
 
 // Detail is the display-ready, read-only representation of one locally stored Order.
-// It intentionally contains approved text fields only and never exposes a raw API object or serialized snapshot to layout code.
+// It intentionally contains approved text fields, including free-shipping eligibility and reason, and never exposes a raw API object or serialized snapshot to layout code.
 type Detail struct {
 	OrderID             faire.OrderID
 	DisplayID           string
@@ -33,6 +33,7 @@ type Detail struct {
 	Commission          string
 	TotalPayout         string
 	IsFreeShipping      string
+	FreeShippingReason  string
 	PendingCancellation string
 	FulfilledByFaire    string
 }
@@ -76,7 +77,7 @@ type DetailAddress struct {
 	PhoneNumber string
 }
 
-// PresentDetail converts order and its local synchronization time into safe display-ready detail values, including lineage, scheduling, and sales-representative data.
+// PresentDetail converts order and its local synchronization time into safe display-ready detail values, including lineage, scheduling, sales-representative, and free-shipping data.
 // It returns a Detail containing only approved presentation fields.
 func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 	detail := Detail{
@@ -99,6 +100,7 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		ShippingAddress:     presentDetailAddress(order.Address),
 		Commission:          formatCommissionAmount(order.PayoutCosts),
 		IsFreeShipping:      detailBoolean(order.IsFreeShipping),
+		FreeShippingReason:  detailFreeShippingReason(order.FreeShippingReason),
 		PendingCancellation: detailBoolean(order.HasPendingRetailerCancellationRequest),
 		FulfilledByFaire:    detailBoolean(order.IsFulfilledByFaire),
 	}
@@ -213,6 +215,15 @@ func displayItemStatus(state *faire.OrderItemState) string {
 		return "—"
 	}
 	return titleFromIdentifier(string(*state))
+}
+
+// detailFreeShippingReason formats an optional Faire free-shipping enum as a readable reason.
+// It returns the missing-value placeholder when the API did not provide a reason.
+func detailFreeShippingReason(value *faire.FreeShippingReason) string {
+	if value == nil {
+		return "—"
+	}
+	return titleFromIdentifier(string(*value))
 }
 
 // detailBoolean formats optional booleans without making a missing API field look false.
