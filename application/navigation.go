@@ -15,7 +15,7 @@ import (
 )
 
 // layoutSidebar renders the persistent application navigation, active-connection switcher, and Settings entry.
-// Brand profile and Connections are available only through Settings, while unimplemented product routes remain visually present but non-interactive.
+// Brand profile and Connections are available only through Settings, while supported but unimplemented routes remain visually present but non-interactive.
 func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 	width := gtx.Dp(unit.Dp(220))
 	gtx.Constraints.Min.X = width
@@ -86,9 +86,10 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 	})
 }
 
-// layoutUnavailableNavigation shows planned routes without misleading users into believing the pages work already.
+// layoutUnavailableNavigation renders Orders together with supported routes that are not implemented as pages yet.
+// Only API-backed destinations are shown, and the unavailable routes are intentionally non-interactive.
 func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dimensions {
-	labels := []string{"Orders", "Products", "Customers", "Marketing", "Analytics", "My shop", "Faire Direct"}
+	labels := []string{"Orders", "Products", "Customers", "Analytics"}
 	children := make([]layout.FlexChild, 0, len(labels)*2)
 	for index, label := range labels {
 		index, label := index, label
