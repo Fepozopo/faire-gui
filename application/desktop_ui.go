@@ -183,7 +183,7 @@ func (ui *DesktopUI) resetOrdersState() {
 	ui.orders.view.updatedAt.SetText(updatedAtMinimumInput)
 }
 
-// Layout processes current-frame interaction and emits the complete desktop UI, including update dialogs and inline Settings navigation.
+// Layout processes current-frame interaction and emits the complete desktop UI, including modal progress and inline Settings navigation.
 // gtx supplies the current frame; while startup is pending it instead renders only preparation progress so no database-dependent action can run.
 func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 	if ui.preparingStartup {
@@ -224,6 +224,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutStatesDialog(gtx)
 			case ui.orders.view.exportDialog.open:
 				return ui.layoutOrderExportMenu(gtx)
+			case ui.orders.view.exporting:
+				return ui.layoutOrderExportProgressDialog(gtx)
 			case ui.orders.view.csvExportBlockedOpen:
 				return ui.layoutCSVExportBlockedDialog(gtx)
 			case ui.orders.view.csvExportCompletedOpen:
@@ -248,9 +250,9 @@ func (ui *DesktopUI) layoutStartup(gtx layout.Context) layout.Dimensions {
 }
 
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
-// Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal such as the update prompt owns input.
+// Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal, including export progress, owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.orders.view.dataDialog.open || ui.connectionPickerOpen || ui.orders.view.statesDialogOpen || ui.orders.view.exportDialog.open || ui.orders.view.csvExportBlockedOpen || ui.orders.view.csvExportCompletedOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.orders.view.dataDialog.open || ui.connectionPickerOpen || ui.orders.view.statesDialogOpen || ui.orders.view.exportDialog.open || ui.orders.view.exporting || ui.orders.view.csvExportBlockedOpen || ui.orders.view.csvExportCompletedOpen {
 		return
 	}
 	for index := range ui.tabButtons {

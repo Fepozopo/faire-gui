@@ -320,6 +320,18 @@ func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions
 	})
 }
 
+// layoutOrderExportProgressDialog blocks further interaction while a CSV export and any selected packing slips are being written.
+// It closes automatically when the export worker publishes its completion, blocked, or error result.
+func (ui *DesktopUI) layoutOrderExportProgressDialog(gtx layout.Context) layout.Dimensions {
+	return modalPanel(gtx, ui, "Exporting orders", func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(bodyText(ui.theme, "Your export is in progress. This window will close automatically when it is complete.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(bodyText(ui.theme, "Downloading selected packing slips may take a little longer.", mutedTextColor)),
+		)
+	})
+}
+
 // handleOrderExportScopeControls advances the export dialog from scope selection to configuration without starting work yet.
 // gtx supplies the current frame; it has no return value because it updates only UI-owned dialog state.
 func (ui *DesktopUI) handleOrderExportScopeControls(gtx layout.Context) {
