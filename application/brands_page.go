@@ -63,7 +63,8 @@ func (ui *DesktopUI) layoutBrands(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// layoutBrandStatus renders Brand Profile feedback and emphasizes an in-progress local-data action.
+// layoutBrandStatus renders Brand Profile feedback and highlights a local-data action without changing the normal status layout.
+// An active rebuild uses an amber background directly behind the same body text that renders completed and error statuses.
 func (ui *DesktopUI) layoutBrandStatus(gtx layout.Context) layout.Dimensions {
 	if ui.status == "" {
 		return layout.Dimensions{}
@@ -71,15 +72,13 @@ func (ui *DesktopUI) layoutBrandStatus(gtx layout.Context) layout.Dimensions {
 	if ui.orders.dataActionConnectionID == "" {
 		return statusText(ui.theme, ui.status)(gtx)
 	}
-	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(material.Label(ui.theme, unit.Sp(14), "Local order data in progress").Layout),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
-				layout.Rigid(bodyText(ui.theme, ui.status, mutedTextColor)),
-			)
-		})
-	})
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(material.H6(ui.theme, "Status").Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return roundedPanel(gtx, activityColor, bodyText(ui.theme, ui.status, mutedTextColor))
+		}),
+	)
 }
 
 // layoutBrandProfileActions renders equal-width, connection-scoped profile and local-data actions.
