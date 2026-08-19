@@ -505,3 +505,121 @@ This refactor is complete when:
 - syncer creation is shared between ordinary synchronization and rebuild workflows;
 - no privacy, checkpoint, stale-result, or connection-scoping guarantees regress; and
 - tests, race-focused tests, static analysis, and supported release builds pass.
+
+---
+
+## Implementation to-do list for the next agent
+
+### Working rules
+
+- [ ] Read this plan in full before changing code, then inspect the current working tree and relevant tests. Do not overwrite unrelated user changes.
+- [ ] Treat this as a behavior-preserving refactor. Do not change the public UI, the local-first loading sequence, connection scoping, or the synchronization contract unless a separate, explicit requirement requires it.
+- [ ] Keep all Gio widget and rendered-state mutations on the frame goroutine. Goroutines may receive immutable input and publish only safe value results.
+- [ ] Do not add a generic job runner, generic async result type, generic repository, or generic database layer.
+- [ ] Preserve the existing package boundaries: `features/orders` stays Gio- and persistence-free; `internal/orderssync` owns remote cursor traversal and checkpoints; `internal/ordersstore` owns SQLite; `connections` owns credentials; and `faire` owns HTTP/API details.
+- [ ] Maintain idiomatic Go documentation for every new or changed exported item, unexported structural type, and non-obvious logic block. Update existing comments when behavior or ownership changes.
+
+### Stage 0 — establish the safety net
+
+- [ ] Run `go test ./...` before refactoring and record any pre-existing failure separately from refactor failures.
+- [ ] Read the current Orders tests in `application/application_test.go`, `internal/orderssync/syncer_test.go`, and `internal/ordersstore/sqlite_test.go`.
+- [ ] Identify existing tests that cover stale request rejection, local-first display, partial sync failure, active/inactive data actions, direct lookup, and detail refresh.
+- [ ] Add narrowly scoped characterization tests only where a critical behavior below is not already covered:
+  - [ ] late load results do not overwrite a newer connection or filter;
+  - [ ] late detail results do not overwrite a newer selected order;
+  - [ ] active rebuild blocks connection switching;
+  - [ ] inactive rebuild does not replace active Orders rows;
+  - [ ] direct lookup and detail refresh persist snapshots without advancing the list checkpoint; and
+  - [ ] export results do not apply after a newer export starts.
+- [ ] Run `go test ./...` again. Do not begin extraction while characterization tests are failing.
+
+### Stage 1 — introduce feature-owned Orders state without changing behavior
+
+- [ ] Create an unexported Orders UI state type in `application` (for example, `ordersViewState`) in a dedicated file such as `application/orders_view_state.go`.
+- [ ] Move only Orders-specific frame-owned values from `DesktopUI` into that type, in coherent groups:
+  - [ ] list/filter/selection state, local cursor, history-boundary state, and New-order count;
+  - [ ] Orders list/search/filter/sort Gio controls;
+  - [ ] detail state and detail Gio controls;
+  - [ ] export state, export dialogs, and export Gio controls; and
+  - [ ] local Orders data-action dialog state.
+- [ ] Keep window, theme, lifecycle context, global navigation, active connection selection, saved connection list, connection-management state, and updater state in `DesktopUI`.
+- [ ] Preserve long-lived Gio widget identity: construct the Orders state once during `newDesktopUIWithOrders` and never recreate its `widget.Editor`, `widget.Clickable`, or `widget.List` values per frame.
+- [ ] Update Orders layout methods in `application/orders_page.go` and `application/order_detail_page.go` to read and mutate Orders-owned state rather than direct `DesktopUI` fields.
+- [ ] Keep `features/orders` unchanged unless a presentation-level type genuinely belongs there; do not move Gio code into it.
+- [ ] Run `gofmt` and `go test ./...` after each coherent field/layout group, not only at the end of the stage.
+
+### Stage 2 — introduce the Orders controller and move worker ownership
+
+- [ ] Create an unexported `ordersController` in `application/orders_controller.go`.
+- [ ] Give the controller ownership of Orders-only dependencies and asynchronous coordination:
+  - [ ] the Orders store reference;
+  - [ ] Orders result channels, detail result channels, export result channels, and scheduler channel;
+  - [ ] Orders request IDs for load, detail, and export operations; and
+  - [ ] the Orders view state introduced in Stage 1.
+- [ ] Keep the controller scoped to Orders. It may receive an immutable active connection scope from `DesktopUI`, but it must not own global connection switching or unrelated shell state.
+- [ ] Move Orders result publication and draining methods out of `DesktopUI` and into the controller while preserving existing result structs and stale-result checks initially.
+- [ ] Update `application/gio_runtime.go` so the frame loop delegates Orders result draining and scheduled refresh draining to the controller.
+- [ ] Update `application/navigation.go` so the shell delegates Orders route rendering to the controller and notifies it when the active connection changes.
+- [ ] Update test constructors so unit tests can build a controller with controlled dependencies. Prefer a focused helper over widening production interfaces.
+- [ ] Verify that workers still publish only safe presentation/status values—never clients, credentials, raw snapshots, HTTP bodies, headers, or URLs.
+- [ ] Run `go test ./...` and `go test -race ./application ./internal/orderssync ./internal/ordersstore`.
+
+### Stage 3 — replace boolean-heavy load selection with named operations
+
+- [ ] Inventory every call to the current Orders loading entry point in `application/orders_actions.go`, including initial load, pagination, scheduled refresh, manual refresh/history expansion, local-only reload, active rebuild, and inactive rebuild.
+- [ ] Introduce a small Orders-specific immutable request type or explicit named controller methods. The call site must make the operation obvious; it must not pass a positional sequence of booleans.
+- [ ] Represent all required semantics explicitly:
+  - [ ] connection ID;
+  - [ ] captured Orders state/query and local cursor;
+  - [ ] append versus replace behavior;
+  - [ ] local-only, ordinary eligible sync, manual history refresh, or rebuild operation;
+  - [ ] whether a stored history boundary must be restored; and
+  - [ ] request ID for stale-result rejection.
+- [ ] Migrate each caller to the named form and keep UI status text unchanged during this stage unless a status is demonstrably incorrect.
+- [ ] Delete the old boolean-heavy entry point only after no caller remains.
+- [ ] Confirm tests still cover each named operation and add table-driven tests where they make operation selection clearer.
+
+### Stage 4 — consolidate shared synchronization setup
+
+- [ ] Extract one private Orders-controller operation that:
+  - [ ] builds a client through `connections.Manager` for an immutable connection ID;
+  - [ ] creates `orderssync.Syncer` with `orderssync.SourceFunc(client.Orders.List)`;
+  - [ ] runs ordinary sync or history expansion as selected by the named request; and
+  - [ ] returns an `orderssync.Summary` or an error for existing safe UI error mapping.
+- [ ] Route regular refresh, history expansion, active rebuild, and inactive rebuild through that operation.
+- [ ] Do not duplicate cursor traversal, overlap calculations, page projection, or checkpoint writes in `application`; retain `internal/orderssync` as the only owner of those rules.
+- [ ] Preserve the inactive rebuild behavior: it reports a connection-scoped status and must not replace the active Orders table unless that connection is active.
+- [ ] Preserve the active rebuild guard: connection switching remains blocked until the action completes.
+- [ ] Add or retain tests proving the shared path preserves safe error classification, especially bootstrap/history/incremental/cursor `400 Bad Request` messaging.
+
+### Stage 5 — optionally consolidate remote single-order persistence
+
+- [ ] Review direct lookup and detail refresh after Stages 1–4. Both currently fetch a remote order, call `orderssync.RecordFromOrder`, and upsert it.
+- [ ] Extract only a narrow fetch-and-persist helper if it makes both callers simpler without obscuring their different outputs.
+- [ ] Keep the distinct behavior explicit:
+  - [ ] direct lookup returns a list presentation result;
+  - [ ] detail refresh returns a typed detail presentation result; and
+  - [ ] neither operation advances the list synchronization checkpoint.
+- [ ] Do not extract a broad generic remote-task abstraction.
+
+### Stage 6 — cleanup, documentation, and final verification
+
+- [ ] Remove transitional `DesktopUI` fields, wrapper methods, duplicate channels, and duplicated worker setup only after all call sites use the controller.
+- [ ] Ensure `DesktopUI` now reads as an application shell: lifecycle, navigation, active connection, shell-level connection/updater behavior, and delegation to feature-owned components.
+- [ ] Update all affected structural documentation and inline reasoning comments to describe the final ownership and concurrency rules accurately.
+- [ ] Confirm this plan still accurately records the supported packing-slip behavior:
+  - [ ] explicit export opt-in;
+  - [ ] private Downloads artifacts, not SQLite data; and
+  - [ ] successful PDF retention with safe partial-failure counts.
+- [ ] Run the full validation suite:
+
+  ```sh
+  gofmt -w application/*.go
+  go test ./...
+  go vet ./...
+  go test -race ./application ./internal/orderssync ./internal/ordersstore
+  make all
+  ```
+
+- [ ] Perform the manual scenarios listed in [Validation plan](#validation-plan), including connection switching, rebuilds, history expansion, stale results, direct lookup, detail refresh, CSV export, and packing-slip partial failures.
+- [ ] Report any unrelated existing failures separately; do not remove meaningful behavior merely to make checks pass.
