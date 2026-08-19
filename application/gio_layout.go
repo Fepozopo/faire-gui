@@ -22,6 +22,7 @@ var (
 	dangerColor        = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
 	modalScrimColor    = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
 	panelBorderColor   = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
+	activityColor      = color.NRGBA{R: 235, G: 187, B: 58, A: 255}
 	primaryButtonColor = color.NRGBA{R: 48, G: 48, B: 48, A: 255}
 	primaryButtonText  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )

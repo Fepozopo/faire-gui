@@ -37,7 +37,7 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrdersStatus renders credential-safe loading, success, and error feedback above the Orders title.
-// A rebuild or delete in progress receives a bordered banner so it remains obvious after navigation from Brand Profile.
+// A local-data action retains its bordered banner, while refresh feedback replaces the existing status row so click targets remain stationary.
 func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
 	if ui.orders.view.state.Status == "" {
 		return layout.Dimensions{}
@@ -55,7 +55,36 @@ func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
 			})
 		})
 	}
-	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, bodyText(ui.theme, ui.orders.view.state.Status, mutedTextColor))
+	if ui.orders.view.state.Loading {
+		return layoutOrdersStatusRow(gtx, ui.layoutOrdersRefreshIndicator)
+	}
+	return layoutOrdersStatusRow(gtx, bodyText(ui.theme, ui.orders.view.state.Status, mutedTextColor))
+}
+
+// layoutOrdersStatusRow reserves a single-line status height while allowing longer messages to expand when necessary.
+// It gives normal status text and the refresh indicator identical dimensions so switching between them cannot move the Orders controls.
+func layoutOrdersStatusRow(gtx layout.Context, child layout.Widget) layout.Dimensions {
+	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		dimensions := child(gtx)
+		minimumHeight := gtx.Dp(unit.Dp(24))
+		if minimumHeight > gtx.Constraints.Max.Y {
+			minimumHeight = gtx.Constraints.Max.Y
+		}
+		if dimensions.Size.Y < minimumHeight {
+			dimensions.Size.Y = minimumHeight
+		}
+		return dimensions
+	})
+}
+
+// layoutOrdersRefreshIndicator renders active Orders work with the same body-text metrics as a completed status.
+// Amber sits directly behind the text to denote non-error work in progress without changing the status row's size.
+func (ui *DesktopUI) layoutOrdersRefreshIndicator(gtx layout.Context) layout.Dimensions {
+	label := "Refreshing orders"
+	if ui.orders.view.searchActive {
+		label = "Searching orders"
+	}
+	return roundedPanel(gtx, activityColor, bodyText(ui.theme, label, mutedTextColor))
 }
 
 // layoutOrdersWorkspace groups the tabs, controls, selection bar, and table in one bordered Orders surface.
