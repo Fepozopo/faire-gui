@@ -115,7 +115,7 @@ func (ui *DesktopUI) ordersConnectionText() string {
 }
 
 // handleOrdersControls processes controls before rendering so visible rows update in the same frame.
-// Refresh validates the retained-history boundary and invokes the shared synchronization path.
+// Refresh validates the retained-history boundary and invokes the shared synchronization path; opening an export dialog omits the CSV header by default.
 func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 	if ui.orders.view.searchButton.Clicked(gtx) {
 		ui.loadOrderByDisplayID()
@@ -153,7 +153,7 @@ func (ui *DesktopUI) handleOrdersControls(gtx layout.Context) {
 		ui.invalidate()
 	}
 	if ui.orders.view.exportMenuButton.Clicked(gtx) {
-		ui.orders.view.exportDialog = orderExportDialogState{open: true, includeHeader: true}
+		ui.orders.view.exportDialog = orderExportDialogState{open: true, includeHeader: false}
 		ui.invalidate()
 	}
 }
