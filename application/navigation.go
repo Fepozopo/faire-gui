@@ -50,7 +50,7 @@ func (ui *DesktopUI) layoutConnectionSwitcher(gtx layout.Context) layout.Dimensi
 		label = ui.activeConnectionLabel
 	}
 	return clickableWithPointer(gtx, &ui.activeConnectionButton, func(gtx layout.Context) layout.Dimensions {
-		return roundedPanel(gtx, color.NRGBA{R: 244, G: 244, B: 244, A: 255}, func(gtx layout.Context) layout.Dimensions {
+		return roundedPanel(gtx, selectionBarColor, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(material.Label(ui.theme, unit.Sp(12), "ACTIVE CONNECTION").Layout),
@@ -168,11 +168,11 @@ func (ui *DesktopUI) layoutSettingsSubmenuItem(gtx layout.Context, button *widge
 	})
 }
 
-// navigationHighlight returns the common light-gray surface for active or hovered sidebar navigation items.
+// navigationHighlight returns the shared darker neutral-gray selection surface for active or hovered sidebar navigation items.
 // An inactive item remains transparent so the white sidebar background continues to show through.
 func navigationHighlight(active bool) color.NRGBA {
 	if active {
-		return color.NRGBA{R: 240, G: 240, B: 240, A: 255}
+		return selectionBarColor
 	}
 	return color.NRGBA{}
 }

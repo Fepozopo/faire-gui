@@ -16,7 +16,7 @@ import (
 
 var (
 	cardBackground     = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	selectionBarColor  = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
+	selectionBarColor  = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
 	formBackground     = selectionBarColor
 	mutedTextColor     = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
 	dangerColor        = color.NRGBA{R: 176, G: 39, B: 39, A: 255}

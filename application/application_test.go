@@ -114,7 +114,7 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 func TestNavigationHighlightUsesSettingsSurface(t *testing.T) {
 	t.Parallel()
 
-	want := color.NRGBA{R: 240, G: 240, B: 240, A: 255}
+	want := color.NRGBA{R: 226, G: 231, B: 240, A: 255}
 	if got := navigationHighlight(true); got != want {
 		t.Fatalf("navigationHighlight(true) = %#v, want %#v", got, want)
 	}

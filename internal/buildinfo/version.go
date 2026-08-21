@@ -3,4 +3,4 @@ package buildinfo
 
 // Version is the semantic version of this application build.
 // Release tags and GitHub release assets must use the same version, optionally with a leading "v" in the tag.
-const Version = "0.1.3"
+const Version = "0.1.4"
