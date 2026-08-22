@@ -510,7 +510,7 @@ func (ui *DesktopUI) layoutOrdersHeader(gtx layout.Context) layout.Dimensions {
 		ui.invalidate()
 	}
 	return layout.Inset{Top: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.layoutOrderColumns(gtx, "", []string{"", "Order", "Status", "Customer", "Total payout", "Order date", "Ship date", "Commission %", "Source"}, true, ui.allVisibleOrdersSelected())
+		return ui.layoutOrderColumns(gtx, "", []string{"", "Order", "Status", "Customer", "Total payout", "Order date", "Ship date", "Commission %", "Source", "Notes"}, true, ui.allVisibleOrdersSelected())
 	})
 }
 
@@ -541,7 +541,7 @@ func (ui *DesktopUI) layoutOrdersListItem(gtx layout.Context, index int) layout.
 					return layout.Dimensions{Size: gtx.Constraints.Min}
 				}, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: unit.Dp(13), Right: unit.Dp(12), Bottom: unit.Dp(13), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return ui.layoutOrderColumns(gtx, row.ID, []string{"", row.DisplayID, row.Status, row.Customer, row.TotalPayout, row.OrderDate, row.ShipDate, row.Commission, row.Source}, false, ui.orders.view.state.IsSelected(row.ID))
+						return ui.layoutOrderColumns(gtx, row.ID, []string{"", row.DisplayID, row.Status, row.Customer, row.TotalPayout, row.OrderDate, row.ShipDate, row.Commission, row.Source, row.Notes}, false, ui.orders.view.state.IsSelected(row.ID))
 					})
 				})
 			}),
@@ -567,7 +567,7 @@ func (ui *DesktopUI) layoutOrdersFooter(gtx layout.Context) layout.Dimensions {
 // gtx supplies the current frame, orderID identifies the detail link, values are cell text, header and selected control row behavior, and the returned dimensions render the columns; a non-empty order ID makes the order-number cell a detail-navigation link that underlines on hover, and every header control receives pointer feedback.
 func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderID, values []string, header, selected bool) layout.Dimensions {
 	// Wide fixed columns preserve readable separation on the desktop-only Orders screen.
-	widths := []unit.Dp{44, 150, 140, 210, 120, 125, 125, 145, 130}
+	widths := []unit.Dp{44, 150, 140, 210, 120, 125, 125, 145, 130, 240}
 	children := make([]layout.FlexChild, 0, len(values))
 	for index, value := range values {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
