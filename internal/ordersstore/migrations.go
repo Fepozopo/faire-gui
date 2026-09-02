@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 9
+const currentSchemaVersion = 10
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -25,6 +25,7 @@ var migrations = []migration{
 	{version: 7, apply: applyMigrationSeven},
 	{version: 8, apply: applyMigrationEight},
 	{version: 9, apply: applyMigrationNine},
+	{version: 10, apply: applyMigrationTen},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -64,6 +65,19 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationTen adds the raw purchase-order-number list projection and backfills it from
+// valid cached snapshots. It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationTen(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE orders ADD COLUMN purchase_order_number TEXT NULL`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET purchase_order_number = CASE
+		WHEN json_valid(order_snapshot_json) THEN json_extract(order_snapshot_json, '$.purchase_order_number')
+		ELSE NULL
+	END`)
+	return err
 }
 
 // applyMigrationNine replaces item-derived totals with Faire's explicit total-payout projection and backfills valid cached snapshots.

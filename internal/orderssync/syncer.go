@@ -292,6 +292,7 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		TotalPayoutCurrency:    row.totalPayoutCurrency,
 		CommissionBPS:          row.commissionBPS,
 		Source:                 row.source,
+		PurchaseOrderNumber:    row.purchaseOrderNumber,
 		CreatedAtUTC:           optionalTimestamp(order.CreatedAt),
 		ExpectedShipAtUTC:      firstTimestamp(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter),
 		UpdatedAtUTC:           updatedAt,
@@ -301,7 +302,9 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 	}, nil
 }
 
-// projection contains storage-owned raw list values, including Faire's total payout, commission BPS, and the delivery business or recipient name, derived atomically from a remote Order.
+// projection contains storage-owned raw list values, including Faire's total payout,
+// commission BPS, source, purchase order number, and the delivery business or recipient name,
+// derived atomically from a remote Order.
 type projection struct {
 	displayID              string
 	state                  string
@@ -310,10 +313,12 @@ type projection struct {
 	totalPayoutCurrency    string
 	commissionBPS          *int64
 	source                 string
+	purchaseOrderNumber    string
 }
 
-// projectOrder derives raw list columns, including Faire's total payout, commission BPS, and the delivery business or recipient name, from order without exposing a raw Order outside the worker.
-// It returns the storage-owned projection.
+// projectOrder derives raw list columns, including Faire's total payout, commission BPS, source,
+// purchase order number, and the delivery business or recipient name, from order without exposing
+// a raw Order outside the worker. It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
 	if order.DisplayID != nil {
@@ -327,6 +332,10 @@ func projectOrder(order faire.Order) projection {
 	value.commissionBPS = commissionBPS(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
+	}
+	if order.PurchaseOrderNumber != nil {
+		// Retailers provide this free text, so preserve it verbatim for the Orders table.
+		value.purchaseOrderNumber = *order.PurchaseOrderNumber
 	}
 	return value
 }

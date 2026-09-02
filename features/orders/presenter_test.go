@@ -7,7 +7,8 @@ import (
 )
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
-// including the delivery business name, order notes, Faire-supplied payout, and commission percentage in their respective table columns.
+// including the delivery business name, order notes, Faire-supplied payout, commission percentage,
+// and unformatted purchase order number in their respective table columns.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
@@ -43,16 +44,17 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 
 	row := PresentRow(order)
 	want := Row{
-		ID:          id,
-		DisplayID:   displayID,
-		Status:      "In transit",
-		Customer:    businessName,
-		Notes:       "Leave at the side entrance",
-		TotalPayout: "$9.99",
-		OrderDate:   "2026-01-02",
-		ShipDate:    "2026-01-03",
-		Commission:  "15.00%",
-		Source:      source,
+		ID:                  id,
+		DisplayID:           displayID,
+		Status:              "In transit",
+		Customer:            businessName,
+		Notes:               "Leave at the side entrance",
+		TotalPayout:         "$9.99",
+		OrderDate:           "2026-01-02",
+		ShipDate:            "2026-01-03",
+		Commission:          "15.00%",
+		Source:              source,
+		PurchaseOrderNumber: "PO-SECRET",
 	}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
@@ -71,7 +73,7 @@ func TestPresentRowFallsBackToShippingRecipient(t *testing.T) {
 // TestPresentRowHandlesOptionalData verifies missing optional fields remain safe table placeholders.
 func TestPresentRowHandlesOptionalData(t *testing.T) {
 	row := PresentRow(faire.Order{})
-	want := Row{DisplayID: "—", Status: "—", Customer: "—", TotalPayout: "—", OrderDate: "—", ShipDate: "—", Commission: "—", Source: "—", Notes: "—"}
+	want := Row{DisplayID: "—", Status: "—", Customer: "—", TotalPayout: "—", OrderDate: "—", ShipDate: "—", Commission: "—", Source: "—", PurchaseOrderNumber: "—", Notes: "—"}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
 	}
