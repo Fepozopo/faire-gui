@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Fepozopo/faire-gui/connections"
@@ -48,6 +49,7 @@ type ordersController struct {
 	ctx     context.Context
 	store   ordersstore.Store
 	manager *connections.Manager
+	workers *sync.WaitGroup
 	view    ordersViewState
 
 	loadResults       chan orderLoadResult
@@ -66,12 +68,13 @@ type ordersController struct {
 }
 
 // newOrdersController constructs one feature-owned Orders component for a DesktopUI lifetime.
-// ctx defines worker cancellation, store scopes local persistence, manager constructs authenticated clients by connection ID, and invalidate requests a safe redraw after a result is queued.
-func newOrdersController(ctx context.Context, store ordersstore.Store, manager *connections.Manager, invalidate func()) *ordersController {
+// ctx defines worker cancellation, store scopes local persistence, manager constructs authenticated clients by connection ID, workers tracks owned asynchronous work for shutdown, and invalidate requests a safe redraw after a result is queued.
+func newOrdersController(ctx context.Context, store ordersstore.Store, manager *connections.Manager, workers *sync.WaitGroup, invalidate func()) *ordersController {
 	return &ordersController{
 		ctx:               ctx,
 		store:             store,
 		manager:           manager,
+		workers:           workers,
 		view:              newOrdersViewState(),
 		loadResults:       make(chan orderLoadResult, 4),
 		detailResults:     make(chan orderDetailResult, 2),
@@ -80,6 +83,16 @@ func newOrdersController(ctx context.Context, store ordersstore.Store, manager *
 		schedule:          make(chan struct{}, 1),
 		invalidate:        invalidate,
 	}
+}
+
+// startWorker runs work as controller-owned asynchronous work that DesktopUI shutdown will cancel and drain.
+// work must publish results rather than mutate controller view state, and it has no return value because it completes through controller channels.
+func (controller *ordersController) startWorker(work func()) {
+	controller.workers.Add(1)
+	go func() {
+		defer controller.workers.Done()
+		work()
+	}()
 }
 
 var (
@@ -206,7 +219,7 @@ func (controller *ordersController) startScheduler() {
 		return
 	}
 	controller.schedulerStarted = true
-	go func() {
+	controller.startWorker(func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		for {
@@ -223,7 +236,7 @@ func (controller *ordersController) startScheduler() {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // drainSchedule discards duplicate queued wake-ups and reports whether at least one scheduled refresh is due.
@@ -346,7 +359,7 @@ func (controller *ordersController) drainDetailResults(activeConnectionID string
 // startActiveDataAction deletes the active connection's local cache and optionally starts its named rebuild operation.
 // request was captured on the frame goroutine and its results remain subject to normal request-ID validation.
 func (controller *ordersController) startActiveDataAction(request ordersLoadRequest, rebuild bool) {
-	go func() {
+	controller.startWorker(func() {
 		if err := controller.store.DeleteConnectionData(controller.ctx, request.ConnectionID); err != nil {
 			controller.publishLoadResult(orderLoadResult{RequestID: request.RequestID, Status: ordersStorageErrorMessage(err)})
 			return
@@ -356,13 +369,13 @@ func (controller *ordersController) startActiveDataAction(request ordersLoadRequ
 			return
 		}
 		controller.loadAndMaybeSync(request)
-	}()
+	})
 }
 
 // startInactiveDataAction deletes one inactive connection's local cache and optionally rebuilds it in a worker.
 // It emits a safe completion event for the shell and deliberately never publishes table rows for that inactive connection.
 func (controller *ordersController) startInactiveDataAction(connectionID string, rebuild bool) {
-	go func() {
+	controller.startWorker(func() {
 		if err := controller.store.DeleteConnectionData(controller.ctx, connectionID); err != nil {
 			controller.publishDataAction(ordersDataActionEvent{ConnectionID: connectionID, Status: ordersStorageErrorMessage(err), Done: true})
 			return
@@ -381,7 +394,7 @@ func (controller *ordersController) startInactiveDataAction(connectionID string,
 			return
 		}
 		controller.publishDataAction(ordersDataActionEvent{ConnectionID: connectionID, Status: "Local order data was rebuilt for this connection.", Done: true})
-	}()
+	})
 }
 
 // syncConnection constructs the authenticated client and syncer for one immutable request, then runs its selected synchronization.

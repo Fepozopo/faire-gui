@@ -224,7 +224,9 @@ func (ui *DesktopUI) startOrdersLoad(kind ordersLoadKind) {
 	}
 	ui.orders.view.state.Loading = true
 	ui.orders.view.state.Status = "Loading locally stored orders…"
-	go ui.orders.loadAndMaybeSync(request)
+	ui.orders.startWorker(func() {
+		ui.orders.loadAndMaybeSync(request)
+	})
 }
 
 // loadAndMaybeSync performs the Orders local-first workflow outside the Gio frame loop.
@@ -335,7 +337,9 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 	requestID, connectionID := ui.orders.loadRequestID, ui.activeConnectionID
 	ui.orders.view.state.Loading = true
 	ui.orders.view.state.Status = "Searching locally stored orders…"
-	go ui.orders.lookupAndPersistOrder(requestID, connectionID, displayID, orderID)
+	ui.orders.startWorker(func() {
+		ui.orders.lookupAndPersistOrder(requestID, connectionID, displayID, orderID)
+	})
 }
 
 // drainOrderResults delegates Orders result validation and view updates to the feature controller.
@@ -375,7 +379,9 @@ func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
 	ui.orders.view.detailList.Position.First = 0
 	ui.orders.view.detailList.Position.Offset = 0
 	ui.orders.view.orderDetailStatus = "Opening locally stored order details…"
-	go loadOrderDetail(ui.ctx, store, requestID, connectionID, orderID, ui.orders.publishOrderDetailResult)
+	ui.orders.startWorker(func() {
+		loadOrderDetail(ui.ctx, store, requestID, connectionID, orderID, ui.orders.publishOrderDetailResult)
+	})
 }
 
 // refreshOrderDetail explicitly retrieves the currently open order and atomically replaces its local snapshot without advancing the feed checkpoint.
@@ -392,7 +398,9 @@ func (ui *DesktopUI) refreshOrderDetail() {
 	connectionID, orderID := ui.activeConnectionID, ui.orders.view.orderDetailID
 	ui.orders.view.orderDetailLoading = true
 	ui.orders.view.orderDetailStatus = "Refreshing order details from Faire…"
-	go ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
+	ui.orders.startWorker(func() {
+		ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
+	})
 }
 
 // loadOrderDetail reads and deserializes one private snapshot in a worker, publishing only its typed presentation model.
@@ -673,7 +681,9 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind, options orderExportO
 	requestID := ui.orders.exportRequestID
 	connectionID := ui.activeConnectionID
 	ui.orders.view.state.Status = "Exporting orders…"
-	go ui.orders.exportOrders(requestID, connectionID, kind, selectedIDs, options)
+	ui.orders.startWorker(func() {
+		ui.orders.exportOrders(requestID, connectionID, kind, selectedIDs, options)
+	})
 }
 
 // exportOrders reads the authenticated Faire brand profile, retrieves the requested full orders, and writes the selected CSV and packing-slip artifacts outside the frame loop.

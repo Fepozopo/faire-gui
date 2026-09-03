@@ -56,10 +56,10 @@ type updateInstallResult struct {
 // startUpdateCheck checks GitHub Releases without blocking Gio's event loop.
 // When userInitiated is false, errors and up-to-date results are silent so startup remains uninterrupted; explicit checks are instead reported in a modal.
 func (ui *DesktopUI) startUpdateCheck(userInitiated bool) {
-	go func() {
+	ui.startWorker(func() {
 		update, available, err := updater.NewChecker(buildinfo.Version).Check(ui.ctx)
 		ui.publishUpdateCheckResult(updateCheckResult{update: update, available: available, userInitiated: userInitiated, err: err})
-	}()
+	})
 }
 
 // startManualUpdateCheck opens progress feedback and starts an explicit asynchronous GitHub Release check.
@@ -124,10 +124,10 @@ func (ui *DesktopUI) beginUpdateInstall() {
 	ui.updateDialog.status = "Downloading and installing the update…"
 	ui.invalidate()
 	update := ui.updateDialog.update
-	go func() {
+	ui.startWorker(func() {
 		err := updater.NewInstaller().Apply(ui.ctx, update.Asset)
 		ui.publishUpdateInstallResult(updateInstallResult{err: err})
-	}()
+	})
 }
 
 // publishUpdateInstallResult sends an installation result unless shutdown has already cancelled the update request.
@@ -142,8 +142,8 @@ func (ui *DesktopUI) publishUpdateInstallResult(result updateInstallResult) {
 	}
 }
 
-// drainUpdateInstallResults closes the window after the Windows helper is ready and forces the Windows process to exit after a brief grace period, or restores the prompt after a failed installation.
-// The forced exit releases Windows' executable lock even though Gio's app.Main intentionally does not return on that platform.
+// drainUpdateInstallResults closes the window after the Windows helper is ready, or restores the prompt after a failed installation.
+// Closing produces DestroyEvent, whose completed window-loop teardown exits the old process and releases its executable lock before the helper replaces it.
 func (ui *DesktopUI) drainUpdateInstallResults() {
 	for {
 		select {
@@ -156,8 +156,6 @@ func (ui *DesktopUI) drainUpdateInstallResults() {
 			ui.updateDialog.status = "Restarting with the updated application…"
 			if ui.window != nil {
 				ui.window.Perform(system.ActionClose)
-				// Gio keeps Windows' main goroutine alive after its window closes, so explicitly end the old process and let the helper replace its locked executable.
-				exitAfterScheduledRestart()
 			}
 		default:
 			return

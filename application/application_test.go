@@ -474,12 +474,17 @@ func TestDrainStartupResultsMakesTheApplicationInteractive(t *testing.T) {
 	}
 }
 
-// TestShutdownReleasesOrdersPresentationState verifies window teardown dereferences visible Orders rows and cancels in-flight work without a session cache.
+// TestShutdownReleasesOrdersPresentationState verifies window teardown cancels and drains tracked workers before releasing visible Orders rows.
 func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ui := newDesktopUI(ctx, cancel, nil, nil, nil, "")
 	ui.orders.view.state.Rows = []orders.Row{{DisplayID: "EFGH123456"}}
 	ui.orders.view.state.Cursor = "next-page"
+	workerStopped := make(chan struct{})
+	ui.startWorker(func() {
+		<-ctx.Done()
+		close(workerStopped)
+	})
 
 	ui.shutdown()
 	ui.shutdown()
@@ -491,6 +496,11 @@ func TestShutdownReleasesOrdersPresentationState(t *testing.T) {
 	case <-ctx.Done():
 	default:
 		t.Fatal("shutdown() did not cancel the application context")
+	}
+	select {
+	case <-workerStopped:
+	default:
+		t.Fatal("shutdown() returned before a tracked worker stopped")
 	}
 }
 

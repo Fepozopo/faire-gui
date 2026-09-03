@@ -57,7 +57,9 @@ func (ui *DesktopUI) selectConnection(connectionID string) {
 
 	ui.status = "Loading selected Faire brand profile…"
 	ui.window.Invalidate()
-	go ui.loadProfile(connectionID)
+	ui.startWorker(func() {
+		ui.loadProfile(connectionID)
+	})
 }
 
 // loadProfile creates an isolated client for connectionID and loads its profile in the background.
@@ -282,7 +284,10 @@ func (ui *DesktopUI) deleteConnection() {
 		return
 	}
 	if ui.orders.store != nil {
-		go ui.deleteConnectionCache(connection.ID, connection.Label, ui.orders.store)
+		store := ui.orders.store
+		ui.startWorker(func() {
+			ui.deleteConnectionCache(connection.ID, connection.Label, store)
+		})
 	}
 	ui.managementStatus = "Deleted connection " + connection.Label + "."
 	ui.status = "Deleted " + connection.Label + "."

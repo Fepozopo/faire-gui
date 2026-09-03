@@ -23,7 +23,7 @@ func (ui *DesktopUI) startStartupPreparation() {
 	ui.startupPreparationStarted = true
 	ui.preparingStartup = true
 	ui.startUpdateCheck(false)
-	go func() {
+	ui.startWorker(func() {
 		manager, savedConnections, startupStatus := loadSavedConnections(ui.ctx)
 		store, storeErr := openOrdersStore(ui.ctx)
 		if storeErr != nil {
@@ -35,7 +35,7 @@ func (ui *DesktopUI) startStartupPreparation() {
 			store:       store,
 			status:      startupStatus,
 		})
-	}()
+	})
 }
 
 // publishStartupResult sends a completed startup result unless shutdown began before the UI could own its Orders store.

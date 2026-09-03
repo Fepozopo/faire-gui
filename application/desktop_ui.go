@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"image/color"
+	"sync"
 	"time"
 
 	"gioui.org/app"
@@ -28,10 +29,11 @@ const (
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
 // Its methods run on Gio's frame goroutine, while startup, profile, order, and update work publish only safe results through channels.
 type DesktopUI struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	window *app.Window
-	theme  *material.Theme
+	ctx     context.Context
+	cancel  context.CancelFunc
+	workers *sync.WaitGroup
+	window  *app.Window
+	theme   *material.Theme
 
 	manager                   *connections.Manager
 	connections               []connections.Connection
@@ -127,16 +129,18 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 }
 
 // newDesktopUIWithOrders constructs a DesktopUI from non-secret metadata, an optional persistent Orders store, result channels, and Gio controls.
-// The returned UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
+// ctx and cancel define the UI lifetime, while the returned UI tracks all owned workers so shutdown can cancel and drain them before storage closes. The UI opens on Orders without selecting a connection and keeps entered token text only in its masked editor until an action immediately clears it.
 func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, store ordersstore.Store, startupStatus string) *DesktopUI {
+	workers := new(sync.WaitGroup)
 	ui := &DesktopUI{
 		ctx:         ctx,
 		cancel:      cancel,
+		workers:     workers,
 		window:      window,
 		theme:       material.NewTheme(),
 		manager:     manager,
 		connections: savedConnections,
-		orders: newOrdersController(ctx, store, manager, func() {
+		orders: newOrdersController(ctx, store, manager, workers, func() {
 			if window != nil {
 				window.Invalidate()
 			}

@@ -28,7 +28,7 @@ func NewInstaller() Installer {
 }
 
 // Apply downloads asset, replaces the running executable, and schedules its restart.
-// On Darwin this call does not return after a successful replacement because it execs the new process; on Windows it returns after scheduling a helper that runs once this process exits.
+// ctx cancels the download, asset identifies the verified release file, and the returned error describes a failed download or restart preparation. On Darwin this call does not return after a successful replacement because it execs the new process; on Windows it returns after scheduling a helper that waits for this process to exit.
 func (installer Installer) Apply(ctx context.Context, asset Asset) error {
 	executablePath, err := os.Executable()
 	if err != nil {
@@ -38,7 +38,7 @@ func (installer Installer) Apply(ctx context.Context, asset Asset) error {
 	if err != nil {
 		return err
 	}
-	if err := scheduleRestart(executablePath, downloadedPath); err != nil {
+	if err := scheduleRestart(executablePath, downloadedPath, os.Getpid()); err != nil {
 		_ = os.Remove(downloadedPath)
 		return err
 	}

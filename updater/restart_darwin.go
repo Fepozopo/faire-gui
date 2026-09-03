@@ -8,8 +8,9 @@ import (
 	"syscall"
 )
 
-// scheduleRestart atomically replaces the Darwin executable and replaces this process with the updated application.
-func scheduleRestart(executablePath, downloadedPath string) error {
+// scheduleRestart atomically replaces executablePath with downloadedPath and execs the updated Darwin application.
+// executablePath is the running program, downloadedPath is its verified replacement, and parentProcessID is unused because syscall.Exec replaces this process directly. It returns an error when replacement or exec cannot proceed.
+func scheduleRestart(executablePath, downloadedPath string, _ int) error {
 	if err := os.Rename(downloadedPath, executablePath); err != nil {
 		return fmt.Errorf("replace application executable: %w", err)
 	}
