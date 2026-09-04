@@ -256,7 +256,7 @@ func cursorPageOptions(cursor string) faire.OrderListOptions {
 }
 
 // RecordFromOrder validates order, verifies its JSON round trip, and builds an atomic stored representation for connectionID at syncedAt.
-// It preserves every supported typed Order field in the private snapshot and returns the record or a validation error.
+// Its list projection stores the requested ship date for NEW orders and the expected ship date otherwise, while preserving every supported typed Order field in the private snapshot.
 // It is used by synchronization and explicit per-order refreshes; callers must upsert the result without advancing a feed checkpoint.
 func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time) (ordersstore.OrderRecord, error) {
 	if order.ID == nil || strings.TrimSpace(string(*order.ID)) == "" || order.UpdatedAt == nil {
@@ -294,7 +294,7 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		Source:                 row.source,
 		PurchaseOrderNumber:    row.purchaseOrderNumber,
 		CreatedAtUTC:           optionalTimestamp(order.CreatedAt),
-		ExpectedShipAtUTC:      firstTimestamp(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter),
+		ExpectedShipAtUTC:      tableShipDateTimestamp(order),
 		UpdatedAtUTC:           updatedAt,
 		SnapshotJSON:           string(snapshot),
 		SnapshotSchemaVersion:  ordersstore.SnapshotSchemaVersion,
@@ -401,14 +401,12 @@ func optionalTimestamp(value *string) *time.Time {
 	return &parsed
 }
 
-// firstTimestamp parses the first valid optional timestamp in priority order.
-func firstTimestamp(values ...*string) *time.Time {
-	for _, value := range values {
-		if parsed := optionalTimestamp(value); parsed != nil {
-			return parsed
-		}
+// tableShipDateTimestamp selects the stored table ship date: requested for NEW orders and expected otherwise.
+func tableShipDateTimestamp(order faire.Order) *time.Time {
+	if order.State != nil && *order.State == faire.OrderStateNew {
+		return optionalTimestamp(order.RequestedShipDate)
 	}
-	return nil
+	return optionalTimestamp(order.ExpectedShipDate)
 }
 
 // errorKind classifies errors without propagating remote bodies, snapshots, paths, or credentials.

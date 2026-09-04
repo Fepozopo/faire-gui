@@ -39,8 +39,9 @@ func PresentRows(orders []faire.Order) []Row {
 
 // PresentRow converts a Faire order into table values, including the delivery
 // business name or shipping recipient, order notes, Faire's total payout, commission percentage,
-// source, and unformatted purchase order number. Missing optional fields use an em dash so table
-// columns remain aligned without exposing Go pointer formatting or inventing data.
+// source, and unformatted purchase order number. New orders show the requested ship date; all
+// other orders show the expected ship date. Missing optional fields use an em dash so table columns
+// remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
 		ID:                  orderID(order.ID),
@@ -50,7 +51,7 @@ func PresentRow(order faire.Order) Row {
 		Notes:               optionalText(order.Notes),
 		TotalPayout:         formatTotalPayout(order.PayoutCosts),
 		OrderDate:           formatDate(order.CreatedAt),
-		ShipDate:            formatDate(firstDate(order.ExpectedShipDate, order.RequestedShipDate, order.ShipAfter)),
+		ShipDate:            formatDate(shipDateForOrder(order)),
 		Commission:          FormatCommissionPercentage(commissionBPS(order.PayoutCosts)),
 		Source:              optionalText(order.Source),
 		PurchaseOrderNumber: optionalText(order.PurchaseOrderNumber),
@@ -231,14 +232,13 @@ func formatDate(value *string) string {
 	return parsed.Format("2006-01-02")
 }
 
-// firstDate returns the first non-empty optional date in priority order.
-func firstDate(values ...*string) *string {
-	for _, value := range values {
-		if value != nil && strings.TrimSpace(*value) != "" {
-			return value
-		}
+// shipDateForOrder selects the shipping date that distinguishes future-shipping
+// requests on new orders from the expected date used after an order leaves NEW.
+func shipDateForOrder(order faire.Order) *string {
+	if order.State != nil && *order.State == faire.OrderStateNew {
+		return order.RequestedShipDate
 	}
-	return nil
+	return order.ExpectedShipDate
 }
 
 // titleFromIdentifier makes an unfamiliar uppercase underscore API enum readable.

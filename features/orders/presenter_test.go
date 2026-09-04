@@ -79,22 +79,58 @@ func TestPresentRowHandlesOptionalData(t *testing.T) {
 	}
 }
 
-// TestPresentRowUsesDateFallbackAndMissingTotalPayout verifies date fallbacks and missing API payout values remain safe.
-func TestPresentRowUsesDateFallbackAndMissingTotalPayout(t *testing.T) {
-	requestedShipDate := "2026-04-05"
+// TestPresentRowHandlesUnknownStateAndMissingTotalPayout verifies unknown API states and missing payout values remain safe.
+func TestPresentRowHandlesUnknownStateAndMissingTotalPayout(t *testing.T) {
 	unknownState := faire.OrderState("ON_HOLD")
-	row := PresentRow(faire.Order{
-		State:             &unknownState,
-		RequestedShipDate: &requestedShipDate,
-	})
+	row := PresentRow(faire.Order{State: &unknownState})
 	if row.Status != "On Hold" {
 		t.Fatalf("Status = %q, want %q", row.Status, "On Hold")
 	}
-	if row.ShipDate != requestedShipDate {
-		t.Fatalf("ShipDate = %q, want %q", row.ShipDate, requestedShipDate)
-	}
 	if row.TotalPayout != "—" {
 		t.Fatalf("TotalPayout = %q, want placeholder", row.TotalPayout)
+	}
+}
+
+// TestPresentRowSelectsShipDateByOrderState verifies requested dates identify future-shipping
+// new orders, while all other orders use only their expected shipping date.
+func TestPresentRowSelectsShipDateByOrderState(t *testing.T) {
+	requestedShipDate := "2026-04-05T00:00:00Z"
+	expectedShipDate := "2026-04-06T00:00:00Z"
+	shipAfter := "2026-04-07T00:00:00Z"
+	newState := faire.OrderStateNew
+	processingState := faire.OrderStateProcessing
+	tests := []struct {
+		name  string
+		order faire.Order
+		want  string
+	}{
+		{
+			name:  "new order uses requested ship date instead of expected date",
+			order: faire.Order{State: &newState, RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
+			want:  "2026-04-05",
+		},
+		{
+			name:  "new order without requested ship date remains empty",
+			order: faire.Order{State: &newState, ExpectedShipDate: &expectedShipDate},
+			want:  "—",
+		},
+		{
+			name:  "non-new order uses expected ship date instead of requested date",
+			order: faire.Order{State: &processingState, RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
+			want:  "2026-04-06",
+		},
+		{
+			name:  "non-new order without expected ship date remains empty",
+			order: faire.Order{State: &processingState, RequestedShipDate: &requestedShipDate, ShipAfter: &shipAfter},
+			want:  "—",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := PresentRow(test.order).ShipDate; got != test.want {
+				t.Fatalf("ShipDate = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

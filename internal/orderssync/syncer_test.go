@@ -197,6 +197,71 @@ func TestSyncRejectsRepeatedCursorWithoutCheckpointAdvance(t *testing.T) {
 	}
 }
 
+// TestRecordFromOrderSelectsTableShipDateByOrderState verifies stored list rows retain
+// requested dates only for NEW orders and expected dates for every other state.
+func TestRecordFromOrderSelectsTableShipDateByOrderState(t *testing.T) {
+	updatedAt := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	requestedAt := updatedAt.Add(24 * time.Hour)
+	expectedAt := updatedAt.Add(48 * time.Hour)
+	shipAfterAt := updatedAt.Add(72 * time.Hour)
+	requestedShipDate := requestedAt.Format(time.RFC3339Nano)
+	expectedShipDate := expectedAt.Format(time.RFC3339Nano)
+	shipAfter := shipAfterAt.Format(time.RFC3339Nano)
+	tests := []struct {
+		name  string
+		state faire.OrderState
+		order faire.Order
+		want  *time.Time
+	}{
+		{
+			name:  "new order stores requested ship date instead of expected ship date",
+			state: faire.OrderStateNew,
+			order: faire.Order{RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
+			want:  &requestedAt,
+		},
+		{
+			name:  "new order without requested ship date stores no ship date",
+			state: faire.OrderStateNew,
+			order: faire.Order{ExpectedShipDate: &expectedShipDate},
+			want:  nil,
+		},
+		{
+			name:  "non-new order stores expected ship date instead of requested ship date",
+			state: faire.OrderStateProcessing,
+			order: faire.Order{RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
+			want:  &expectedAt,
+		},
+		{
+			name:  "non-new order without expected ship date stores no ship date",
+			state: faire.OrderStateProcessing,
+			order: faire.Order{RequestedShipDate: &requestedShipDate, ShipAfter: &shipAfter},
+			want:  nil,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			order := syncOrder("order-1", updatedAt)
+			order.State = &test.state
+			order.RequestedShipDate = test.order.RequestedShipDate
+			order.ExpectedShipDate = test.order.ExpectedShipDate
+			order.ShipAfter = test.order.ShipAfter
+			record, err := RecordFromOrder("connection-a", order, updatedAt)
+			if err != nil {
+				t.Fatalf("RecordFromOrder() error = %v", err)
+			}
+			if test.want == nil {
+				if record.ExpectedShipAtUTC != nil {
+					t.Fatalf("ExpectedShipAtUTC = %v, want nil", record.ExpectedShipAtUTC)
+				}
+				return
+			}
+			if record.ExpectedShipAtUTC == nil || !record.ExpectedShipAtUTC.Equal(*test.want) {
+				t.Fatalf("ExpectedShipAtUTC = %v, want %v", record.ExpectedShipAtUTC, test.want)
+			}
+		})
+	}
+}
+
 // openSyncStore opens a temporary real SQLite store for sync behavior tests.
 func openSyncStore(t *testing.T) *ordersstore.SQLiteStore {
 	t.Helper()
