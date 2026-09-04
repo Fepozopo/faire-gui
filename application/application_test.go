@@ -23,6 +23,7 @@ import (
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 	"github.com/Fepozopo/faire-gui/internal/orderssync"
 	"github.com/Fepozopo/faire-gui/updater"
+	"github.com/gpdf-dev/gpdf"
 )
 
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
@@ -390,10 +391,26 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 }
 
-// TestDownloadPackingSlipsRetainsSuccessfulPDFs verifies one failed PDF does not discard CSV-adjacent packing slips that were saved successfully.
-func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
+// packingSlipTestPDF creates a valid single-page PDF for packing-slip export tests.
+// t reports fixture-generation failures, and the returned bytes can be served as a Faire packing slip.
+func packingSlipTestPDF(t *testing.T) []byte {
+	t.Helper()
+
+	document := gpdf.NewDocument()
+	document.AddPage()
+	data, err := document.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	return data
+}
+
+// TestDownloadPackingSlipsCreatesCombinedPDF verifies individually named PDFs are retained and merged in export order.
+func TestDownloadPackingSlipsCreatesCombinedPDF(t *testing.T) {
 	t.Parallel()
 
+	firstPDF := packingSlipTestPDF(t)
+	secondPDF := packingSlipTestPDF(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.RawQuery != "" {
 			t.Fatalf("query = %q, want no optional timezone", request.URL.RawQuery)
@@ -401,7 +418,61 @@ func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
 		switch request.URL.Path {
 		case "/orders/order-a/packing-slip-pdf":
 			writer.Header().Set("Content-Type", "application/pdf")
-			_, _ = writer.Write([]byte("pdf-a"))
+			_, _ = writer.Write(firstPDF)
+		case "/orders/order-b/packing-slip-pdf":
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = writer.Write(secondPDF)
+		default:
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, err := faire.NewClient(faire.Config{BaseURL: server.URL, AccessToken: "test-token"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	directory := t.TempDir()
+	summary, err := downloadPackingSlips(context.Background(), client.Orders, []faire.Order{
+		{ID: faire.Ptr(faire.OrderID("order-a")), DisplayID: faire.Ptr("DISPLAY-A")},
+		{ID: faire.Ptr(faire.OrderID("order-b")), DisplayID: faire.Ptr("DISPLAY-B")},
+	}, directory)
+	if err != nil {
+		t.Fatalf("downloadPackingSlips() error = %v", err)
+	}
+	if summary != (packingSlipSummary{downloaded: 2, combined: true}) {
+		t.Fatalf("packing-slip summary = %#v, want two successes and a combined PDF", summary)
+	}
+	for filename, want := range map[string][]byte{"DISPLAY-A.pdf": firstPDF, "DISPLAY-B.pdf": secondPDF} {
+		contents, err := os.ReadFile(filepath.Join(directory, filename))
+		if err != nil || !reflect.DeepEqual(contents, want) {
+			t.Fatalf("saved PDF %s = %d bytes, err=%v, want original PDF", filename, len(contents), err)
+		}
+	}
+	mergedPDF, err := os.ReadFile(filepath.Join(directory, combinedPackingSlipsFilename))
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", combinedPackingSlipsFilename, err)
+	}
+	mergedDocument, err := gpdf.Open(mergedPDF)
+	if err != nil {
+		t.Fatalf("Open(combined PDF) error = %v", err)
+	}
+	pageCount, err := mergedDocument.PageCount()
+	if err != nil || pageCount != 2 {
+		t.Fatalf("combined page count = %d, err=%v, want 2", pageCount, err)
+	}
+}
+
+// TestDownloadPackingSlipsRetainsSuccessfulPDFs verifies one failed download preserves successful individual and combined packing-slip PDFs.
+func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
+	t.Parallel()
+
+	firstPDF := packingSlipTestPDF(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/orders/order-a/packing-slip-pdf":
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = writer.Write(firstPDF)
 		case "/orders/order-b/packing-slip-pdf":
 			writer.WriteHeader(http.StatusInternalServerError)
 		default:
@@ -422,12 +493,24 @@ func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadPackingSlips() error = %v", err)
 	}
-	if summary != (packingSlipSummary{downloaded: 1, failures: 1}) {
-		t.Fatalf("packing-slip summary = %#v, want one success and one failure", summary)
+	if summary != (packingSlipSummary{downloaded: 1, failures: 1, combined: true}) {
+		t.Fatalf("packing-slip summary = %#v, want one success, one failure, and a combined PDF", summary)
 	}
 	contents, err := os.ReadFile(filepath.Join(directory, "DISPLAY-A.pdf"))
-	if err != nil || string(contents) != "pdf-a" {
-		t.Fatalf("saved PDF = %q, err=%v, want pdf-a", contents, err)
+	if err != nil || !reflect.DeepEqual(contents, firstPDF) {
+		t.Fatalf("saved PDF = %d bytes, err=%v, want original PDF", len(contents), err)
+	}
+	mergedPDF, err := os.ReadFile(filepath.Join(directory, combinedPackingSlipsFilename))
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", combinedPackingSlipsFilename, err)
+	}
+	mergedDocument, err := gpdf.Open(mergedPDF)
+	if err != nil {
+		t.Fatalf("Open(combined PDF) error = %v", err)
+	}
+	pageCount, err := mergedDocument.PageCount()
+	if err != nil || pageCount != 1 {
+		t.Fatalf("combined page count = %d, err=%v, want 1", pageCount, err)
 	}
 }
 

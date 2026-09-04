@@ -78,9 +78,9 @@ CSV exports are written to the current user’s Downloads directory. You can exp
 
 Packing-slip PDFs are an optional, explicit export choice:
 
-- A private Downloads folder is created for the CSV and PDFs.
+- A private Downloads folder is created for the CSV, one PO-named PDF per order, and `all-packing-slips.pdf` containing every successfully downloaded slip.
 - PDFs are user-requested files, not cached application data.
-- If one PDF fails, the CSV and any successfully downloaded PDFs are retained.
+- If one PDF fails, the CSV, any successfully downloaded PDFs, and the combined PDF containing those successful slips are retained.
 - The app reports only safe success/failure counts rather than private order or API details.
 
 ## Architecture

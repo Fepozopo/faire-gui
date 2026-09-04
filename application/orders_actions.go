@@ -19,6 +19,7 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 	"github.com/Fepozopo/faire-gui/internal/orderssync"
+	"github.com/gpdf-dev/gpdf"
 )
 
 // orderLoadResult carries one credential-safe local Orders query or synchronization result to the frame loop.
@@ -740,12 +741,15 @@ func (controller *ordersController) exportOrders(requestID uint64, connectionID 
 	})
 }
 
-// packingSlipSummary records only safe successful and failed PDF counts for a completed export.
-// downloaded counts saved PDFs and failures counts skipped or failed PDFs without retaining private order or transport details.
+// packingSlipSummary records safe artifact counts and combined-PDF status for a completed export.
+// downloaded counts individually saved PDFs, failures counts skipped or failed downloads, and combined records whether all saved PDFs were merged without retaining private order or transport details.
 type packingSlipSummary struct {
 	downloaded int
 	failures   int
+	combined   bool
 }
+
+const combinedPackingSlipsFilename = "all-packing-slips.pdf"
 
 // writeOrderExport writes a CSV directly to Downloads or, when requested, writes the CSV and packing slips into one unique folder.
 // ctx cancels packing-slip work, service retrieves PDFs, kind and saleSource name and format the CSV, source is exported orders, options choose artifacts, and it returns artifact names plus a safe PDF summary.
@@ -772,11 +776,12 @@ func writeOrderExport(ctx context.Context, service *faire.OrdersService, kind or
 	return filename, folder, summary, nil
 }
 
-// downloadPackingSlips retrieves and writes one PDF per export order, retaining successful artifacts when individual requests or writes fail.
-// ctx cancels the batch, service downloads PDFs using Faire's default timezone, source identifies orders, directory receives private files, and the returned summary excludes private error details.
+// downloadPackingSlips retrieves and writes one PDF per export order, then merges all successfully saved PDFs into all-packing-slips.pdf.
+// ctx cancels the batch, service downloads PDFs using Faire's default timezone, source identifies orders, directory receives private files, and the returned summary excludes private order and transport details.
 func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, source []faire.Order, directory string) (packingSlipSummary, error) {
 	summary := packingSlipSummary{}
 	usedNames := make(map[string]struct{}, len(source))
+	mergedSources := make([]gpdf.Source, 0, len(source))
 	for index, order := range source {
 		if err := ctx.Err(); err != nil {
 			return packingSlipSummary{}, err
@@ -795,8 +800,26 @@ func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, sou
 			summary.failures++
 			continue
 		}
+		mergedSources = append(mergedSources, gpdf.Source{Data: pdf})
 		summary.downloaded++
 	}
+	if len(mergedSources) == 0 {
+		return summary, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return packingSlipSummary{}, err
+	}
+	mergedPDF, err := gpdf.Merge(mergedSources)
+	if err != nil {
+		return summary, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return packingSlipSummary{}, err
+	}
+	if err := os.WriteFile(filepath.Join(directory, combinedPackingSlipsFilename), mergedPDF, 0o600); err != nil {
+		return summary, nil
+	}
+	summary.combined = true
 	return summary, nil
 }
 
@@ -882,13 +905,18 @@ func safeFilenameComponent(value string) string {
 }
 
 // orderExportCompletionStatus returns a safe completion message for CSV-only, complete packing-slip, and partial packing-slip exports.
-// orderCount identifies exported orders, filename and packingSlipFolder identify user-visible artifacts, summary contains only counts, and the returned message excludes private order details.
+// orderCount identifies exported orders, filename and packingSlipFolder identify user-visible artifacts, summary contains only counts and combined-file status, and the returned message excludes private order details.
 func orderExportCompletionStatus(orderCount int, filename, packingSlipFolder string, summary packingSlipSummary) string {
 	status := "Exported " + itoa(orderCount) + " orders to Downloads as " + filename + "."
 	if packingSlipFolder == "" {
 		return status
 	}
 	status += " Saved " + packingSlipCountLabel(summary.downloaded) + " in " + packingSlipFolder + "."
+	if summary.combined {
+		status += " Also created " + combinedPackingSlipsFilename + "."
+	} else if summary.downloaded > 0 {
+		status += " The combined packing-slip PDF could not be created."
+	}
 	if summary.failures > 0 {
 		status += " " + packingSlipCountLabel(summary.failures) + " could not be downloaded."
 	}

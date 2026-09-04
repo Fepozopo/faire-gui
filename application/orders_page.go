@@ -306,7 +306,7 @@ func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return ui.layoutOrderExportOption(gtx, &ui.orders.view.includePackingSlipsButton, ui.orders.view.exportDialog.includePackingSlips, "Download packing slips", "Saves one PDF per order alongside the CSV in a new Downloads folder. This may take longer.")
+				return ui.layoutOrderExportOption(gtx, &ui.orders.view.includePackingSlipsButton, ui.orders.view.exportDialog.includePackingSlips, "Download packing slips", "Saves one PDF per order and all-packing-slips.pdf alongside the CSV in a new Downloads folder. This may take longer.")
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
