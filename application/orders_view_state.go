@@ -16,6 +16,7 @@ type ordersViewState struct {
 	newCount                 int
 	searchActive             bool
 	historyBoundaryKnown     bool
+	tableFullscreen          bool
 	exporting                bool
 	orderDetailOpen          bool
 	orderDetailLoading       bool
@@ -48,6 +49,7 @@ type ordersViewState struct {
 	loadMoreButton            widget.Clickable
 	clearSearchButton         widget.Clickable
 	stateFilterButton         widget.Clickable
+	tableFullscreenButton     widget.Clickable
 	applyStatesButton         widget.Clickable
 	cancelStatesButton        widget.Clickable
 	selectAllStatesButton     widget.Clickable

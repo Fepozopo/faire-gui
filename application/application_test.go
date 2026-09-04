@@ -26,6 +26,22 @@ import (
 	"github.com/gpdf-dev/gpdf"
 )
 
+// TestToggleOrdersTableFullscreen verifies that the table-only view can be entered and exited without reconstructing the Orders controller.
+func TestToggleOrdersTableFullscreen(t *testing.T) {
+	t.Parallel()
+
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.toggleOrdersTableFullscreen()
+	if !ui.orders.view.tableFullscreen {
+		t.Fatal("table fullscreen = false after first toggle, want true")
+	}
+
+	ui.toggleOrdersTableFullscreen()
+	if ui.orders.view.tableFullscreen {
+		t.Fatal("table fullscreen = true after second toggle, want false")
+	}
+}
+
 // TestProfileSummaryUsesProfileValues verifies that profile data takes precedence over saved metadata.
 func TestProfileSummaryUsesProfileValues(t *testing.T) {
 	t.Parallel()

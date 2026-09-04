@@ -139,6 +139,55 @@ func clickableWithPointer(gtx layout.Context, button *widget.Clickable, child la
 	})
 }
 
+// tableFullscreenButton renders the compact expand or minimize control for the Orders table.
+// gtx supplies the current frame, button retains interaction state, fullscreen selects the inverse glyph, and the returned dimensions provide a stable 36dp mouse target.
+func tableFullscreenButton(gtx layout.Context, button *widget.Clickable, fullscreen bool) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(36))
+	gtx.Constraints.Min = image.Pt(size, size)
+	gtx.Constraints.Max = image.Pt(size, size)
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
+		return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(9), Right: unit.Dp(9), Bottom: unit.Dp(9), Left: unit.Dp(9)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return tableFullscreenIcon(gtx, fullscreen)
+			})
+		})
+	})
+}
+
+// tableFullscreenIcon draws four corners that point outward to expand and inward to minimize.
+// gtx provides the icon's fixed 16dp drawing area, fullscreen selects the minimize orientation, and the returned dimensions fill that area without depending on a font glyph.
+func tableFullscreenIcon(gtx layout.Context, fullscreen bool) layout.Dimensions {
+	size := gtx.Constraints.Min.X
+	stroke := max(gtx.Dp(unit.Dp(2)), 1)
+	arm := max(gtx.Dp(unit.Dp(6)), stroke)
+	paintHorizontal := func(x, y, width int) {
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x, y, x+width, y+stroke)).Op())
+	}
+	paintVertical := func(x, y, height int) {
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x, y, x+stroke, y+height)).Op())
+	}
+	if fullscreen {
+		paintHorizontal(0, arm-stroke, arm)
+		paintVertical(arm-stroke, 0, arm)
+		paintHorizontal(size-arm, arm-stroke, arm)
+		paintVertical(size-arm, 0, arm)
+		paintHorizontal(0, size-arm, arm)
+		paintVertical(arm-stroke, size-arm, arm)
+		paintHorizontal(size-arm, size-arm, arm)
+		paintVertical(size-arm, size-arm, arm)
+	} else {
+		paintHorizontal(0, 0, arm)
+		paintVertical(0, 0, arm)
+		paintHorizontal(size-arm, 0, arm)
+		paintVertical(size-stroke, 0, arm)
+		paintHorizontal(0, size-stroke, arm)
+		paintVertical(0, size-arm, arm)
+		paintHorizontal(size-arm, size-stroke, arm)
+		paintVertical(size-stroke, size-arm, arm)
+	}
+	return layout.Dimensions{Size: gtx.Constraints.Min}
+}
+
 // linkLabel renders text as a navigation link that underlines only while its persistent clickable target is hovered.
 // gtx supplies the current frame, theme controls text shaping, button owns interaction state, text is the visible label, and the returned dimensions preserve the caller's column width.
 func linkLabel(gtx layout.Context, theme *material.Theme, button *widget.Clickable, text string) layout.Dimensions {

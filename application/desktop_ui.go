@@ -205,6 +205,9 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 			return fill(gtx, color.NRGBA{R: 250, G: 250, B: 250, A: 255})
 		}),
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			if ui.selectedTab == ordersTab && ui.orders.view.tableFullscreen {
+				return ui.layoutFullscreenOrdersTable(gtx)
+			}
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(ui.layoutSidebar),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -239,6 +242,20 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 			}
 		}),
 	)
+}
+
+// layoutFullscreenOrdersTable renders the Orders table surface without sidebar, title, or page margins.
+// gtx supplies the current frame, and the returned dimensions let the existing Orders controls and scrollable rows use the entire application window.
+func (ui *DesktopUI) layoutFullscreenOrdersTable(gtx layout.Context) layout.Dimensions {
+	ui.handleOrdersControls(gtx)
+	return ui.layoutOrdersWorkspace(gtx)
+}
+
+// toggleOrdersTableFullscreen switches between the normal Orders page and the table-only window layout.
+// It has no parameters or return value because the mode belongs exclusively to the retained Orders view state.
+func (ui *DesktopUI) toggleOrdersTableFullscreen() {
+	ui.orders.view.tableFullscreen = !ui.orders.view.tableFullscreen
+	ui.invalidate()
 }
 
 // layoutStartup renders the non-interactive startup screen while connection metadata and local Orders data are prepared.

@@ -169,8 +169,8 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 		{label: "All"},
 		{label: "New", state: faire.Ptr(faire.OrderStateNew), showNewCount: true},
 		{label: "Processing", state: faire.Ptr(faire.OrderStateProcessing)},
+		{label: "Backordered", state: faire.Ptr(faire.OrderStateBackordered)},
 		{label: "Fulfilled", state: faire.Ptr(faire.OrderStateDelivered)},
-		{label: "Canceled", state: faire.Ptr(faire.OrderStateCanceled)},
 	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, func() []layout.FlexChild {
 		children := make([]layout.FlexChild, 0, len(tabs)+2)
@@ -198,10 +198,18 @@ func (ui *DesktopUI) layoutOrderTabs(gtx layout.Context) layout.Dimensions {
 				})
 			}))
 		}
-		// Keep the advanced picker visually separate so the preset tabs remain easy to scan.
+		// Keep the advanced picker adjacent to the quick state selections, while the table-mode control remains at the far right.
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 			layout.Rigid(primaryButton(ui.theme, &ui.orders.view.stateFilterButton, ui.statesButtonLabel())),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if ui.orders.view.tableFullscreenButton.Clicked(gtx) {
+					ui.toggleOrdersTableFullscreen()
+				}
+				return tableFullscreenButton(gtx, &ui.orders.view.tableFullscreenButton, ui.orders.view.tableFullscreen)
+			}),
 		)
 		return children
 	}()...)
@@ -229,9 +237,10 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders selection context and export actions on a muted toolbar.
+// layoutOrderActionBar renders selection context and export actions on a muted toolbar that spans the available table width.
 // Order details are opened directly from each row's order-number control.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
 			return fill(gtx, selectionBarColor)
