@@ -13,12 +13,12 @@ import (
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
 )
 
-// Run starts the Faire Gio desktop application.
-// It creates the window before app.Main takes control of the process main goroutine, so startup preparation and the automatic update check begin only after Gio can render progress.
+// Run starts the Faire Gio desktop application in a maximized window.
+// It creates the window before app.Main takes control of the process main goroutine, so startup preparation and the automatic update check begin only after Gio can render progress. Maximized mode fills the available work area while preserving OS chrome such as the macOS menu bar.
 func Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	window := new(app.Window)
-	window.Option(app.Title(windowTitle), app.Size(unit.Dp(windowWidth), unit.Dp(windowHeight)))
+	window.Option(app.Title(windowTitle), app.Size(unit.Dp(windowWidth), unit.Dp(windowHeight)), app.Maximized.Option())
 	ui := newDesktopUIWithOrders(ctx, cancel, window, nil, nil, nil, "Preparing local data…")
 	ui.preparingStartup = true
 
