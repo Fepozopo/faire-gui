@@ -8,7 +8,7 @@ import (
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
 // including the delivery business name, order notes, Faire-supplied payout, commission percentage,
-// and unformatted purchase order number in their respective table columns.
+// first-order flat fee, and unformatted purchase order number in their respective table columns.
 func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	id := faire.OrderID("bo_123")
 	displayID := "ANMQ69YVJB"
@@ -25,6 +25,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	currency := "usd"
 	commission := int64(250)
 	commissionBPS := int64(1500)
+	commissionFlatFee := int64(1000)
 	payout := int64(999)
 	order := faire.Order{
 		ID:               &id,
@@ -35,7 +36,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ExpectedShipDate: &expectedShipDate,
 		Source:           &source,
 		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
-		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
+		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission, CommissionFlatFee: &faire.Money{AmountMinor: &commissionFlatFee, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
 		// Both fields are present to verify the business name takes precedence over the shipping recipient in the table.
 		Address:             &faire.Address{Name: &shippingRecipientName, CompanyName: &businessName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Leave at the side entrance"),
@@ -52,12 +53,35 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		TotalPayout:         "$9.99",
 		OrderDate:           "2026-01-02",
 		ShipDate:            "2026-01-03",
-		Commission:          "15.00%",
+		Commission:          "15.00% + $10.00 | First order",
 		Source:              source,
 		PurchaseOrderNumber: "PO-SECRET",
 	}
 	if row != want {
 		t.Fatalf("PresentRow() = %#v, want %#v", row, want)
+	}
+}
+
+// TestPresentRowRetainsPercentageWhenFlatFeeMissing verifies orders without a first-order flat fee retain the percentage-only commission label.
+func TestPresentRowRetainsPercentageWhenFlatFeeMissing(t *testing.T) {
+	commissionBPS := int64(1500)
+	row := PresentRow(faire.Order{PayoutCosts: &faire.PayoutCosts{CommissionBPS: &commissionBPS}})
+	if row.Commission != "15.00%" {
+		t.Fatalf("Commission = %q, want percentage-only commission", row.Commission)
+	}
+}
+
+// TestPresentRowRetainsPercentageWhenFlatFeeIsZero verifies a zero-valued flat fee is not labelled as a first order.
+func TestPresentRowRetainsPercentageWhenFlatFeeIsZero(t *testing.T) {
+	commissionBPS := int64(1500)
+	flatFeeAmount := int64(0)
+	currency := "USD"
+	row := PresentRow(faire.Order{PayoutCosts: &faire.PayoutCosts{
+		CommissionBPS:     &commissionBPS,
+		CommissionFlatFee: &faire.Money{AmountMinor: &flatFeeAmount, Currency: &currency},
+	}})
+	if row.Commission != "15.00%" {
+		t.Fatalf("Commission = %q, want percentage-only commission", row.Commission)
 	}
 }
 

@@ -629,12 +629,12 @@ func TestLoadOrderDetailPublishesOnlyTypedPresentation(t *testing.T) {
 }
 
 // TestLocalRowsFormatRawDeliveryAndFinancialValues verifies cached table rows format raw delivery,
-// API payout, and commission values only at presentation time while retaining purchase order numbers verbatim.
+// API payout and commission values, including a first-order flat fee, only at presentation time while retaining purchase order numbers verbatim.
 func TestLocalRowsFormatRawDeliveryAndFinancialValues(t *testing.T) {
-	totalPayout, commissionBPS := int64(999), int64(1500)
+	totalPayout, commissionBPS, commissionFlatFee := int64(999), int64(1500), int64(1000)
 	purchaseOrderNumber := "  PO-123  "
-	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalPayoutAmountMinor: &totalPayout, TotalPayoutCurrency: "USD", CommissionBPS: &commissionBPS, PurchaseOrderNumber: purchaseOrderNumber}})
-	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].TotalPayout != "$9.99" || rows[0].Commission != "15.00%" || rows[0].PurchaseOrderNumber != purchaseOrderNumber {
+	rows := localRows([]ordersstore.LocalRow{{OrderID: "order-1", DisplayID: "DISPLAY-1", AddressName: "Ada's Antiques", TotalPayoutAmountMinor: &totalPayout, TotalPayoutCurrency: "USD", CommissionBPS: &commissionBPS, CommissionFlatFeeAmountMinor: &commissionFlatFee, CommissionFlatFeeCurrency: "USD", PurchaseOrderNumber: purchaseOrderNumber}})
+	if len(rows) != 1 || rows[0].Customer != "Ada's Antiques" || rows[0].TotalPayout != "$9.99" || rows[0].Commission != "15.00% + $10.00 | First order" || rows[0].PurchaseOrderNumber != purchaseOrderNumber {
 		t.Fatalf("localRows() = %#v, want formatted raw values and an unformatted purchase order number", rows)
 	}
 }

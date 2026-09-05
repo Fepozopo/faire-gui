@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 // migration is one append-only SQLite schema change.
 type migration struct {
@@ -26,6 +26,7 @@ var migrations = []migration{
 	{version: 8, apply: applyMigrationEight},
 	{version: 9, apply: applyMigrationNine},
 	{version: 10, apply: applyMigrationTen},
+	{version: 11, apply: applyMigrationEleven},
 }
 
 // runMigrations applies each missing append-only migration before Orders data is read.
@@ -65,6 +66,33 @@ func runMigrations(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// applyMigrationEleven adds the optional first-order commission flat-fee projection and backfills it
+// from valid cached snapshots. It uses ctx and tx for the atomic migration and returns the first SQLite error.
+func applyMigrationEleven(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range []string{
+		`ALTER TABLE orders ADD COLUMN commission_flat_fee_amount_minor INTEGER NULL`,
+		`ALTER TABLE orders ADD COLUMN commission_flat_fee_currency TEXT NULL`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE orders SET
+		commission_flat_fee_amount_minor = CASE
+			WHEN json_valid(order_snapshot_json)
+				AND json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.amount_minor') IS NOT NULL
+				AND NULLIF(TRIM(json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.currency')), '') IS NOT NULL
+			THEN json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.amount_minor')
+		END,
+		commission_flat_fee_currency = CASE
+			WHEN json_valid(order_snapshot_json)
+				AND json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.amount_minor') IS NOT NULL
+				AND NULLIF(TRIM(json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.currency')), '') IS NOT NULL
+			THEN TRIM(json_extract(order_snapshot_json, '$.payout_costs.commission_flat_fee.currency'))
+		END`)
+	return err
 }
 
 // applyMigrationTen adds the raw purchase-order-number list projection and backfills it from

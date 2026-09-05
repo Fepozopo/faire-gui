@@ -9,8 +9,8 @@ import (
 )
 
 // Row is the display-ready data for one Orders table row. It includes the delivery
-// business name or shipping recipient, Faire-supplied total payout, commission percentage,
-// source, purchase order number, and order notes while excluding other address details,
+// business name or shipping recipient, Faire-supplied total payout, and commission percentage
+// with an optional first-order flat fee, source, purchase order number, and order notes while excluding other address details,
 // tracking details, and raw-order fields not needed by the list.
 type Row struct {
 	ID                  faire.OrderID
@@ -39,8 +39,8 @@ func PresentRows(orders []faire.Order) []Row {
 
 // PresentRow converts a Faire order into table values, including the delivery
 // business name or shipping recipient, order notes, Faire's total payout, commission percentage,
-// source, unformatted purchase order number, and expected ship date. Missing optional fields use
-// an em dash so table columns remain aligned without exposing Go pointer formatting or inventing data.
+// and an optional first-order flat fee, source, unformatted purchase order number, and expected ship date.
+// Missing optional fields use an em dash so table columns remain aligned without exposing Go pointer formatting or inventing data.
 func PresentRow(order faire.Order) Row {
 	return Row{
 		ID:                  orderID(order.ID),
@@ -51,7 +51,7 @@ func PresentRow(order faire.Order) Row {
 		TotalPayout:         formatTotalPayout(order.PayoutCosts),
 		OrderDate:           formatDate(order.CreatedAt),
 		ShipDate:            formatDate(order.ExpectedShipDate),
-		Commission:          FormatCommissionPercentage(commissionBPS(order.PayoutCosts)),
+		Commission:          formatCommission(order.PayoutCosts),
 		Source:              optionalText(order.Source),
 		PurchaseOrderNumber: optionalText(order.PurchaseOrderNumber),
 	}
@@ -172,6 +172,24 @@ func FormatCommissionPercentage(bps *int64) string {
 	return formatPercentageFromBPS(*bps)
 }
 
+// FormatCommission formats an Orders-table commission percentage with an optional first-order flat fee.
+// It returns the percentage alone when the flat-fee amount is absent or zero, or its currency is unavailable.
+func FormatCommission(bps, flatFeeAmountMinor *int64, flatFeeCurrency string) string {
+	percentage := FormatCommissionPercentage(bps)
+	if flatFeeAmountMinor == nil || *flatFeeAmountMinor == 0 || strings.TrimSpace(flatFeeCurrency) == "" {
+		return percentage
+	}
+	return fmt.Sprintf("%s + %s | First order", percentage, FormatTotal(flatFeeAmountMinor, flatFeeCurrency))
+}
+
+// formatCommission extracts Faire's commission values and formats them for the Orders table.
+func formatCommission(costs *faire.PayoutCosts) string {
+	if costs == nil || costs.CommissionFlatFee == nil {
+		return FormatCommission(commissionBPS(costs), nil, "")
+	}
+	return FormatCommission(commissionBPS(costs), costs.CommissionFlatFee.AmountMinor, optionalTextValue(costs.CommissionFlatFee.Currency))
+}
+
 // commissionBPS returns a copy of the raw commission_bps value in costs for table presentation.
 func commissionBPS(costs *faire.PayoutCosts) *int64 {
 	if costs == nil || costs.CommissionBPS == nil {
@@ -179,6 +197,14 @@ func commissionBPS(costs *faire.PayoutCosts) *int64 {
 	}
 	value := *costs.CommissionBPS
 	return &value
+}
+
+// optionalTextValue returns an optional string's value or an empty string when it is absent.
+func optionalTextValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // formatCommissionAmount formats the explicit commission Money in costs for the order detail page.

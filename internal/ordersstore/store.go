@@ -22,47 +22,52 @@ var ErrCorruptData = errors.New("orders store: corrupt local data")
 const SnapshotSchemaVersion = 1
 
 // OrderRecord is one atomic, connection-scoped Orders snapshot and its indexed list projection.
-// Its projection includes Faire's raw total payout and commission values, source, purchase order
-// number, and the delivery business or recipient name. SnapshotJSON retains every supported typed
-// Order field, including nested fulfillment, payout, and retailer data, and must never contain
+// Its projection includes Faire's raw total payout, commission percentage, and optional first-order
+// commission flat fee, source, purchase order number, and the delivery business or recipient name.
+// SnapshotJSON retains every supported typed Order field, including nested fulfillment, payout,
+// and retailer data, and must never contain
 // credentials or HTTP metadata.
 type OrderRecord struct {
-	ConnectionID           string
-	OrderID                string
-	DisplayID              string
-	State                  string
-	AddressName            string
-	TotalPayoutAmountMinor *int64
-	TotalPayoutCurrency    string
-	CommissionBPS          *int64
-	Source                 string
-	PurchaseOrderNumber    string
-	CreatedAtUTC           *time.Time
-	ExpectedShipAtUTC      *time.Time
-	UpdatedAtUTC           time.Time
-	SnapshotJSON           string
-	SnapshotSchemaVersion  int
-	SyncedAtUTC            time.Time
+	ConnectionID                 string
+	OrderID                      string
+	DisplayID                    string
+	State                        string
+	AddressName                  string
+	TotalPayoutAmountMinor       *int64
+	TotalPayoutCurrency          string
+	CommissionBPS                *int64
+	CommissionFlatFeeAmountMinor *int64
+	CommissionFlatFeeCurrency    string
+	Source                       string
+	PurchaseOrderNumber          string
+	CreatedAtUTC                 *time.Time
+	ExpectedShipAtUTC            *time.Time
+	UpdatedAtUTC                 time.Time
+	SnapshotJSON                 string
+	SnapshotSchemaVersion        int
+	SyncedAtUTC                  time.Time
 }
 
 // LocalRow is the safe indexed projection needed to present one Orders table row.
 // It includes the delivery business or recipient name, Faire's raw total payout, raw commission
-// BPS, source, and unformatted purchase order number while excluding the complete snapshot and
-// remaining private nested fields.
+// BPS, optional first-order commission flat fee, source, and unformatted purchase order number
+// while excluding the complete snapshot and remaining private nested fields.
 type LocalRow struct {
-	OrderID                string
-	DisplayID              string
-	State                  string
-	AddressName            string
-	TotalPayoutAmountMinor *int64
-	TotalPayoutCurrency    string
-	CommissionBPS          *int64
-	Source                 string
-	PurchaseOrderNumber    string
-	CreatedAtUTC           *time.Time
-	ExpectedShipAtUTC      *time.Time
-	UpdatedAtUTC           time.Time
-	SyncedAtUTC            time.Time
+	OrderID                      string
+	DisplayID                    string
+	State                        string
+	AddressName                  string
+	TotalPayoutAmountMinor       *int64
+	TotalPayoutCurrency          string
+	CommissionBPS                *int64
+	CommissionFlatFeeAmountMinor *int64
+	CommissionFlatFeeCurrency    string
+	Source                       string
+	PurchaseOrderNumber          string
+	CreatedAtUTC                 *time.Time
+	ExpectedShipAtUTC            *time.Time
+	UpdatedAtUTC                 time.Time
+	SyncedAtUTC                  time.Time
 }
 
 // LocalSortColumn identifies an indexed date column used for local Orders ordering.

@@ -262,6 +262,23 @@ func TestRecordFromOrderSelectsTableShipDateByOrderState(t *testing.T) {
 	}
 }
 
+// TestRecordFromOrderProjectsCommissionFlatFee verifies a complete first-order fee is retained in the local list projection.
+func TestRecordFromOrderProjectsCommissionFlatFee(t *testing.T) {
+	updatedAt := time.Date(2026, 2, 3, 12, 0, 0, 0, time.UTC)
+	order := syncOrder("order-1", updatedAt)
+	flatFeeAmount := int64(1000)
+	currency := "USD"
+	order.PayoutCosts.CommissionFlatFee = &faire.Money{AmountMinor: &flatFeeAmount, Currency: &currency}
+
+	record, err := RecordFromOrder("connection-a", order, updatedAt)
+	if err != nil {
+		t.Fatalf("RecordFromOrder() error = %v", err)
+	}
+	if record.CommissionFlatFeeAmountMinor == nil || *record.CommissionFlatFeeAmountMinor != flatFeeAmount || record.CommissionFlatFeeCurrency != currency {
+		t.Fatalf("commission flat-fee projection = amount %v, currency %q; want %d, %q", record.CommissionFlatFeeAmountMinor, record.CommissionFlatFeeCurrency, flatFeeAmount, currency)
+	}
+}
+
 // openSyncStore opens a temporary real SQLite store for sync behavior tests.
 func openSyncStore(t *testing.T) *ordersstore.SQLiteStore {
 	t.Helper()

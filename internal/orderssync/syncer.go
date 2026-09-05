@@ -256,7 +256,7 @@ func cursorPageOptions(cursor string) faire.OrderListOptions {
 }
 
 // RecordFromOrder validates order, verifies its JSON round trip, and builds an atomic stored representation for connectionID at syncedAt.
-// Its list projection stores the requested ship date for NEW orders and the expected ship date otherwise, while preserving every supported typed Order field in the private snapshot.
+// Its list projection stores the requested ship date for NEW orders and the expected ship date otherwise, including any first-order commission flat fee, while preserving every supported typed Order field in the private snapshot.
 // It is used by synchronization and explicit per-order refreshes; callers must upsert the result without advancing a feed checkpoint.
 func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time) (ordersstore.OrderRecord, error) {
 	if order.ID == nil || strings.TrimSpace(string(*order.ID)) == "" || order.UpdatedAt == nil {
@@ -283,41 +283,45 @@ func RecordFromOrder(connectionID string, order faire.Order, syncedAt time.Time)
 		displayID = string(*order.ID)
 	}
 	return ordersstore.OrderRecord{
-		ConnectionID:           connectionID,
-		OrderID:                string(*order.ID),
-		DisplayID:              displayID,
-		State:                  row.state,
-		AddressName:            row.addressName,
-		TotalPayoutAmountMinor: row.totalPayoutAmountMinor,
-		TotalPayoutCurrency:    row.totalPayoutCurrency,
-		CommissionBPS:          row.commissionBPS,
-		Source:                 row.source,
-		PurchaseOrderNumber:    row.purchaseOrderNumber,
-		CreatedAtUTC:           optionalTimestamp(order.CreatedAt),
-		ExpectedShipAtUTC:      tableShipDateTimestamp(order),
-		UpdatedAtUTC:           updatedAt,
-		SnapshotJSON:           string(snapshot),
-		SnapshotSchemaVersion:  ordersstore.SnapshotSchemaVersion,
-		SyncedAtUTC:            syncedAt,
+		ConnectionID:                 connectionID,
+		OrderID:                      string(*order.ID),
+		DisplayID:                    displayID,
+		State:                        row.state,
+		AddressName:                  row.addressName,
+		TotalPayoutAmountMinor:       row.totalPayoutAmountMinor,
+		TotalPayoutCurrency:          row.totalPayoutCurrency,
+		CommissionBPS:                row.commissionBPS,
+		CommissionFlatFeeAmountMinor: row.commissionFlatFeeAmountMinor,
+		CommissionFlatFeeCurrency:    row.commissionFlatFeeCurrency,
+		Source:                       row.source,
+		PurchaseOrderNumber:          row.purchaseOrderNumber,
+		CreatedAtUTC:                 optionalTimestamp(order.CreatedAt),
+		ExpectedShipAtUTC:            tableShipDateTimestamp(order),
+		UpdatedAtUTC:                 updatedAt,
+		SnapshotJSON:                 string(snapshot),
+		SnapshotSchemaVersion:        ordersstore.SnapshotSchemaVersion,
+		SyncedAtUTC:                  syncedAt,
 	}, nil
 }
 
 // projection contains storage-owned raw list values, including Faire's total payout,
-// commission BPS, source, purchase order number, and the delivery business or recipient name,
+// commission BPS, optional first-order commission flat fee, source, purchase order number, and the delivery business or recipient name,
 // derived atomically from a remote Order.
 type projection struct {
-	displayID              string
-	state                  string
-	addressName            string
-	totalPayoutAmountMinor *int64
-	totalPayoutCurrency    string
-	commissionBPS          *int64
-	source                 string
-	purchaseOrderNumber    string
+	displayID                    string
+	state                        string
+	addressName                  string
+	totalPayoutAmountMinor       *int64
+	totalPayoutCurrency          string
+	commissionBPS                *int64
+	commissionFlatFeeAmountMinor *int64
+	commissionFlatFeeCurrency    string
+	source                       string
+	purchaseOrderNumber          string
 }
 
-// projectOrder derives raw list columns, including Faire's total payout, commission BPS, source,
-// purchase order number, and the delivery business or recipient name, from order without exposing
+// projectOrder derives raw list columns, including Faire's total payout, commission BPS, optional
+// first-order commission flat fee, source, purchase order number, and the delivery business or recipient name, from order without exposing
 // a raw Order outside the worker. It returns the storage-owned projection.
 func projectOrder(order faire.Order) projection {
 	value := projection{}
@@ -330,6 +334,7 @@ func projectOrder(order faire.Order) projection {
 	value.addressName = shippingBusinessOrRecipientName(order.Address)
 	value.totalPayoutAmountMinor, value.totalPayoutCurrency = totalPayout(order.PayoutCosts)
 	value.commissionBPS = commissionBPS(order.PayoutCosts)
+	value.commissionFlatFeeAmountMinor, value.commissionFlatFeeCurrency = commissionFlatFee(order.PayoutCosts)
 	if order.Source != nil {
 		value.source = strings.TrimSpace(*order.Source)
 	}
@@ -363,6 +368,20 @@ func totalPayout(costs *faire.PayoutCosts) (*int64, string) {
 		return nil, ""
 	}
 	amount := *costs.TotalPayout.AmountMinor
+	return &amount, currency
+}
+
+// commissionFlatFee copies Faire's first-order commission flat fee from costs for the Orders table projection.
+// It returns nil and an empty currency when the API did not provide a complete flat-fee money value.
+func commissionFlatFee(costs *faire.PayoutCosts) (*int64, string) {
+	if costs == nil || costs.CommissionFlatFee == nil || costs.CommissionFlatFee.AmountMinor == nil || costs.CommissionFlatFee.Currency == nil {
+		return nil, ""
+	}
+	currency := strings.TrimSpace(*costs.CommissionFlatFee.Currency)
+	if currency == "" {
+		return nil, ""
+	}
+	amount := *costs.CommissionFlatFee.AmountMinor
 	return &amount, currency
 }
 

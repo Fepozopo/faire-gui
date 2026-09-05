@@ -510,8 +510,8 @@ func loadLocalPage(ctx context.Context, store ordersstore.Store, connectionID st
 	return store.List(ctx, ordersstore.ListQuery{ConnectionID: connectionID, States: states, UpdatedAtMin: updatedAtMin, SortColumn: sortColumn, Descending: state.TableSort.Direction != orders.TableSortAscending, After: after, Limit: 50})
 }
 
-// localRows converts source storage projections, including Faire total payouts, commission BPS,
-// and raw purchase order numbers, to safe table presentation rows outside the frame loop.
+// localRows converts source storage projections, including Faire total payouts, commission percentages,
+// optional first-order flat fees, and raw purchase order numbers, to safe table presentation rows outside the frame loop.
 // It returns one presentation row per source record.
 func localRows(source []ordersstore.LocalRow) []orders.Row {
 	rows := make([]orders.Row, len(source))
@@ -520,7 +520,7 @@ func localRows(source []ordersstore.LocalRow) []orders.Row {
 		order := faire.Order{ID: &id, DisplayID: optionalPointer(sourceRow.DisplayID), State: optionalOrderState(sourceRow.State), Address: optionalAddress(sourceRow.AddressName), CreatedAt: formatTimestampPointer(sourceRow.CreatedAtUTC), ExpectedShipDate: formatTimestampPointer(sourceRow.ExpectedShipAtUTC), Source: optionalPointer(sourceRow.Source), PurchaseOrderNumber: optionalPointer(sourceRow.PurchaseOrderNumber)}
 		row := orders.PresentRow(order)
 		row.TotalPayout = orders.FormatTotal(sourceRow.TotalPayoutAmountMinor, sourceRow.TotalPayoutCurrency)
-		row.Commission = orders.FormatCommissionPercentage(sourceRow.CommissionBPS)
+		row.Commission = orders.FormatCommission(sourceRow.CommissionBPS, sourceRow.CommissionFlatFeeAmountMinor, sourceRow.CommissionFlatFeeCurrency)
 		rows[index] = row
 	}
 	return rows

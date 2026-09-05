@@ -34,13 +34,13 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 || page.Rows[0].PurchaseOrderNumber != "PO-123" {
+	if len(page.Rows) != 1 || page.Rows[0].OrderID != "order-1" || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 || page.Rows[0].CommissionFlatFeeAmountMinor == nil || *page.Rows[0].CommissionFlatFeeAmountMinor != 1000 || page.Rows[0].CommissionFlatFeeCurrency != "USD" || page.Rows[0].PurchaseOrderNumber != "PO-123" {
 		t.Fatalf("List() = %#v, want durable order-1 with raw delivery, API payout, commission, and purchase order values", page.Rows)
 	}
 }
 
 // TestMigrationsCarryForwardBoundaryAndListProjections verifies a v1 cache retains its date while
-// later migrations restore business names, API financial projections, and raw purchase order numbers from valid snapshots.
+// later migrations restore business names, API financial projections including first-order fees, and raw purchase order numbers from valid snapshots.
 func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "orders.sqlite3")
@@ -89,7 +89,7 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		_ = database.Close()
 		t.Fatalf("insert v1 state error = %v", err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada Lovelace","company_name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500,"total_payout":{"amount_minor":999,"currency":"USD"}},"purchase_order_number":"PO-123"}`, 1, boundary.UnixMicro()); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO orders(connection_id, order_id, display_id, updated_at_utc, order_snapshot_json, snapshot_schema_version, synced_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, "connection-a", "order-1", "DISPLAY-1", boundary.UnixMicro(), `{"id":"order-1","address":{"name":"Ada Lovelace","company_name":"Ada's Antiques"},"items":[{"quantity":2,"price":{"amount_minor":1234,"currency":"USD"}}],"payout_costs":{"commission_bps":1500,"commission_flat_fee":{"amount_minor":1000,"currency":"USD"},"total_payout":{"amount_minor":999,"currency":"USD"}},"purchase_order_number":"PO-123"}`, 1, boundary.UnixMicro()); err != nil {
 		_ = database.Close()
 		t.Fatalf("insert v1 order error = %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 		t.Fatalf("migrated state = %#v, found=%v, err=%v", state, found, err)
 	}
 	page, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", Limit: 1})
-	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 || page.Rows[0].PurchaseOrderNumber != "PO-123" {
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 || page.Rows[0].CommissionFlatFeeAmountMinor == nil || *page.Rows[0].CommissionFlatFeeAmountMinor != 1000 || page.Rows[0].CommissionFlatFeeCurrency != "USD" || page.Rows[0].PurchaseOrderNumber != "PO-123" {
 		t.Fatalf("migrated raw list projections = %#v, err=%v", page, err)
 	}
 	var legacyColumns int
@@ -297,21 +297,24 @@ func testRecord(connectionID, orderID, displayID string, updatedAt time.Time) Or
 	created := updatedAt.Add(-time.Hour)
 	totalPayout := int64(999)
 	commissionBPS := int64(1500)
+	commissionFlatFee := int64(1000)
 	return OrderRecord{
-		ConnectionID:           connectionID,
-		OrderID:                orderID,
-		DisplayID:              displayID,
-		State:                  "NEW",
-		AddressName:            "Ada's Antiques",
-		TotalPayoutAmountMinor: &totalPayout,
-		TotalPayoutCurrency:    "USD",
-		CommissionBPS:          &commissionBPS,
-		Source:                 "FAIRE",
-		PurchaseOrderNumber:    "PO-123",
-		CreatedAtUTC:           &created,
-		UpdatedAtUTC:           updatedAt,
-		SnapshotJSON:           `{"id":"order"}`,
-		SnapshotSchemaVersion:  SnapshotSchemaVersion,
-		SyncedAtUTC:            updatedAt,
+		ConnectionID:                 connectionID,
+		OrderID:                      orderID,
+		DisplayID:                    displayID,
+		State:                        "NEW",
+		AddressName:                  "Ada's Antiques",
+		TotalPayoutAmountMinor:       &totalPayout,
+		TotalPayoutCurrency:          "USD",
+		CommissionBPS:                &commissionBPS,
+		CommissionFlatFeeAmountMinor: &commissionFlatFee,
+		CommissionFlatFeeCurrency:    "USD",
+		Source:                       "FAIRE",
+		PurchaseOrderNumber:          "PO-123",
+		CreatedAtUTC:                 &created,
+		UpdatedAtUTC:                 updatedAt,
+		SnapshotJSON:                 `{"id":"order"}`,
+		SnapshotSchemaVersion:        SnapshotSchemaVersion,
+		SyncedAtUTC:                  updatedAt,
 	}
 }
