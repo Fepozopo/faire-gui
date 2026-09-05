@@ -9,18 +9,19 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item and the specified column order.
+// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item, free-shipping reason, and the specified column order.
 func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
 	order := faire.Order{
-		ID:             faire.Ptr(faire.OrderID("order-1")),
-		DisplayID:      faire.Ptr("ABCD123456"),
-		CreatedAt:      faire.Ptr("2026-01-02T03:04:05Z"),
-		ShipAfter:      faire.Ptr("2026-01-04T00:00:00Z"),
-		Address:        &faire.Address{Name: faire.Ptr("Ada Retailer"), Address1: faire.Ptr("1 Main St"), City: faire.Ptr("London")},
-		IsFreeShipping: faire.Ptr(true),
+		ID:                 faire.Ptr(faire.OrderID("order-1")),
+		DisplayID:          faire.Ptr("ABCD123456"),
+		CreatedAt:          faire.Ptr("2026-01-02T03:04:05Z"),
+		ShipAfter:          faire.Ptr("2026-01-04T00:00:00Z"),
+		Address:            &faire.Address{Name: faire.Ptr("Ada Retailer"), Address1: faire.Ptr("1 Main St"), City: faire.Ptr("London")},
+		IsFreeShipping:     faire.Ptr(true),
+		FreeShippingReason: faire.Ptr(faire.FreeShippingReasonThreshold),
 		BrandDiscounts: []faire.Discount{
 			{IncludesFreeShipping: faire.Ptr(true), DiscountPercentage: faire.Ptr(10.5)},
 			{IncludesFreeShipping: faire.Ptr(false), DiscountPercentage: faire.Ptr(5.0)},
@@ -51,13 +52,16 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	if got := rows[0][21]; got != "item_price" {
 		t.Fatalf("item price header = %q, want item_price", got)
 	}
-	if got := rows[0][len(rows[0])-1]; got != "payout_costs_total_payout" {
-		t.Fatalf("final header = %q, want payout_costs_total_payout", got)
+	if got := rows[0][len(rows[0])-2]; got != "payout_costs_total_payout" {
+		t.Fatalf("penultimate header = %q, want payout_costs_total_payout", got)
+	}
+	if got := rows[0][len(rows[0])-1]; got != "free_shipping_reason" {
+		t.Fatalf("final header = %q, want free_shipping_reason", got)
 	}
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
-	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50"}; !reflect.DeepEqual(got, want) {
+	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("first item row = %#v, want %#v", got, want)
 	}
 	if got := rows[2][21]; got != "34.00" {

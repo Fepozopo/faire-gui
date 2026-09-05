@@ -31,7 +31,7 @@ func SalesSourceForBrand(brandID faire.BrandID) (SalesSource, bool) {
 	return source, found
 }
 
-// CSVHeader defines the stable column order for every exported order CSV file.
+// CSVHeader defines the stable column order for every exported order CSV file, ending with Faire's free-shipping reason.
 var CSVHeader = []string{
 	"id", "display_id", "created_at", "ship_after",
 	"address_name", "address_address1", "address_address2", "address_postal_code",
@@ -39,7 +39,7 @@ var CSVHeader = []string{
 	"address_country", "address_country_code", "address_company_name",
 	"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 	"payout_costs_commission_bps", "payout_costs_commission",
-	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout",
+	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason",
 }
 
 // WriteCSV writes orders as a CSV with an optional CSVHeader row and saleSource in every data row.
@@ -99,6 +99,7 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 		stringValue(order.SalesRepName),
 		stringValue(order.Notes),
 		payoutTotal(order.PayoutCosts),
+		stringValue(order.FreeShippingReason),
 	}
 }
 
