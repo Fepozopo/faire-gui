@@ -39,7 +39,7 @@ var CSVHeader = []string{
 	"address_country", "address_country_code", "address_company_name",
 	"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 	"payout_costs_commission_bps", "payout_costs_commission_cents",
-	"item_sku", "item_price_cents", "item_quantity", "sale_source", "sales_rep_name", "notes",
+	"item_sku", "item_price_cents", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout",
 }
 
 // WriteCSV writes orders as a CSV with an optional CSVHeader row and saleSource in every data row.
@@ -98,6 +98,7 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 		string(saleSource),
 		stringValue(order.SalesRepName),
 		stringValue(order.Notes),
+		payoutTotal(order.PayoutCosts),
 	}
 }
 
@@ -145,6 +146,14 @@ func payoutCommissionCents(costs *faire.PayoutCosts) string {
 		return ""
 	}
 	return fmt.Sprintf("%.2f", float64(*costs.CommissionCents)/100.0)
+}
+
+// payoutTotal returns Faire's total payout minor amount as a decimal amount with two decimal places.
+func payoutTotal(costs *faire.PayoutCosts) string {
+	if costs == nil || costs.TotalPayout == nil || costs.TotalPayout.AmountMinor == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", float64(*costs.TotalPayout.AmountMinor)/100.0)
 }
 
 // itemSKU returns an item's SKU or a blank value for an order without items.

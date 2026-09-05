@@ -25,7 +25,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 			{IncludesFreeShipping: faire.Ptr(true), DiscountPercentage: faire.Ptr(10.5)},
 			{IncludesFreeShipping: faire.Ptr(false), DiscountPercentage: faire.Ptr(5.0)},
 		},
-		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), CommissionCents: faire.Ptr(int64(425))},
+		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), CommissionCents: faire.Ptr(int64(425)), TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(7650))}},
 		Source:       faire.Ptr("FAIRE_MARKETPLACE"),
 		SalesRepName: faire.Ptr("Sam"),
 		Notes:        faire.Ptr("Leave at loading bay"),
@@ -45,10 +45,13 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	if !reflect.DeepEqual(rows[0], CSVHeader) {
 		t.Fatalf("header = %#v, want %#v", rows[0], CSVHeader)
 	}
+	if got := rows[0][len(rows[0])-1]; got != "payout_costs_total_payout" {
+		t.Fatalf("final header = %q, want payout_costs_total_payout", got)
+	}
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
-	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay"}; !reflect.DeepEqual(got, want) {
+	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("first item row = %#v, want %#v", got, want)
 	}
 	if got := rows[2][21]; got != "34.00" {
@@ -130,7 +133,7 @@ func TestWriteCSVWritesBlankItemFieldsForOrdersWithoutItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
-	if len(rows) != 2 || rows[1][0] != "order-1" || rows[1][20] != "" || rows[1][21] != "" || rows[1][22] != "" {
+	if len(rows) != 2 || rows[1][0] != "order-1" || rows[1][20] != "" || rows[1][21] != "" || rows[1][22] != "" || rows[1][len(rows[1])-1] != "" {
 		t.Fatalf("rows = %#v, want an order row with blank item fields", rows)
 	}
 }
