@@ -46,7 +46,6 @@ type DetailItem struct {
 	SKU            string
 	Quantity       string
 	Price          string
-	Status         string
 	Customizations []DetailCustomization
 }
 
@@ -151,7 +150,6 @@ func presentDetailItems(items []faire.OrderItem) []DetailItem {
 			SKU:            safeDetailText(optionalText(item.SKU)),
 			Quantity:       quantity,
 			Price:          price,
-			Status:         displayItemStatus(item.State),
 			Customizations: presentDetailCustomizations(item.Customizations),
 		}
 	}
@@ -206,14 +204,6 @@ func presentDetailAddress(address *faire.Address) DetailAddress {
 		Country:     safeDetailText(optionalText(firstNonEmpty(address.Country, address.CountryCode))),
 		PhoneNumber: safeDetailText(optionalText(address.PhoneNumber)),
 	}
-}
-
-// displayItemStatus converts known and future item states into readable labels.
-func displayItemStatus(state *faire.OrderItemState) string {
-	if state == nil {
-		return "—"
-	}
-	return titleFromIdentifier(string(*state))
 }
 
 // detailFreeShippingReason formats an optional Faire free-shipping enum as a readable reason.

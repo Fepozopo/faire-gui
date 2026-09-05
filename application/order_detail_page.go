@@ -109,7 +109,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 }
 
 // layoutOrderItem renders one product or variant in a lightly tinted, bordered card.
-// Its first two rows align the item position, product, and price labels with their values, while Customizations and then Status remain below.
+// Its first two rows align the item position, product, and price labels with their values, while any Customizations remain below.
 func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, index, total int) layout.Dimensions {
 	positionLabel := "Item"
 	if total > 1 {
@@ -162,29 +162,11 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 			children = append(children, layout.Rigid(detailLine(ui, customization.Type, customization.Value)))
 		}
 	}
-	children = append(children,
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		layout.Rigid(orderItemStatusLine(ui, item.Status)),
-	)
 	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(14), Bottom: unit.Dp(14), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 		})
 	})
-}
-
-// orderItemStatusLine renders the item status directly beside its label so it is distinct
-// from wider order-detail fields while remaining available after customizations.
-func orderItemStatusLine(ui *DesktopUI, status string) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Status").Layout),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Flexed(1, bodyText(ui.theme, status, mutedTextColor)),
-			)
-		})
-	}
 }
 
 // detailOriginalOrderIDLine renders the original order ID as the same link style used by Orders table rows.
