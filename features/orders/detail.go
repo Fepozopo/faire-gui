@@ -141,8 +141,6 @@ func presentDetailItems(items []faire.OrderItem) []DetailItem {
 		price := "—"
 		if item.Price != nil && item.Price.AmountMinor != nil && item.Price.Currency != nil {
 			price = formatMoney(*item.Price.AmountMinor, *item.Price.Currency)
-		} else if item.PriceCents != nil {
-			price = formatMoney(*item.PriceCents, "USD")
 		}
 		presented[index] = DetailItem{
 			ProductName:    safeDetailText(optionalText(item.ProductName)),
@@ -173,8 +171,6 @@ func presentDetailShipments(shipments []faire.Shipment) []DetailShipment {
 		cost := "—"
 		if shipment.MakerCost != nil && shipment.MakerCost.AmountMinor != nil && shipment.MakerCost.Currency != nil {
 			cost = formatMoney(*shipment.MakerCost.AmountMinor, *shipment.MakerCost.Currency)
-		} else if shipment.MakerCostCents != nil {
-			cost = formatMoney(*shipment.MakerCostCents, "USD")
 		}
 		shippingType := "—"
 		if shipment.ShippingType != nil {

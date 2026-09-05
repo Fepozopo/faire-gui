@@ -113,24 +113,22 @@ const (
 
 // OrderItem represents a product variant included in an order.
 type OrderItem struct {
-	ID               *string         `json:"id,omitempty"`
-	CreatedAt        *string         `json:"created_at,omitempty"`
-	UpdatedAt        *string         `json:"updated_at,omitempty"`
-	OrderID          *OrderID        `json:"order_id,omitempty"`
-	ProductID        *ProductID      `json:"product_id,omitempty"`
-	VariantID        *VariantID      `json:"variant_id,omitempty"`
-	Quantity         *int64          `json:"quantity,omitempty"`
-	SKU              *string         `json:"sku,omitempty"`
-	PriceCents       *int64          `json:"price_cents,omitempty"`
-	ProductName      *string         `json:"product_name,omitempty"`
-	VariantName      *string         `json:"variant_name,omitempty"`
-	IncludesTester   *bool           `json:"includes_tester,omitempty"`
-	TesterPriceCents *int64          `json:"tester_price_cents,omitempty"`
-	Customizations   []Customization `json:"customizations,omitempty"`
-	Price            *Money          `json:"price,omitempty"`
-	TesterPrice      *Money          `json:"tester_price,omitempty"`
-	Discounts        []Discount      `json:"discounts,omitempty"`
-	State            *OrderItemState `json:"state,omitempty"`
+	ID             *string         `json:"id,omitempty"`
+	CreatedAt      *string         `json:"created_at,omitempty"`
+	UpdatedAt      *string         `json:"updated_at,omitempty"`
+	OrderID        *OrderID        `json:"order_id,omitempty"`
+	ProductID      *ProductID      `json:"product_id,omitempty"`
+	VariantID      *VariantID      `json:"variant_id,omitempty"`
+	Quantity       *int64          `json:"quantity,omitempty"`
+	SKU            *string         `json:"sku,omitempty"`
+	ProductName    *string         `json:"product_name,omitempty"`
+	VariantName    *string         `json:"variant_name,omitempty"`
+	IncludesTester *bool           `json:"includes_tester,omitempty"`
+	Customizations []Customization `json:"customizations,omitempty"`
+	Price          *Money          `json:"price,omitempty"`
+	TesterPrice    *Money          `json:"tester_price,omitempty"`
+	Discounts      []Discount      `json:"discounts,omitempty"`
+	State          *OrderItemState `json:"state,omitempty"`
 }
 
 // Customization records a retailer-provided customization for an order item.
@@ -163,7 +161,6 @@ type Discount struct {
 	ID                   *string       `json:"id,omitempty"`
 	Code                 *string       `json:"code,omitempty"`
 	DiscountType         *DiscountType `json:"discount_type,omitempty"`
-	DiscountAmountCents  *int64        `json:"discount_amount_cents,omitempty"`
 	DiscountPercentage   *float64      `json:"discount_percentage,omitempty"`
 	IncludesFreeShipping *bool         `json:"includes_free_shipping,omitempty"`
 	DiscountAmount       *Money        `json:"discount_amount,omitempty"`
@@ -185,7 +182,6 @@ type Shipment struct {
 	CreatedAt        *string       `json:"created_at,omitempty"`
 	UpdatedAt        *string       `json:"updated_at,omitempty"`
 	OrderID          *OrderID      `json:"order_id,omitempty"`
-	MakerCostCents   *int64        `json:"maker_cost_cents,omitempty"`
 	Carrier          *string       `json:"carrier,omitempty"`
 	TrackingCode     *string       `json:"tracking_code,omitempty"`
 	MakerCost        *Money        `json:"maker_cost,omitempty"`
@@ -224,10 +220,8 @@ type Address struct {
 
 // PayoutCosts contains the fees, taxes, discounts, and expected payout for an order.
 type PayoutCosts struct {
-	PayoutFeeCents              *int64    `json:"payout_fee_cents,omitempty"`
 	PayoutFeeBPS                *int64    `json:"payout_fee_bps,omitempty"`
 	PayoutFlatFee               *Money    `json:"payout_flat_fee,omitempty"`
-	CommissionCents             *int64    `json:"commission_cents,omitempty"`
 	CommissionBPS               *int64    `json:"commission_bps,omitempty"`
 	CommissionFlatFee           *Money    `json:"commission_flat_fee,omitempty"`
 	PayoutFee                   *Money    `json:"payout_fee,omitempty"`

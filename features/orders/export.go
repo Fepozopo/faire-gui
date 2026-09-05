@@ -38,8 +38,8 @@ var CSVHeader = []string{
 	"address_city", "address_state", "address_state_code", "address_phone_number",
 	"address_country", "address_country_code", "address_company_name",
 	"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
-	"payout_costs_commission_bps", "payout_costs_commission_cents",
-	"item_sku", "item_price_cents", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout",
+	"payout_costs_commission_bps", "payout_costs_commission",
+	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout",
 }
 
 // WriteCSV writes orders as a CSV with an optional CSVHeader row and saleSource in every data row.
@@ -91,7 +91,7 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 		discountFreeShippingValues(order.BrandDiscounts),
 		discountPercentageValues(order.BrandDiscounts),
 		payoutCommissionBPS(order.PayoutCosts),
-		payoutCommissionCents(order.PayoutCosts),
+		payoutCommission(order.PayoutCosts),
 		itemSKU(item),
 		itemPrice(item),
 		itemQuantity(item),
@@ -140,12 +140,12 @@ func payoutCommissionBPS(costs *faire.PayoutCosts) string {
 	return fmt.Sprintf("%.2f", float64(*costs.CommissionBPS)*0.01)
 }
 
-// payoutCommissionCents returns Faire's cent-denominated commission as a decimal amount with two decimal places.
-func payoutCommissionCents(costs *faire.PayoutCosts) string {
-	if costs == nil || costs.CommissionCents == nil {
+// payoutCommission returns Faire's Commission minor amount as a decimal amount with two decimal places.
+func payoutCommission(costs *faire.PayoutCosts) string {
+	if costs == nil || costs.Commission == nil || costs.Commission.AmountMinor == nil {
 		return ""
 	}
-	return fmt.Sprintf("%.2f", float64(*costs.CommissionCents)/100.0)
+	return fmt.Sprintf("%.2f", float64(*costs.Commission.AmountMinor)/100.0)
 }
 
 // payoutTotal returns Faire's total payout minor amount as a decimal amount with two decimal places.
@@ -164,16 +164,9 @@ func itemSKU(item *faire.OrderItem) string {
 	return stringValue(item.SKU)
 }
 
-// itemPrice returns an item's cent-denominated price as a decimal amount with two decimal places.
-// It uses Money's minor amount only when the legacy PriceCents field is unavailable.
+// itemPrice returns an item's Price minor amount as a decimal amount with two decimal places.
 func itemPrice(item *faire.OrderItem) string {
-	if item == nil {
-		return ""
-	}
-	if item.PriceCents != nil {
-		return fmt.Sprintf("%.2f", float64(*item.PriceCents)/100.0)
-	}
-	if item.Price == nil || item.Price.AmountMinor == nil {
+	if item == nil || item.Price == nil || item.Price.AmountMinor == nil {
 		return ""
 	}
 	return fmt.Sprintf("%.2f", float64(*item.Price.AmountMinor)/100.0)

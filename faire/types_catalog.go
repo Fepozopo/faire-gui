@@ -52,28 +52,26 @@ type Product struct {
 
 // ProductVariant represents a purchasable configuration of a Faire product.
 type ProductVariant struct {
-	ID                  *VariantID               `json:"id,omitempty"`
-	CreatedAt           *string                  `json:"created_at,omitempty"`
-	UpdatedAt           *string                  `json:"updated_at,omitempty"`
-	ProductID           *ProductID               `json:"product_id,omitempty"`
-	Name                *string                  `json:"name,omitempty"`
-	SaleState           *ProductSaleState        `json:"sale_state,omitempty"`
-	LifecycleState      *ProductLifecycleState   `json:"lifecycle_state,omitempty"`
-	IdempotenceToken    *string                  `json:"idempotence_token,omitempty"`
-	SKU                 *string                  `json:"sku,omitempty"`
-	AvailableQuantity   *int64                   `json:"available_quantity,omitempty"`
-	BackorderedUntil    *string                  `json:"backordered_until,omitempty"`
-	WholesalePriceCents *int64                   `json:"wholesale_price_cents,omitempty"`
-	RetailPriceCents    *int64                   `json:"retail_price_cents,omitempty"`
-	TariffCode          *string                  `json:"tariff_code,omitempty"`
-	Images              []Image                  `json:"images,omitempty"`
-	Options             []VariantOption          `json:"options,omitempty"`
-	Prices              []VariantPrice           `json:"prices,omitempty"`
-	PreorderDetails     *VariantPreorderDetails  `json:"variant_preorder_details,omitempty"`
-	Measurements        *Measurements            `json:"measurements,omitempty"`
-	GTIN                *string                  `json:"gtin,omitempty"`
-	OrderabilityType    *VariantOrderabilityType `json:"orderability_type,omitempty"`
-	CaseMeasurements    *Measurements            `json:"case_measurements,omitempty"`
+	ID                *VariantID               `json:"id,omitempty"`
+	CreatedAt         *string                  `json:"created_at,omitempty"`
+	UpdatedAt         *string                  `json:"updated_at,omitempty"`
+	ProductID         *ProductID               `json:"product_id,omitempty"`
+	Name              *string                  `json:"name,omitempty"`
+	SaleState         *ProductSaleState        `json:"sale_state,omitempty"`
+	LifecycleState    *ProductLifecycleState   `json:"lifecycle_state,omitempty"`
+	IdempotenceToken  *string                  `json:"idempotence_token,omitempty"`
+	SKU               *string                  `json:"sku,omitempty"`
+	AvailableQuantity *int64                   `json:"available_quantity,omitempty"`
+	BackorderedUntil  *string                  `json:"backordered_until,omitempty"`
+	TariffCode        *string                  `json:"tariff_code,omitempty"`
+	Images            []Image                  `json:"images,omitempty"`
+	Options           []VariantOption          `json:"options,omitempty"`
+	Prices            []VariantPrice           `json:"prices,omitempty"`
+	PreorderDetails   *VariantPreorderDetails  `json:"variant_preorder_details,omitempty"`
+	Measurements      *Measurements            `json:"measurements,omitempty"`
+	GTIN              *string                  `json:"gtin,omitempty"`
+	OrderabilityType  *VariantOrderabilityType `json:"orderability_type,omitempty"`
+	CaseMeasurements  *Measurements            `json:"case_measurements,omitempty"`
 }
 
 // Image represents a Faire-hosted product or variant image.

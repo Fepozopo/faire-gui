@@ -208,18 +208,12 @@ func optionalTextValue(value *string) string {
 }
 
 // formatCommissionAmount formats the explicit commission Money in costs for the order detail page.
-// It falls back to the legacy cents field and returns the standard missing-value placeholder when neither is present.
+// It returns the standard missing-value placeholder when the API does not provide a complete money value.
 func formatCommissionAmount(costs *faire.PayoutCosts) string {
-	if costs == nil {
+	if costs == nil || costs.Commission == nil || costs.Commission.AmountMinor == nil || costs.Commission.Currency == nil || *costs.Commission.Currency == "" {
 		return "—"
 	}
-	if costs.Commission != nil && costs.Commission.AmountMinor != nil && costs.Commission.Currency != nil && *costs.Commission.Currency != "" {
-		return formatMoney(*costs.Commission.AmountMinor, *costs.Commission.Currency)
-	}
-	if costs.CommissionCents != nil {
-		return formatMoney(*costs.CommissionCents, "USD")
-	}
-	return "—"
+	return formatMoney(*costs.Commission.AmountMinor, *costs.Commission.Currency)
 }
 
 // formatPercentageFromBPS converts value basis points to a signed percentage with two decimal places.

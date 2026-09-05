@@ -23,7 +23,6 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 	quantity := int64(2)
 	amount := int64(1234)
 	currency := "usd"
-	commission := int64(250)
 	commissionBPS := int64(1500)
 	commissionFlatFee := int64(1000)
 	payout := int64(999)
@@ -36,7 +35,7 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		ExpectedShipDate: &expectedShipDate,
 		Source:           &source,
 		Items:            []faire.OrderItem{{Quantity: &quantity, Price: &faire.Money{AmountMinor: &amount, Currency: &currency}}},
-		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionCents: &commission, CommissionFlatFee: &faire.Money{AmountMinor: &commissionFlatFee, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
+		PayoutCosts:      &faire.PayoutCosts{CommissionBPS: &commissionBPS, CommissionFlatFee: &faire.Money{AmountMinor: &commissionFlatFee, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
 		// Both fields are present to verify the business name takes precedence over the shipping recipient in the table.
 		Address:             &faire.Address{Name: &shippingRecipientName, CompanyName: &businessName, PhoneNumber: stringPointer("555-0100")},
 		Notes:               stringPointer("Leave at the side entrance"),

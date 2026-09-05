@@ -25,12 +25,12 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 			{IncludesFreeShipping: faire.Ptr(true), DiscountPercentage: faire.Ptr(10.5)},
 			{IncludesFreeShipping: faire.Ptr(false), DiscountPercentage: faire.Ptr(5.0)},
 		},
-		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), CommissionCents: faire.Ptr(int64(425)), TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(7650))}},
+		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), Commission: &faire.Money{AmountMinor: faire.Ptr(int64(425))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(7650))}},
 		Source:       faire.Ptr("FAIRE_MARKETPLACE"),
 		SalesRepName: faire.Ptr("Sam"),
 		Notes:        faire.Ptr("Leave at loading bay"),
 		Items: []faire.OrderItem{
-			{SKU: faire.Ptr("SKU-1"), PriceCents: faire.Ptr(int64(1200)), Quantity: faire.Ptr(int64(2))},
+			{SKU: faire.Ptr("SKU-1"), Price: &faire.Money{AmountMinor: faire.Ptr(int64(1200))}, Quantity: faire.Ptr(int64(2))},
 			{SKU: faire.Ptr("SKU-2"), Price: &faire.Money{AmountMinor: faire.Ptr(int64(3400))}, Quantity: faire.Ptr(int64(1))},
 		},
 	}
@@ -45,6 +45,12 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	if !reflect.DeepEqual(rows[0], CSVHeader) {
 		t.Fatalf("header = %#v, want %#v", rows[0], CSVHeader)
 	}
+	if got := rows[0][19]; got != "payout_costs_commission" {
+		t.Fatalf("commission header = %q, want payout_costs_commission", got)
+	}
+	if got := rows[0][21]; got != "item_price" {
+		t.Fatalf("item price header = %q, want item_price", got)
+	}
 	if got := rows[0][len(rows[0])-1]; got != "payout_costs_total_payout" {
 		t.Fatalf("final header = %q, want payout_costs_total_payout", got)
 	}
@@ -55,7 +61,16 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		t.Fatalf("first item row = %#v, want %#v", got, want)
 	}
 	if got := rows[2][21]; got != "34.00" {
-		t.Fatalf("second item price = %q, want formatted Money fallback", got)
+		t.Fatalf("second item price = %q, want formatted Price", got)
+	}
+}
+
+// TestItemPriceReturnsBlankWithoutPrice verifies the CSV exporter requires Faire's current Price value.
+func TestItemPriceReturnsBlankWithoutPrice(t *testing.T) {
+	t.Parallel()
+
+	if got := itemPrice(&faire.OrderItem{}); got != "" {
+		t.Fatalf("itemPrice() = %q, want blank without Price", got)
 	}
 }
 
