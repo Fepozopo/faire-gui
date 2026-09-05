@@ -10,32 +10,33 @@ import (
 )
 
 // Detail is the display-ready, read-only representation of one locally stored Order.
-// It intentionally contains approved text fields, including free-shipping eligibility and reason, and never exposes a raw API object or serialized snapshot to layout code.
+// It intentionally contains approved text fields, including free-shipping eligibility and reason, plus the typed original-order navigation ID and its formatted display label, without exposing a raw API object or serialized snapshot to layout code.
 type Detail struct {
-	OrderID             faire.OrderID
-	DisplayID           string
-	Status              string
-	OriginalOrderID     string
-	CreatedAt           string
-	ShipAfter           string
-	RequestedShipDate   string
-	ExpectedShipDate    string
-	UpdatedAt           string
-	SyncedAt            string
-	Customer            string
-	Source              string
-	PurchaseOrderNumber string
-	SalesRepName        string
-	Notes               string
-	Items               []DetailItem
-	Shipments           []DetailShipment
-	ShippingAddress     DetailAddress
-	Commission          string
-	TotalPayout         string
-	IsFreeShipping      string
-	FreeShippingReason  string
-	PendingCancellation string
-	FulfilledByFaire    string
+	OrderID                faire.OrderID
+	DisplayID              string
+	Status                 string
+	OriginalOrderID        faire.OrderID
+	OriginalOrderDisplayID string
+	CreatedAt              string
+	ShipAfter              string
+	RequestedShipDate      string
+	ExpectedShipDate       string
+	UpdatedAt              string
+	SyncedAt               string
+	Customer               string
+	Source                 string
+	PurchaseOrderNumber    string
+	SalesRepName           string
+	Notes                  string
+	Items                  []DetailItem
+	Shipments              []DetailShipment
+	ShippingAddress        DetailAddress
+	Commission             string
+	TotalPayout            string
+	IsFreeShipping         string
+	FreeShippingReason     string
+	PendingCancellation    string
+	FulfilledByFaire       string
 }
 
 // DetailItem is the display-ready subset of one ordered product or variant.
@@ -81,28 +82,29 @@ type DetailAddress struct {
 // It returns a Detail containing only approved presentation fields.
 func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 	detail := Detail{
-		OrderID:             orderID(order.ID),
-		DisplayID:           safeDetailText(optionalText(order.DisplayID)),
-		Status:              displayStatus(order.State),
-		OriginalOrderID:     detailOrderID(order.OriginalOrderID),
-		CreatedAt:           formatDate(order.CreatedAt),
-		ShipAfter:           formatDate(order.ShipAfter),
-		RequestedShipDate:   formatDate(order.RequestedShipDate),
-		ExpectedShipDate:    formatDate(order.ExpectedShipDate),
-		UpdatedAt:           formatDateTime(order.UpdatedAt),
-		SyncedAt:            formatSyncedAt(syncedAt),
-		Source:              safeDetailText(optionalText(order.Source)),
-		PurchaseOrderNumber: safeDetailText(optionalText(order.PurchaseOrderNumber)),
-		SalesRepName:        safeDetailText(optionalText(order.SalesRepName)),
-		Notes:               safeMultilineDetailText(optionalText(order.Notes)),
-		Items:               presentDetailItems(order.Items),
-		Shipments:           presentDetailShipments(order.Shipments),
-		ShippingAddress:     presentDetailAddress(order.Address),
-		Commission:          formatCommissionAmount(order.PayoutCosts),
-		IsFreeShipping:      detailBoolean(order.IsFreeShipping),
-		FreeShippingReason:  detailFreeShippingReason(order.FreeShippingReason),
-		PendingCancellation: detailBoolean(order.HasPendingRetailerCancellationRequest),
-		FulfilledByFaire:    detailBoolean(order.IsFulfilledByFaire),
+		OrderID:                orderID(order.ID),
+		DisplayID:              safeDetailText(optionalText(order.DisplayID)),
+		Status:                 displayStatus(order.State),
+		OriginalOrderID:        orderID(order.OriginalOrderID),
+		OriginalOrderDisplayID: detailOrderID(order.OriginalOrderID),
+		CreatedAt:              formatDate(order.CreatedAt),
+		ShipAfter:              formatDate(order.ShipAfter),
+		RequestedShipDate:      formatDate(order.RequestedShipDate),
+		ExpectedShipDate:       formatDate(order.ExpectedShipDate),
+		UpdatedAt:              formatDateTime(order.UpdatedAt),
+		SyncedAt:               formatSyncedAt(syncedAt),
+		Source:                 safeDetailText(optionalText(order.Source)),
+		PurchaseOrderNumber:    safeDetailText(optionalText(order.PurchaseOrderNumber)),
+		SalesRepName:           safeDetailText(optionalText(order.SalesRepName)),
+		Notes:                  safeMultilineDetailText(optionalText(order.Notes)),
+		Items:                  presentDetailItems(order.Items),
+		Shipments:              presentDetailShipments(order.Shipments),
+		ShippingAddress:        presentDetailAddress(order.Address),
+		Commission:             formatCommissionAmount(order.PayoutCosts),
+		IsFreeShipping:         detailBoolean(order.IsFreeShipping),
+		FreeShippingReason:     detailFreeShippingReason(order.FreeShippingReason),
+		PendingCancellation:    detailBoolean(order.HasPendingRetailerCancellationRequest),
+		FulfilledByFaire:       detailBoolean(order.IsFulfilledByFaire),
 	}
 	if order.Customer != nil {
 		detail.Customer = safeDetailText(displayCustomer(order.Customer))
@@ -117,8 +119,8 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 	return detail
 }
 
-// detailOrderID safely formats an optional original-order ID for presentation.
-// It returns the missing-value placeholder when value is absent or becomes empty after control-character removal.
+// detailOrderID formats an optional original-order ID for display like an Orders table ID.
+// It removes Faire's internal bo_ prefix and uppercases the remaining safe text, returning the missing-value placeholder when the ID is absent or becomes empty after control-character removal.
 func detailOrderID(value *faire.OrderID) string {
 	if value == nil {
 		return "—"
@@ -127,7 +129,8 @@ func detailOrderID(value *faire.OrderID) string {
 	if id == "" {
 		return "—"
 	}
-	return id
+	id, _ = strings.CutPrefix(id, "bo_")
+	return strings.ToUpper(id)
 }
 
 // presentDetailItems maps each stored order item without retaining the raw API item in presentation state.

@@ -5,12 +5,17 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
+	"github.com/Fepozopo/faire-gui/faire"
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
-// Its detail panel scrolls independently so the header controls remain available for long orders.
+// Its detail panel scrolls independently so the header controls remain available for long orders, and an original-order link opens that locally stored order.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
+	if originalOrderID := ui.orders.view.orderDetail.OriginalOrderID; originalOrderID != "" && ui.orderDetailControlFor(originalOrderID).Clicked(gtx) {
+		ui.openOrder(originalOrderID)
+		ui.invalidate()
+	}
 	if ui.orders.view.backToOrdersButton.Clicked(gtx) {
 		ui.orders.view.orderDetailOpen = false
 		ui.invalidate()
@@ -47,14 +52,14 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date, free-shipping reason following its eligibility, and shipments between order notes and items.
+// layoutOrderDetailContent lays out approved values from detail, with a clickable original-order ID, updated and local-sync timestamps preceding the order's creation date, free-shipping reason following its eligibility, and shipments between order notes and items.
 // It uses ui for themed controls and returns the rendered content dimensions; each order item is a separate card for scanability.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(material.H4(ui.theme, detail.DisplayID).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		layout.Rigid(detailLine(ui, "Status", detail.Status)),
-		layout.Rigid(detailLine(ui, "Original order ID", detail.OriginalOrderID)),
+		layout.Rigid(detailOriginalOrderIDLine(ui, detail.OriginalOrderID, detail.OriginalOrderDisplayID)),
 		layout.Rigid(detailLine(ui, "Updated", detail.UpdatedAt)),
 		layout.Rigid(detailLine(ui, "Local data synced", detail.SyncedAt)),
 		layout.Rigid(detailLine(ui, "Created", detail.CreatedAt)),
@@ -177,6 +182,28 @@ func orderItemStatusLine(ui *DesktopUI, status string) layout.Widget {
 				layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Status").Layout),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Flexed(1, bodyText(ui.theme, status, mutedTextColor)),
+			)
+		})
+	}
+}
+
+// detailOriginalOrderIDLine renders the original order ID as the same link style used by Orders table rows.
+// ui supplies the persistent navigation target, originalOrderID is the raw ID used to open the order, displayID is its formatted label or missing-value placeholder, and the returned widget preserves detail-field alignment.
+func detailOriginalOrderIDLine(ui *DesktopUI, originalOrderID faire.OrderID, displayID string) layout.Widget {
+	if originalOrderID == "" {
+		return detailLine(ui, "Original order ID", displayID)
+	}
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(150))
+					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(150))
+					return material.Label(ui.theme, unit.Sp(13), "Original order ID").Layout(gtx)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(originalOrderID), displayID)
+				}),
 			)
 		})
 	}
