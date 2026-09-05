@@ -788,10 +788,12 @@ func orderTabButton(gtx layout.Context, theme *material.Theme, button *widget.Cl
 }
 
 // orderTabCountBadge renders the muted pill used to display the complete locally stored New-order count.
+// The bold number makes the count distinct from the adjacent state label without changing the toolbar layout.
 func orderTabCountBadge(gtx layout.Context, theme *material.Theme, count int) layout.Dimensions {
 	return roundedPanel(gtx, selectionBarColor, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(2), Right: unit.Dp(7), Bottom: unit.Dp(2), Left: unit.Dp(7)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			style := material.Label(theme, unit.Sp(12), itoa(count))
+			style.Font.Weight = font.Bold
 			style.Color = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
 			return style.Layout(gtx)
 		})
