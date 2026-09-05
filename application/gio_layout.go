@@ -23,7 +23,7 @@ var (
 	modalScrimColor    = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
 	panelBorderColor   = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
 	activityColor      = color.NRGBA{R: 246, G: 239, B: 219, A: 255}
-	primaryButtonColor = color.NRGBA{R: 48, G: 48, B: 48, A: 255}
+	primaryButtonColor = color.NRGBA{R: 74, G: 85, B: 104, A: 255}
 	primaryButtonText  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )
 
@@ -92,7 +92,7 @@ func outlinedPanel(gtx layout.Context, background, border color.NRGBA, child lay
 	})
 }
 
-// primaryButton creates the dark filled action treatment used for the application's non-destructive controls.
+// primaryButton creates the muted slate filled action treatment used for the application's non-destructive controls.
 // The returned widget preserves the supplied clickable's interaction state and lays out its label with white text.
 func primaryButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
 	return filledButton(theme, button, label, primaryButtonColor)
