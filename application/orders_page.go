@@ -593,6 +593,9 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderI
 			if !header && index == 1 {
 				return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(orderID), value)
 			}
+			if !header && index == 2 {
+				return orderStatusBadgeCell(gtx, ui.theme, value)
+			}
 
 			if header && index == 5 {
 				return clickableWithPointer(gtx, &ui.orders.view.orderDateSortButton, func(gtx layout.Context) layout.Dimensions {
