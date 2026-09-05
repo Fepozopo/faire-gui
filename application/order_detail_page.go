@@ -47,7 +47,7 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date, free-shipping reason following its eligibility, and order notes preceding items.
+// layoutOrderDetailContent lays out approved values from detail, with updated and local-sync timestamps preceding the order's creation date, free-shipping reason following its eligibility, and shipments between order notes and items.
 // It uses ui for themed controls and returns the rendered content dimensions; each order item is a separate card for scanability.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
@@ -84,8 +84,13 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(material.H6(ui.theme, "Order notes").Layout),
 		layout.Rigid(bodyText(ui.theme, detail.Notes, mutedTextColor)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(material.H6(ui.theme, "Items").Layout),
+		layout.Rigid(material.H6(ui.theme, "Shipments").Layout),
 	}
+	for _, shipment := range detail.Shipments {
+		shipment := shipment
+		children = append(children, layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)), layout.Rigid(detailLine(ui, "Tracking", shipment.TrackingCode)), layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)))
+	}
+	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Items").Layout))
 	for index, item := range detail.Items {
 		item, itemIndex := item, index
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -94,11 +99,6 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		if itemIndex < len(detail.Items)-1 {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout))
 		}
-	}
-	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Shipments").Layout))
-	for _, shipment := range detail.Shipments {
-		shipment := shipment
-		children = append(children, layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)), layout.Rigid(detailLine(ui, "Tracking", shipment.TrackingCode)), layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
