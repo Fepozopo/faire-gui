@@ -104,7 +104,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 }
 
 // layoutOrderItem renders one product or variant in a lightly tinted, bordered card.
-// The SKU is the card heading, while the item index and total provide a position label only for multi-item orders.
+// Its first two rows align the item position, product, and price labels with their values, while Customizations and then Status remain below.
 func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, index, total int) layout.Dimensions {
 	positionLabel := "Item"
 	if total > 1 {
@@ -116,16 +116,36 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			style := material.Label(ui.theme, unit.Sp(12), positionLabel)
-			style.Color = mutedTextColor
-			return style.Layout(gtx)
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					style := material.Label(ui.theme, unit.Sp(12), positionLabel)
+					style.Color = mutedTextColor
+					return style.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Flexed(2, func(gtx layout.Context) layout.Dimensions {
+					style := material.Label(ui.theme, unit.Sp(12), "Product / variant")
+					style.Color = mutedTextColor
+					return style.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					style := material.Label(ui.theme, unit.Sp(12), "Quantity / price")
+					style.Color = mutedTextColor
+					return style.Layout(gtx)
+				}),
+			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-		layout.Rigid(material.H6(ui.theme, item.SKU).Layout),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-		layout.Rigid(detailLine(ui, "Product / variant", productLabel)),
-		layout.Rigid(detailLine(ui, "Quantity / price", item.Quantity+" · "+item.Price)),
-		layout.Rigid(detailLine(ui, "Status", item.Status)),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+				layout.Flexed(1, material.H6(ui.theme, item.SKU).Layout),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Flexed(2, bodyText(ui.theme, productLabel, mutedTextColor)),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Flexed(1, bodyText(ui.theme, item.Quantity+" · "+item.Price, mutedTextColor)),
+			)
+		}),
 	}
 	if len(item.Customizations) > 0 {
 		children = append(children,
@@ -137,11 +157,29 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 			children = append(children, layout.Rigid(detailLine(ui, customization.Type, customization.Value)))
 		}
 	}
+	children = append(children,
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(orderItemStatusLine(ui, item.Status)),
+	)
 	return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(14), Right: unit.Dp(14), Bottom: unit.Dp(14), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 		})
 	})
+}
+
+// orderItemStatusLine renders the item status directly beside its label so it is distinct
+// from wider order-detail fields while remaining available after customizations.
+func orderItemStatusLine(ui *DesktopUI, status string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Status").Layout),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Flexed(1, bodyText(ui.theme, status, mutedTextColor)),
+			)
+		})
+	}
 }
 
 // detailLine renders one compact detail label and value supplied by the typed detail model.
