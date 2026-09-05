@@ -44,13 +44,13 @@ func orderStatusBadgeCell(gtx layout.Context, theme *material.Theme, status stri
 	)
 }
 
-// orderStatusBadge draws a two-line-or-shorter status label on its semantic fill.
+// orderStatusBadge draws a compact two-line-or-shorter status label on its semantic fill.
 // Recording the text before painting lets the fill use the label's natural size,
 // rather than the full fixed width of the Status table column.
 func orderStatusBadge(gtx layout.Context, theme *material.Theme, status string) layout.Dimensions {
 	colors := orderStatusBadgeColorsFor(status)
 	macro := op.Record(gtx.Ops)
-	style := material.Body1(theme, status)
+	style := material.Body2(theme, status)
 	style.MaxLines = 2
 	style.Color = colors.text
 	dimensions := layout.Inset{Top: unit.Dp(4), Right: unit.Dp(8), Bottom: unit.Dp(4), Left: unit.Dp(8)}.Layout(gtx, style.Layout)

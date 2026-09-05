@@ -613,36 +613,39 @@ func (ui *DesktopUI) layoutOrderColumns(gtx layout.Context, orderID faire.OrderI
 				}
 				return ui.orderCheckbox(gtx, selected)
 			}
-			if !header && index == 1 {
-				return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(orderID), value)
-			}
-			if !header && index == 2 {
-				return orderStatusBadgeCell(gtx, ui.theme, value)
-			}
+			// Reserve a small gutter inside each column so adjacent values never visually run together.
+			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if !header && index == 1 {
+					return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(orderID), value)
+				}
+				if !header && index == 2 {
+					return orderStatusBadgeCell(gtx, ui.theme, value)
+				}
 
-			if header && index == 5 {
-				return clickableWithPointer(gtx, &ui.orders.view.orderDateSortButton, func(gtx layout.Context) layout.Dimensions {
-					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnOrderDate, value))
-				})
-			}
-			if header && index == 6 {
-				return clickableWithPointer(gtx, &ui.orders.view.shipDateSortButton, func(gtx layout.Context) layout.Dimensions {
-					return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnShipDate, value))
-				})
-			}
-			style := material.Body1(ui.theme, value)
-			style.MaxLines = 2
-			if header {
-				style = material.Label(ui.theme, unit.Sp(14), value)
-				style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
-			}
-			return style.Layout(gtx)
+				if header && index == 5 {
+					return clickableWithPointer(gtx, &ui.orders.view.orderDateSortButton, func(gtx layout.Context) layout.Dimensions {
+						return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnOrderDate, value))
+					})
+				}
+				if header && index == 6 {
+					return clickableWithPointer(gtx, &ui.orders.view.shipDateSortButton, func(gtx layout.Context) layout.Dimensions {
+						return ui.orderHeaderLabel(gtx, ui.sortHeaderLabel(orders.TableSortColumnShipDate, value))
+					})
+				}
+				style := material.Body2(ui.theme, value)
+				style.MaxLines = 2
+				if header {
+					style = material.Label(ui.theme, unit.Sp(14), value)
+					style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+				}
+				return style.Layout(gtx)
+			})
 		}))
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
-// orderHeaderLabel renders one interactive Orders date-header label with the shared header typography.
+// orderHeaderLabel renders one interactive Orders date-header label with the emphasized shared table-header typography.
 func (ui *DesktopUI) orderHeaderLabel(gtx layout.Context, label string) layout.Dimensions {
 	style := material.Label(ui.theme, unit.Sp(14), label)
 	style.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
