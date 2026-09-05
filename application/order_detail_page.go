@@ -10,11 +10,16 @@ import (
 )
 
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
-// Its detail panel scrolls independently so the header controls remain available for long orders, and an original-order link opens that locally stored order.
+// Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links keep their own actions.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	if originalOrderID := ui.orders.view.orderDetail.OriginalOrderID; originalOrderID != "" && ui.orderDetailControlFor(originalOrderID).Clicked(gtx) {
 		ui.openOrder(originalOrderID)
 		ui.invalidate()
+	}
+	for index, shipment := range ui.orders.view.orderDetail.Shipments {
+		if shipment.TrackingURL != "" && ui.shipmentTrackingControlFor(ui.orders.view.orderDetail.OrderID, index).Clicked(gtx) {
+			ui.openTrackingURL(shipment.TrackingURL)
+		}
 	}
 	if ui.orders.view.backToOrdersButton.Clicked(gtx) {
 		ui.orders.view.orderDetailOpen = false
@@ -91,9 +96,12 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Shipments").Layout),
 	}
-	for _, shipment := range detail.Shipments {
-		shipment := shipment
-		children = append(children, layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)), layout.Rigid(detailLine(ui, "Tracking", shipment.TrackingCode)), layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)))
+	for index, shipment := range detail.Shipments {
+		children = append(children,
+			layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)),
+			layout.Rigid(detailTrackingLine(ui, detail.OrderID, index, shipment)),
+			layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)),
+		)
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Items").Layout))
 	for index, item := range detail.Items {
@@ -185,6 +193,28 @@ func detailOriginalOrderIDLine(ui *DesktopUI, originalOrderID faire.OrderID, dis
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return linkLabel(gtx, ui.theme, ui.orderDetailControlFor(originalOrderID), displayID)
+				}),
+			)
+		})
+	}
+}
+
+// detailTrackingLine renders a shipment tracking number as a link only when the detail model resolved an official-carrier URL.
+// ui supplies persistent click state, orderID and shipmentIndex uniquely identify the link, shipment contains display-safe text and its optional allowlisted destination, and the returned widget preserves detail-field alignment.
+func detailTrackingLine(ui *DesktopUI, orderID faire.OrderID, shipmentIndex int, shipment orders.DetailShipment) layout.Widget {
+	if shipment.TrackingURL == "" {
+		return detailLine(ui, "Tracking", shipment.TrackingCode)
+	}
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(150))
+					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(150))
+					return material.Label(ui.theme, unit.Sp(13), "Tracking").Layout(gtx)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return linkLabel(gtx, ui.theme, ui.shipmentTrackingControlFor(orderID, shipmentIndex), shipment.TrackingCode)
 				}),
 			)
 		})

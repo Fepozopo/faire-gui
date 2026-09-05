@@ -725,6 +725,18 @@ func (ui *DesktopUI) orderDetailControlFor(id faire.OrderID) *widget.Clickable {
 	return control
 }
 
+// shipmentTrackingControlFor returns the persistent clickable for one tracking link in an order detail view.
+// Its state survives immediate-mode redraws, including orders with multiple shipments that have the same carrier or tracking code.
+func (ui *DesktopUI) shipmentTrackingControlFor(orderID faire.OrderID, shipmentIndex int) *widget.Clickable {
+	key := shipmentTrackingControlKey{orderID: orderID, shipmentIndex: shipmentIndex}
+	if control, found := ui.orders.view.trackingControls[key]; found {
+		return control
+	}
+	control := new(widget.Clickable)
+	ui.orders.view.trackingControls[key] = control
+	return control
+}
+
 // allVisibleOrdersSelected reports whether every selectable visible row belongs to the current selection.
 func (ui *DesktopUI) allVisibleOrdersSelected() bool {
 	if len(ui.orders.view.state.Rows) == 0 {

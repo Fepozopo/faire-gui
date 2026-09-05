@@ -128,6 +128,42 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 }
 
 // TestNavigationHighlightUsesSettingsSurface verifies selected and hovered sidebar entries share Settings' light-gray surface.
+// TestOpenTrackingURLUsesInjectedBrowserOpener verifies tracking clicks invoke the browser only for a resolved URL and report a safe failure message.
+func TestOpenTrackingURLUsesInjectedBrowserOpener(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	openedURL := ""
+	ui.openBrowserURL = func(rawURL string) error {
+		openedURL = rawURL
+		return nil
+	}
+
+	ui.openTrackingURL("https://www.ups.com/track?loc=en_US&tracknum=TRACK-1")
+	if openedURL != "https://www.ups.com/track?loc=en_US&tracknum=TRACK-1" {
+		t.Fatalf("opened URL = %q", openedURL)
+	}
+	if ui.orders.view.orderDetailStatus != "" {
+		t.Fatalf("order detail status = %q after a successful browser open, want unchanged", ui.orders.view.orderDetailStatus)
+	}
+
+	ui.openBrowserURL = func(string) error { return errors.New("browser unavailable") }
+	ui.openTrackingURL("https://www.ups.com/track?loc=en_US&tracknum=TRACK-1")
+	if ui.orders.view.orderDetailStatus != "Could not open the carrier tracking website." {
+		t.Fatalf("order detail status = %q after a failed browser open", ui.orders.view.orderDetailStatus)
+	}
+}
+
+// TestOpenBrowserURLRejectsNonHTTPSURLs verifies browser dispatch cannot be used with non-HTTPS destinations.
+func TestOpenBrowserURLRejectsNonHTTPSURLs(t *testing.T) {
+	t.Parallel()
+
+	for _, rawURL := range []string{"", "https://", "http://www.ups.com/track", "file:///tmp/tracking"} {
+		if err := openBrowserURL(rawURL); err == nil {
+			t.Fatalf("openBrowserURL(%q) succeeded, want validation error", rawURL)
+		}
+	}
+}
+
+// TestNavigationHighlightUsesSettingsSurface verifies selected and hovered sidebar entries share Settings' light-gray surface.
 func TestNavigationHighlightUsesSettingsSurface(t *testing.T) {
 	t.Parallel()
 

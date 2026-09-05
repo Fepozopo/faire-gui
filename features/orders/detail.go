@@ -1,6 +1,7 @@
 package orders
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -56,9 +57,11 @@ type DetailCustomization struct {
 }
 
 // DetailShipment is the display-ready shipping and tracking information for one order shipment.
+// TrackingURL is an allowlisted official-carrier destination and is empty when the carrier or tracking code cannot be safely resolved.
 type DetailShipment struct {
 	Carrier      string
 	TrackingCode string
+	TrackingURL  string
 	ShippingType string
 	MakerCost    string
 	Status       string
@@ -180,12 +183,43 @@ func presentDetailShipments(shipments []faire.Shipment) []DetailShipment {
 		presented[index] = DetailShipment{
 			Carrier:      safeDetailText(optionalText(shipment.Carrier)),
 			TrackingCode: safeDetailText(optionalText(shipment.TrackingCode)),
+			TrackingURL:  officialTrackingURL(optionalTextValue(shipment.Carrier), optionalTextValue(shipment.TrackingCode)),
 			ShippingType: shippingType,
 			MakerCost:    cost,
 			Status:       formatDate(shipment.UpdatedAt),
 		}
 	}
 	return presented
+}
+
+// presentDetailAddress maps the approved stored shipping-address fields with safe placeholders.
+// officialTrackingURL returns the HTTPS URL for an allowlisted carrier's official tracker.
+// It removes control characters and safely escapes the tracking code; unsupported carriers and empty values deliberately return an empty URL so the UI does not forward shipment data to a third party.
+func officialTrackingURL(carrier, trackingCode string) string {
+	trackingCode = strings.TrimSpace(strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return -1
+		}
+		return character
+	}, trackingCode))
+	if trackingCode == "" {
+		return ""
+	}
+
+	carrier = strings.Join(strings.Fields(strings.ToLower(carrier)), " ")
+	trackingCode = url.QueryEscape(trackingCode)
+	switch carrier {
+	case "ups", "united parcel service":
+		return "https://www.ups.com/track?loc=en_US&tracknum=" + trackingCode
+	case "fedex", "federal express":
+		return "https://www.fedex.com/fedextrack/?trknbr=" + trackingCode
+	case "usps", "united states postal service":
+		return "https://tools.usps.com/go/TrackConfirmAction?tLabels=" + trackingCode
+	case "dhl", "dhl express":
+		return "https://www.dhl.com/global-en/home/tracking.html?tracking-id=" + trackingCode
+	default:
+		return ""
+	}
 }
 
 // presentDetailAddress maps the approved stored shipping-address fields with safe placeholders.

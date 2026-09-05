@@ -8,6 +8,13 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
+// shipmentTrackingControlKey uniquely identifies one shipment link within an order detail view.
+// Its order ID and stable shipment position ensure each immediate-mode link retains independent click state.
+type shipmentTrackingControlKey struct {
+	orderID       faire.OrderID
+	shipmentIndex int
+}
+
 // ordersViewState owns all Orders-only frame-loop presentation state and Gio controls.
 // Its values are initialized once with the DesktopUI and may be read or mutated only on
 // Gio's frame goroutine so immediate-mode controls retain their identity between frames.
@@ -71,6 +78,7 @@ type ordersViewState struct {
 	searchButton              widget.Clickable
 	rowControls               map[faire.OrderID]*widget.Clickable
 	detailControls            map[faire.OrderID]*widget.Clickable
+	trackingControls          map[shipmentTrackingControlKey]*widget.Clickable
 	stateControls             map[faire.OrderState]*widget.Clickable
 }
 
@@ -78,10 +86,11 @@ type ordersViewState struct {
 // It returns a fully initialized view state whose lists and editors are safe to retain across Gio frames.
 func newOrdersViewState() ordersViewState {
 	view := ordersViewState{
-		pendingStates:  make(map[faire.OrderState]struct{}),
-		rowControls:    make(map[faire.OrderID]*widget.Clickable),
-		detailControls: make(map[faire.OrderID]*widget.Clickable),
-		stateControls:  make(map[faire.OrderState]*widget.Clickable),
+		pendingStates:    make(map[faire.OrderState]struct{}),
+		rowControls:      make(map[faire.OrderID]*widget.Clickable),
+		detailControls:   make(map[faire.OrderID]*widget.Clickable),
+		trackingControls: make(map[shipmentTrackingControlKey]*widget.Clickable),
+		stateControls:    make(map[faire.OrderState]*widget.Clickable),
 	}
 	view.list.Axis = layout.Vertical
 	view.detailList.Axis = layout.Vertical

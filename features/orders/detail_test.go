@@ -50,6 +50,35 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 }
 
 // TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safe placeholders, including a non-navigable original-order ID.
+// TestOfficialTrackingURLUsesOnlyAllowlistedCarrierTrackers verifies known carrier aliases generate escaped official URLs and all other inputs remain non-navigable.
+func TestOfficialTrackingURLUsesOnlyAllowlistedCarrierTrackers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		carrier  string
+		tracking string
+		want     string
+	}{
+		{name: "UPS", carrier: "United Parcel Service", tracking: "1Z 123/456", want: "https://www.ups.com/track?loc=en_US&tracknum=1Z+123%2F456"},
+		{name: "FedEx", carrier: "fedex", tracking: "TRACK-1", want: "https://www.fedex.com/fedextrack/?trknbr=TRACK-1"},
+		{name: "USPS", carrier: "USPS", tracking: "9400 1000", want: "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400+1000"},
+		{name: "DHL", carrier: "DHL Express", tracking: "JD01", want: "https://www.dhl.com/global-en/home/tracking.html?tracking-id=JD01"},
+		{name: "unknown carrier", carrier: "Example Logistics", tracking: "TRACK-1", want: ""},
+		{name: "empty tracking", carrier: "UPS", tracking: " \t", want: ""},
+		{name: "control characters removed", carrier: "UPS", tracking: "TRACK\x00-1", want: "https://www.ups.com/track?loc=en_US&tracknum=TRACK-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := officialTrackingURL(test.carrier, test.tracking); got != test.want {
+				t.Fatalf("officialTrackingURL(%q, %q) = %q, want %q", test.carrier, test.tracking, got, test.want)
+			}
+		})
+	}
+}
+
+// TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safe placeholders, including a non-navigable original-order ID.
 func TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates(t *testing.T) {
 	unknown := faire.OrderState("ON_HOLD")
 	detail := PresentDetail(faire.Order{State: &unknown}, time.Time{})

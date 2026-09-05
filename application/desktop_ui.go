@@ -29,11 +29,12 @@ const (
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
 // Its methods run on Gio's frame goroutine, while startup, profile, order, and update work publish only safe results through channels.
 type DesktopUI struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	workers *sync.WaitGroup
-	window  *app.Window
-	theme   *material.Theme
+	ctx            context.Context
+	cancel         context.CancelFunc
+	workers        *sync.WaitGroup
+	window         *app.Window
+	theme          *material.Theme
+	openBrowserURL func(string) error
 
 	manager                   *connections.Manager
 	connections               []connections.Connection
@@ -133,13 +134,14 @@ func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Wi
 func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, store ordersstore.Store, startupStatus string) *DesktopUI {
 	workers := new(sync.WaitGroup)
 	ui := &DesktopUI{
-		ctx:         ctx,
-		cancel:      cancel,
-		workers:     workers,
-		window:      window,
-		theme:       material.NewTheme(),
-		manager:     manager,
-		connections: sortedConnectionsByLabel(savedConnections),
+		ctx:            ctx,
+		cancel:         cancel,
+		workers:        workers,
+		window:         window,
+		theme:          material.NewTheme(),
+		openBrowserURL: openBrowserURL,
+		manager:        manager,
+		connections:    sortedConnectionsByLabel(savedConnections),
 		orders: newOrdersController(ctx, store, manager, workers, func() {
 			if window != nil {
 				window.Invalidate()
