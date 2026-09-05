@@ -42,7 +42,7 @@ func TestOrderStatusBadgeColorsFor(t *testing.T) {
 		},
 		{
 			status: "Pending retailer confirmation",
-			want:   orderStatusBadgeColors{background: color.NRGBA{R: 247, G: 240, B: 216, A: 255}, text: color.NRGBA{R: 60, G: 60, B: 60, A: 255}},
+			want:   orderStatusBadgeColors{background: color.NRGBA{R: 230, G: 230, B: 230, A: 255}, text: color.NRGBA{R: 60, G: 60, B: 60, A: 255}},
 		},
 		{
 			status: "On Hold",

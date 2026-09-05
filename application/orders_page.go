@@ -3,9 +3,12 @@ package application
 import (
 	"image"
 	"image/color"
+	"strings"
 	"time"
 
+	"gioui.org/font"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -35,12 +38,9 @@ func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutOrdersStatus renders credential-safe loading, success, and error feedback above the Orders title.
-// A local-data action retains its bordered banner, while refresh feedback replaces the existing status row so click targets remain stationary.
+// It always reserves the normal status-row height so loading or feedback never shifts the Orders header and table; only a real active local-data action uses the larger bordered banner.
 func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
-	if ui.orders.view.state.Status == "" {
-		return layout.Dimensions{}
-	}
-	if ui.orders.dataActionConnectionID == ui.activeConnectionID {
+	if ui.hasActiveOrdersDataAction() {
 		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return outlinedPanel(gtx, selectionBarColor, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -56,15 +56,24 @@ func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
 	if ui.orders.view.state.Loading {
 		return layoutOrdersStatusRow(gtx, ui.layoutOrdersRefreshIndicator)
 	}
+	if ui.orders.view.state.Status == "" {
+		return layoutOrdersStatusRow(gtx, func(layout.Context) layout.Dimensions { return layout.Dimensions{} })
+	}
 	return layoutOrdersStatusRow(gtx, bodyText(ui.theme, ui.orders.view.state.Status, mutedTextColor))
 }
 
+// hasActiveOrdersDataAction reports whether the active connection is currently running an explicitly requested local-data action.
+// Empty connection IDs never represent an action, preventing an unselected Orders page from displaying the action banner.
+func (ui *DesktopUI) hasActiveOrdersDataAction() bool {
+	return ui.orders.dataActionConnectionID != "" && ui.orders.dataActionConnectionID == ui.activeConnectionID
+}
+
 // layoutOrdersStatusRow reserves a single-line status height while allowing longer messages to expand when necessary.
-// It gives normal status text and the refresh indicator identical dimensions so switching between them cannot move the Orders controls.
+// It gives blank, normal, and loading status content identical minimum dimensions so switching states cannot move the Orders controls.
 func layoutOrdersStatusRow(gtx layout.Context, child layout.Widget) layout.Dimensions {
 	return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		dimensions := child(gtx)
-		minimumHeight := gtx.Dp(unit.Dp(24))
+		minimumHeight := gtx.Dp(unit.Dp(20))
 		if minimumHeight > gtx.Constraints.Max.Y {
 			minimumHeight = gtx.Constraints.Max.Y
 		}
@@ -75,14 +84,29 @@ func layoutOrdersStatusRow(gtx layout.Context, child layout.Widget) layout.Dimen
 	})
 }
 
-// layoutOrdersRefreshIndicator renders active Orders work with the same body-text metrics as a completed status.
-// Amber sits directly behind the text to denote non-error work in progress without changing the status row's size.
+// layoutOrdersRefreshIndicator renders active Orders work as bold, animated text on a pastel yellow fill.
+// It requests the next frame while visible so the trailing dots continue to communicate progress without changing the status row's size.
 func (ui *DesktopUI) layoutOrdersRefreshIndicator(gtx layout.Context) layout.Dimensions {
+	now := gtx.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	gtx.Execute(op.InvalidateCmd{At: now.Add(400 * time.Millisecond)})
+	style := material.Body1(ui.theme, ordersLoadingLabel(ui.orders.view.searchActive, now))
+	style.Font.Weight = font.Bold
+	style.Color = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
+	return roundedPanel(gtx, activityColor, style.Layout)
+}
+
+// ordersLoadingLabel returns the current progress label with a one-to-three-dot cycle.
+// search selects the local search label; now determines the animation phase for deterministic rendering and testing.
+func ordersLoadingLabel(search bool, now time.Time) string {
 	label := "Refreshing orders"
-	if ui.orders.view.searchActive {
+	if search {
 		label = "Searching orders"
 	}
-	return roundedPanel(gtx, activityColor, bodyText(ui.theme, label, mutedTextColor))
+	dotCount := int(now.UnixMilli()/400%3) + 1
+	return label + strings.Repeat(".", dotCount)
 }
 
 // layoutOrdersWorkspace groups the tabs, controls, selection bar, and table in one bordered Orders surface.

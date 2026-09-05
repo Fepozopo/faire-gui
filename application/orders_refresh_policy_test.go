@@ -90,3 +90,48 @@ func TestOrdersHeadingIncludesActiveConnection(t *testing.T) {
 		t.Fatalf("ordersHeading() = %q, want %q", got, want)
 	}
 }
+
+// TestOrdersLoadingLabelCyclesDots verifies visible Orders work keeps an animated,
+// one-to-three-dot suffix for both refresh and search progress labels.
+func TestOrdersLoadingLabelCyclesDots(t *testing.T) {
+	startedAt := time.Unix(0, 0)
+	tests := []struct {
+		name   string
+		search bool
+		at     time.Time
+		want   string
+	}{
+		{name: "first refresh frame", at: startedAt, want: "Refreshing orders."},
+		{name: "second refresh frame", at: startedAt.Add(400 * time.Millisecond), want: "Refreshing orders.."},
+		{name: "third search frame", search: true, at: startedAt.Add(800 * time.Millisecond), want: "Searching orders..."},
+		{name: "cycle repeats", at: startedAt.Add(1200 * time.Millisecond), want: "Refreshing orders."},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ordersLoadingLabel(test.search, test.at); got != test.want {
+				t.Fatalf("ordersLoadingLabel(%t, %v) = %q, want %q", test.search, test.at, got, test.want)
+			}
+		})
+	}
+}
+
+// TestHasActiveOrdersDataActionRejectsEmptyConnectionIDs verifies an unselected Orders
+// page reserves only its blank status row rather than showing a local-data action banner.
+func TestHasActiveOrdersDataActionRejectsEmptyConnectionIDs(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	if ui.hasActiveOrdersDataAction() {
+		t.Fatal("hasActiveOrdersDataAction() = true for empty connection IDs")
+	}
+
+	ui.activeConnectionID = "connection-a"
+	ui.orders.dataActionConnectionID = "connection-a"
+	if !ui.hasActiveOrdersDataAction() {
+		t.Fatal("hasActiveOrdersDataAction() = false for matching non-empty connection IDs")
+	}
+
+	ui.orders.dataActionConnectionID = "connection-b"
+	if ui.hasActiveOrdersDataAction() {
+		t.Fatal("hasActiveOrdersDataAction() = true for a different connection ID")
+	}
+}

@@ -28,7 +28,6 @@ var (
 	orderStatusBadgeDeliveredColor  = color.NRGBA{R: 226, G: 240, B: 230, A: 255}
 	orderStatusBadgeCanceledColor   = color.NRGBA{R: 242, G: 228, B: 225, A: 255}
 	orderStatusBadgeBackorderColor  = color.NRGBA{R: 230, G: 230, B: 230, A: 255}
-	orderStatusBadgePendingColor    = color.NRGBA{R: 247, G: 240, B: 216, A: 255}
 )
 
 // orderStatusBadgeCell preserves the fixed Status-column width while left-aligning
@@ -81,7 +80,7 @@ func orderStatusBadgeColorsFor(status string) orderStatusBadgeColors {
 	case "Backordered":
 		return orderStatusBadgeColors{background: orderStatusBadgeBackorderColor, text: orderStatusBadgeTextColor}
 	case "Pending retailer confirmation":
-		return orderStatusBadgeColors{background: orderStatusBadgePendingColor, text: orderStatusBadgeTextColor}
+		return orderStatusBadgeColors{background: orderStatusBadgeBackorderColor, text: orderStatusBadgeTextColor}
 	default:
 		return orderStatusBadgeColors{background: orderStatusBadgeNeutralColor, text: orderStatusBadgeTextColor}
 	}
