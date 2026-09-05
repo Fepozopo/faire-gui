@@ -35,6 +35,14 @@ func inputField(gtx layout.Context, theme *material.Theme, editor *widget.Editor
 	})
 }
 
+// outlinedInputField draws an editor in a white rounded field with a subtle one-pixel border.
+// The editor must be a persistent DesktopUI field because Gio stores its cursor, selection, and typed text in widget.Editor.
+func outlinedInputField(gtx layout.Context, theme *material.Theme, editor *widget.Editor, hint string) layout.Dimensions {
+	return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, material.Editor(theme, editor, hint).Layout)
+	})
+}
+
 // fieldSpacer returns the consistent vertical separation between form controls.
 func fieldSpacer() layout.FlexChild {
 	return layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout)
