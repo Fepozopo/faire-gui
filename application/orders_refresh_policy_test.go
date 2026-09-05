@@ -76,3 +76,17 @@ func TestFormatOrdersUpdatedAtUses12HourClock(t *testing.T) {
 		t.Fatalf("formatOrdersUpdatedAt() = %q, want %q", got, want)
 	}
 }
+
+// TestOrdersHeadingIncludesActiveConnection verifies the active connection is visible
+// in the prominent Orders heading and a connection-free session keeps the short title.
+func TestOrdersHeadingIncludesActiveConnection(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	if got, want := ui.ordersHeading(), "Orders"; got != want {
+		t.Fatalf("ordersHeading() = %q, want %q", got, want)
+	}
+
+	ui.activeConnectionLabel = "BSC"
+	if got, want := ui.ordersHeading(), "Orders: BSC"; got != want {
+		t.Fatalf("ordersHeading() = %q, want %q", got, want)
+	}
+}

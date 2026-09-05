@@ -17,20 +17,18 @@ import (
 )
 
 // layoutOrders renders the read-only Orders workflow for the active saved connection.
-// It keeps all interaction state on DesktopUI and delegates query semantics to features/orders.
+// It keeps all interaction state on DesktopUI, includes the active connection in the title, and delegates query semantics to features/orders.
 func (ui *DesktopUI) layoutOrders(gtx layout.Context) layout.Dimensions {
 	ui.handleOrdersControls(gtx)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(ui.layoutOrdersStatus),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(material.H3(ui.theme, "Orders").Layout),
+				layout.Rigid(material.H3(ui.theme, ui.ordersHeading()).Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(ui.refreshOrdersControl),
 			)
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(5)}.Layout),
-		layout.Rigid(bodyText(ui.theme, ui.ordersConnectionText(), mutedTextColor)),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Flexed(1, ui.layoutOrdersWorkspace),
 	)
@@ -106,12 +104,13 @@ func (ui *DesktopUI) layoutOrdersWorkspace(gtx layout.Context) layout.Dimensions
 	})
 }
 
-// ordersConnectionText returns a non-secret prompt or active connection label for the Orders heading.
-func (ui *DesktopUI) ordersConnectionText() string {
+// ordersHeading returns the Orders title with its active connection label when one is selected.
+// A connection-free session retains the short title so the sidebar prompt remains the selection affordance.
+func (ui *DesktopUI) ordersHeading() string {
 	if ui.activeConnectionLabel == "" {
-		return "Select an active saved connection from the sidebar to load its orders."
+		return "Orders"
 	}
-	return "Active connection: " + ui.activeConnectionLabel
+	return "Orders: " + ui.activeConnectionLabel
 }
 
 // handleOrdersControls processes controls before rendering so visible rows update in the same frame.
