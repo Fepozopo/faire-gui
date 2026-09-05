@@ -17,12 +17,12 @@ import (
 type ordersLoadKind uint8
 
 const (
-	// ordersLoadInitial reads local data, restores a retained boundary when needed, and synchronizes when eligible.
+	// ordersLoadInitial reads local data and restores a retained boundary when the Orders screen opens.
 	ordersLoadInitial ordersLoadKind = iota
 	// ordersLoadNextPage appends one local SQLite page without synchronization.
 	ordersLoadNextPage
-	// ordersLoadScheduledRefresh reads local data and performs an eligible incremental synchronization.
-	ordersLoadScheduledRefresh
+	// ordersLoadConnectionRefresh synchronizes immediately after the user selects a saved connection.
+	ordersLoadConnectionRefresh
 	// ordersLoadManualRefresh expands retained history from the selected boundary.
 	ordersLoadManualRefresh
 	// ordersLoadLocalOnly reloads the current local query without contacting Faire.
@@ -56,7 +56,6 @@ type ordersController struct {
 	detailResults     chan orderDetailResult
 	exportResults     chan orderExportResult
 	dataActionResults chan ordersDataActionEvent
-	schedule          chan struct{}
 	invalidate        func()
 
 	loadRequestID          uint64
@@ -64,7 +63,6 @@ type ordersController struct {
 	exportRequestID        uint64
 	dataStatusRequestID    uint64
 	dataActionConnectionID string
-	schedulerStarted       bool
 }
 
 // newOrdersController constructs one feature-owned Orders component for a DesktopUI lifetime.
@@ -80,7 +78,6 @@ func newOrdersController(ctx context.Context, store ordersstore.Store, manager *
 		detailResults:     make(chan orderDetailResult, 2),
 		exportResults:     make(chan orderExportResult, 1),
 		dataActionResults: make(chan ordersDataActionEvent, 2),
-		schedule:          make(chan struct{}, 1),
 		invalidate:        invalidate,
 	}
 }
@@ -209,47 +206,6 @@ func (controller *ordersController) publishOrderDetailResult(result orderDetailR
 	}
 	if controller.invalidate != nil {
 		controller.invalidate()
-	}
-}
-
-// startScheduler creates the bounded Orders refresh wake-up source once local storage is available.
-// It publishes no UI state directly; the frame loop drains the channel before requesting a named refresh operation.
-func (controller *ordersController) startScheduler() {
-	if controller.store == nil || controller.schedulerStarted {
-		return
-	}
-	controller.schedulerStarted = true
-	controller.startWorker(func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-controller.ctx.Done():
-				return
-			case <-ticker.C:
-				select {
-				case controller.schedule <- struct{}{}:
-					if controller.invalidate != nil {
-						controller.invalidate()
-					}
-				default:
-				}
-			}
-		}
-	})
-}
-
-// drainSchedule discards duplicate queued wake-ups and reports whether at least one scheduled refresh is due.
-// It runs on the frame goroutine; the shell supplies the active connection before requesting the named refresh.
-func (controller *ordersController) drainSchedule() bool {
-	due := false
-	for {
-		select {
-		case <-controller.schedule:
-			due = true
-		default:
-			return due
-		}
 	}
 }
 

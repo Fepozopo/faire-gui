@@ -67,7 +67,6 @@ func (ui *DesktopUI) drainStartupResults() {
 			ui.connections = result.connections
 			ui.orders.manager = result.manager
 			ui.orders.store = result.store
-			ui.startOrdersScheduler()
 			ui.status = result.status
 			ui.preparingStartup = false
 		default:

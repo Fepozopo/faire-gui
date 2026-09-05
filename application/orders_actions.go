@@ -185,7 +185,7 @@ func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
 	ui.orders.view.list.Position.First = 0
 	ui.orders.view.list.Position.Offset = 0
 	ui.selectedTab = ordersTab
-	ui.startOrdersLoad(ordersLoadInitial)
+	ui.startOrdersLoad(ordersLoadConnectionRefresh)
 	ui.invalidate()
 }
 
@@ -221,7 +221,7 @@ func (ui *DesktopUI) startOrdersLoad(kind ordersLoadKind) {
 		ConnectionID:    ui.activeConnectionID,
 		State:           state,
 		Kind:            kind,
-		RestoreBoundary: !ui.orders.view.historyBoundaryKnown && (kind == ordersLoadInitial || kind == ordersLoadScheduledRefresh),
+		RestoreBoundary: !ui.orders.view.historyBoundaryKnown && (kind == ordersLoadInitial || kind == ordersLoadConnectionRefresh),
 	}
 	ui.orders.view.state.Loading = true
 	ui.orders.view.state.Status = "Loading locally stored orders…"
@@ -257,20 +257,9 @@ func (controller *ordersController) loadAndMaybeSync(request ordersLoadRequest) 
 		result := orderLoadResult{RequestID: request.RequestID, Append: appendResults, Rows: localRows(page.Rows), Cursor: encodeLocalCursor(page.NextCursor), Status: status, ApplyRows: true, KeepLoading: keepLoading, UpdatedAtMin: boundary, ApplyBoundary: boundary != ""}
 		return attachNewOrdersCount(controller.ctx, store, request.ConnectionID, result)
 	}
-	if request.Kind == ordersLoadNextPage || request.Kind == ordersLoadLocalOnly {
+	if request.Kind == ordersLoadInitial || request.Kind == ordersLoadNextPage || request.Kind == ordersLoadLocalOnly {
 		controller.publishLoadResult(localResult(localStatus(store, controller.ctx, request.ConnectionID), false))
 		return
-	}
-	if request.Kind == ordersLoadInitial || request.Kind == ordersLoadScheduledRefresh {
-		shouldSync, err := ordersNeedSync(controller.ctx, store, request.ConnectionID, time.Now().UTC())
-		if err != nil {
-			controller.publishLoadResult(localResult(ordersStorageErrorMessage(err), false))
-			return
-		}
-		if !shouldSync {
-			controller.publishLoadResult(localResult(localStatus(store, controller.ctx, request.ConnectionID), false))
-			return
-		}
 	}
 	controller.publishLoadResult(localResult("Checking Faire for updated orders…", true))
 	summary, err := controller.syncConnection(request)
@@ -306,7 +295,7 @@ func (controller *ordersController) loadAndMaybeSync(request ordersLoadRequest) 
 	} else if summary.Orders > 0 {
 		status = "Orders updated from Faire."
 	}
-	controller.publishLoadResult(localResult(status, false))
+	controller.publishLoadResult(localResult(statusWithLastUpdatedAt(status, store, controller.ctx, request.ConnectionID), false))
 }
 
 // publishLoadResult sends a safe Orders load result unless application shutdown has begun.
@@ -600,25 +589,6 @@ func decodeLocalCursor(value string) (*ordersstore.KeysetCursor, error) {
 	return &ordersstore.KeysetCursor{SortAtUTC: payload.SortAtUTC, OrderID: payload.OrderID}, nil
 }
 
-// ordersNeedSync determines whether the selected connection lacks a completed bootstrap or is at least one hour stale.
-func ordersNeedSync(ctx context.Context, store ordersstore.Store, connectionID string, now time.Time) (bool, error) {
-	state, found, err := store.SyncState(ctx, connectionID)
-	if err != nil {
-		return true, err
-	}
-	if !found {
-		return true, nil
-	}
-	if state.LastErrorKind == "invalid_request" {
-		// An unchanged automatic request would repeat the same validation failure; require an explicit user adjustment and refresh.
-		return false, nil
-	}
-	if state.BootstrapCompletedAtUTC == nil || state.LastSuccessfulSyncAtUTC == nil {
-		return true, nil
-	}
-	return !state.LastSuccessfulSyncAtUTC.Add(time.Hour).After(now), nil
-}
-
 // localStatus returns a safe local freshness status after a successful worker state read.
 func localStatus(store ordersstore.Store, ctx context.Context, connectionID string) string {
 	state, found, err := store.SyncState(ctx, connectionID)
@@ -628,7 +598,23 @@ func localStatus(store ordersstore.Store, ctx context.Context, connectionID stri
 		}
 		return "Showing locally stored orders."
 	}
-	return "Showing locally stored orders. Last synced " + state.LastSuccessfulSyncAtUTC.Local().Format("Jan 2, 15:04") + "."
+	return "Showing locally stored orders. Last updated " + formatOrdersUpdatedAt(*state.LastSuccessfulSyncAtUTC) + "."
+}
+
+// statusWithLastUpdatedAt appends the persisted successful synchronization time to
+// status when it is available, preserving the base status if storage cannot provide it.
+func statusWithLastUpdatedAt(status string, store ordersstore.Store, ctx context.Context, connectionID string) string {
+	state, found, err := store.SyncState(ctx, connectionID)
+	if err != nil || !found || state.LastSuccessfulSyncAtUTC == nil {
+		return status
+	}
+	return status + " Last updated " + formatOrdersUpdatedAt(*state.LastSuccessfulSyncAtUTC) + "."
+}
+
+// formatOrdersUpdatedAt renders a successful synchronization timestamp in the user's
+// local time with a 12-hour clock and AM/PM marker for the Orders status message.
+func formatOrdersUpdatedAt(value time.Time) string {
+	return value.Local().Format("Jan 2, 3:04 PM")
 }
 
 // ordersStorageErrorMessage converts storage or snapshot failures to credential-safe user feedback.
@@ -637,18 +623,6 @@ func ordersStorageErrorMessage(err error) string {
 		return "Local order data needs to be rebuilt."
 	}
 	return "Local order storage could not be read. Rebuild local order data after resolving the issue."
-}
-
-// startOrdersScheduler starts the controller-owned hourly wake-up source when local Orders storage is available.
-func (ui *DesktopUI) startOrdersScheduler() {
-	ui.orders.startScheduler()
-}
-
-// drainOrdersSchedule delegates queued wake-ups to the controller, then asks for one scheduled operation when the visible Orders state is idle.
-func (ui *DesktopUI) drainOrdersSchedule() {
-	if ui.orders.drainSchedule() && ui.activeConnectionID != "" && !ui.orders.view.state.Loading && !ui.orders.view.orderDetailLoading {
-		ui.startOrdersLoad(ordersLoadScheduledRefresh)
-	}
 }
 
 // invalidate requests another Gio frame when a native window exists.

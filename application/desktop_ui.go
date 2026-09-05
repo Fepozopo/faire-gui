@@ -161,7 +161,6 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
 	ui.connectionPickerList.Axis = layout.Vertical
-	ui.startOrdersScheduler()
 	return ui
 }
 
