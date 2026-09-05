@@ -138,7 +138,7 @@ func FormatTotal(amountMinor *int64, currency string) string {
 	if amountMinor == nil || strings.TrimSpace(currency) == "" {
 		return "—"
 	}
-	return formatTotalAmount(*amountMinor, currency)
+	return formatMoney(*amountMinor, currency)
 }
 
 // formatTotalPayout formats Faire's explicit payout value for the Orders table.
@@ -148,19 +148,6 @@ func formatTotalPayout(costs *faire.PayoutCosts) string {
 		return "—"
 	}
 	return FormatTotal(costs.TotalPayout.AmountMinor, *costs.TotalPayout.Currency)
-}
-
-// formatTotalAmount formats amountMinor for a total, using $ for USD and an ISO currency code otherwise.
-// It returns the resulting signed total label.
-func formatTotalAmount(amountMinor int64, currency string) string {
-	sign := ""
-	if amountMinor < 0 {
-		sign, amountMinor = "-", -amountMinor
-	}
-	if strings.EqualFold(currency, "USD") {
-		return fmt.Sprintf("%s$%d.%02d", sign, amountMinor/100, amountMinor%100)
-	}
-	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amountMinor/100, amountMinor%100)
 }
 
 // FormatCommissionPercentage converts Faire's raw commission BPS to an Orders-table percentage.
@@ -226,13 +213,15 @@ func formatPercentageFromBPS(value int64) string {
 	return fmt.Sprintf("%s%d.%02d%%", sign, value/100, value%100)
 }
 
-// formatMoney produces a locale-independent currency code and two decimal places,
-// avoiding host-locale differences in snapshots and table sorting expectations.
+// formatMoney produces a locale-independent currency label with two decimal places,
+// using $ for USD and an ISO currency code otherwise to keep monetary values consistent across views.
 func formatMoney(amountMinor int64, currency string) string {
 	sign := ""
 	if amountMinor < 0 {
-		sign = "-"
-		amountMinor = -amountMinor
+		sign, amountMinor = "-", -amountMinor
+	}
+	if strings.EqualFold(currency, "USD") {
+		return fmt.Sprintf("%s$%d.%02d", sign, amountMinor/100, amountMinor%100)
 	}
 	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amountMinor/100, amountMinor%100)
 }
