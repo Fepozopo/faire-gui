@@ -346,7 +346,7 @@ func (ui *DesktopUI) refreshConnections() {
 		ui.window.Invalidate()
 		return
 	}
-	ui.connections = savedConnections
+	ui.connections = sortedConnectionsByLabel(savedConnections)
 	ui.reconcileRowControls()
 	ui.selectedTab = connectionsTab
 	ui.window.Invalidate()

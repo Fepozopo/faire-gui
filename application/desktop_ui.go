@@ -139,7 +139,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		window:      window,
 		theme:       material.NewTheme(),
 		manager:     manager,
-		connections: savedConnections,
+		connections: sortedConnectionsByLabel(savedConnections),
 		orders: newOrdersController(ctx, store, manager, workers, func() {
 			if window != nil {
 				window.Invalidate()
