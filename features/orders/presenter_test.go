@@ -91,12 +91,11 @@ func TestPresentRowHandlesUnknownStateAndMissingTotalPayout(t *testing.T) {
 	}
 }
 
-// TestPresentRowSelectsShipDateByOrderState verifies requested dates identify future-shipping
-// new orders, while all other orders use only their expected shipping date.
-func TestPresentRowSelectsShipDateByOrderState(t *testing.T) {
+// TestPresentRowUsesExpectedShipDate verifies every order state displays the expected
+// ship date, rather than a requested ship date, and absent expected dates use an em dash.
+func TestPresentRowUsesExpectedShipDate(t *testing.T) {
 	requestedShipDate := "2026-04-05T00:00:00Z"
 	expectedShipDate := "2026-04-06T00:00:00Z"
-	shipAfter := "2026-04-07T00:00:00Z"
 	newState := faire.OrderStateNew
 	processingState := faire.OrderStateProcessing
 	tests := []struct {
@@ -105,13 +104,13 @@ func TestPresentRowSelectsShipDateByOrderState(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "new order uses requested ship date instead of expected date",
+			name:  "new order uses expected ship date instead of requested date",
 			order: faire.Order{State: &newState, RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
-			want:  "2026-04-05",
+			want:  "2026-04-06",
 		},
 		{
-			name:  "new order without requested ship date remains empty",
-			order: faire.Order{State: &newState, ExpectedShipDate: &expectedShipDate},
+			name:  "new order without expected ship date uses an em dash",
+			order: faire.Order{State: &newState, RequestedShipDate: &requestedShipDate},
 			want:  "—",
 		},
 		{
@@ -120,8 +119,8 @@ func TestPresentRowSelectsShipDateByOrderState(t *testing.T) {
 			want:  "2026-04-06",
 		},
 		{
-			name:  "non-new order without expected ship date remains empty",
-			order: faire.Order{State: &processingState, RequestedShipDate: &requestedShipDate, ShipAfter: &shipAfter},
+			name:  "non-new order without expected ship date uses an em dash",
+			order: faire.Order{State: &processingState, RequestedShipDate: &requestedShipDate},
 			want:  "—",
 		},
 	}
