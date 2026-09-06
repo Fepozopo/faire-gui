@@ -899,6 +899,28 @@ func TestProcessingRequestForOrderPreservesRequestedShipDates(t *testing.T) {
 	}
 }
 
+// TestStoredOrderFromSnapshotValidatesLocalIdentity verifies the bulk processing lookup trusts only a current, matching SQLite snapshot.
+func TestStoredOrderFromSnapshotValidatesLocalIdentity(t *testing.T) {
+	orderID := faire.OrderID("order-1")
+	requestedShipDate := "2026-09-12T00:00:00Z"
+	snapshot := ordersstore.Snapshot{
+		SnapshotSchemaVersion: ordersstore.SnapshotSchemaVersion,
+		SnapshotJSON:          `{"id":"order-1","requested_ship_date":"2026-09-12T00:00:00Z"}`,
+	}
+
+	order, valid := storedOrderFromSnapshot(snapshot, orderID)
+	if !valid || order.RequestedShipDate == nil || *order.RequestedShipDate != requestedShipDate {
+		t.Fatalf("storedOrderFromSnapshot() = (%#v, %t), want matching requested ship date", order, valid)
+	}
+	if _, valid := storedOrderFromSnapshot(snapshot, faire.OrderID("other-order")); valid {
+		t.Fatal("mismatched local order ID is valid")
+	}
+	snapshot.SnapshotSchemaVersion++
+	if _, valid := storedOrderFromSnapshot(snapshot, orderID); valid {
+		t.Fatal("unsupported local snapshot schema is valid")
+	}
+}
+
 // TestCalendarGridStartUsesSundayAndPreservesDateOnlyValues verifies the calendar supports a deterministic six-week Sunday-first layout.
 func TestCalendarGridStartUsesSundayAndPreservesDateOnlyValues(t *testing.T) {
 	month := time.Date(2026, time.September, 14, 16, 30, 0, 0, time.Local)

@@ -540,8 +540,8 @@ func (ui *DesktopUI) startMoveSelectedOrdersToProcessing(expectedShipDate string
 	})
 }
 
-// moveSelectedOrdersToProcessing fetches each selected order before processing so its matching requested and expected ship dates are never modified.
-// It continues after individual failures, persists successful endpoint responses, and publishes only safe row/status data to the frame loop.
+// moveSelectedOrdersToProcessing reads each selected order's local SQLite snapshot before processing so its matching requested and expected ship dates are never modified.
+// It avoids a per-order Faire GET, continues after individual failures, persists successful endpoint responses, and publishes only safe row/status data to the frame loop.
 func (controller *ordersController) moveSelectedOrdersToProcessing(requestID uint64, connectionID string, selectedIDs []faire.OrderID, expectedShipDate string) {
 	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
@@ -559,10 +559,10 @@ func (controller *ordersController) moveSelectedOrdersToProcessing(requestID uin
 			controller.publishOrderProcessingResult(result)
 			return
 		}
-		order, lookupErr := client.Orders.Get(controller.ctx, orderID)
-		request := processingRequestForOrder(order, expectedShipDate)
+		order, _, lookupErr := storedOrder(controller.ctx, controller.store, connectionID, orderID)
+		request := processingRequestForOrder(&order, expectedShipDate)
 		if lookupErr != nil {
-			// When the fresh lookup fails, omit the optional date rather than risk replacing an unknown requested date.
+			// When the local snapshot cannot be read, omit the optional date rather than risk replacing an unknown requested date.
 			request = faire.MoveOrderToProcessingRequest{}
 			result.LookupFailures++
 		} else if request.ExpectedShipDate == nil {
@@ -584,7 +584,7 @@ func (controller *ordersController) moveSelectedOrdersToProcessing(requestID uin
 	controller.publishOrderProcessingResult(result)
 }
 
-// processingRequestForOrder builds the endpoint payload for one freshly retrieved order.
+// processingRequestForOrder builds the endpoint payload for one locally stored order.
 // expectedShipDate is omitted whenever order has a requested ship date so Faire preserves the matching requested and expected dates already on that order.
 func processingRequestForOrder(order *faire.Order, expectedShipDate string) faire.MoveOrderToProcessingRequest {
 	if order == nil || (order.RequestedShipDate != nil && strings.TrimSpace(*order.RequestedShipDate) != "") || expectedShipDate == "" {
@@ -617,7 +617,7 @@ func processingCompletionStatus(result orderProcessingResult) string {
 		if result.LookupFailures != 1 {
 			status += "s"
 		}
-		status += " whose current details could not be retrieved."
+		status += " whose locally stored details could not be read."
 	}
 	if result.ProcessingFailures > 0 {
 		status += " " + itoa(result.ProcessingFailures) + " order"
@@ -638,25 +638,42 @@ func processingCompletionStatus(result orderProcessingResult) string {
 
 // loadOrderDetail reads and deserializes one private snapshot in a worker, publishing only its typed presentation model.
 func loadOrderDetail(ctx context.Context, store ordersstore.Store, requestID uint64, connectionID string, orderID faire.OrderID, publish func(orderDetailResult)) {
-	snapshot, err := store.Snapshot(ctx, connectionID, string(orderID))
+	order, snapshot, err := storedOrder(ctx, store, connectionID, orderID)
 	if err != nil {
-		publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
-		return
-	}
-	if snapshot.SnapshotSchemaVersion != ordersstore.SnapshotSchemaVersion {
-		publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Local order data needs to be rebuilt."})
-		return
-	}
-	var order faire.Order
-	if err := json.Unmarshal([]byte(snapshot.SnapshotJSON), &order); err != nil {
-		publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Local order data needs to be rebuilt."})
-		return
-	}
-	if order.ID == nil || *order.ID != orderID {
-		publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Local order data needs to be rebuilt."})
+		status := ordersStorageErrorMessage(err)
+		if errors.Is(err, ordersstore.ErrCorruptData) {
+			status = "Local order data needs to be rebuilt."
+		}
+		publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: status})
 		return
 	}
 	publish(orderDetailResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(order, snapshot.SyncedAtUTC)})
+}
+
+// storedOrder reads and validates one connection-scoped Faire order snapshot from SQLite.
+// It returns ErrCorruptData for an unsupported snapshot version, malformed JSON, or mismatched ID so callers never act on ambiguous local order data.
+func storedOrder(ctx context.Context, store ordersstore.Store, connectionID string, orderID faire.OrderID) (faire.Order, ordersstore.Snapshot, error) {
+	snapshot, err := store.Snapshot(ctx, connectionID, string(orderID))
+	if err != nil {
+		return faire.Order{}, ordersstore.Snapshot{}, err
+	}
+	order, valid := storedOrderFromSnapshot(snapshot, orderID)
+	if !valid {
+		return faire.Order{}, ordersstore.Snapshot{}, ordersstore.ErrCorruptData
+	}
+	return order, snapshot, nil
+}
+
+// storedOrderFromSnapshot decodes and validates one private SQLite snapshot without retaining any transport metadata.
+// snapshot supplies the serialized order and schema version, orderID scopes its expected identity, and valid is false for data callers must rebuild rather than trust.
+func storedOrderFromSnapshot(snapshot ordersstore.Snapshot, orderID faire.OrderID) (order faire.Order, valid bool) {
+	if snapshot.SnapshotSchemaVersion != ordersstore.SnapshotSchemaVersion {
+		return faire.Order{}, false
+	}
+	if err := json.Unmarshal([]byte(snapshot.SnapshotJSON), &order); err != nil {
+		return faire.Order{}, false
+	}
+	return order, order.ID != nil && *order.ID == orderID
 }
 
 // drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller.
