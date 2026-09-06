@@ -109,16 +109,13 @@ func primaryButton(theme *material.Theme, button *widget.Clickable, label string
 	return filledButton(theme, button, label, primaryButtonColor)
 }
 
-// disabledPrimaryButton creates a non-interactive gray version of the standard primary-button treatment.
-// button retains its stable Gio identity while callers drain and ignore clicks until their validation condition is satisfied.
-func disabledPrimaryButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+// disabledPrimaryButton creates a static gray version of the standard primary-button treatment.
+// It intentionally creates no clickable region, preventing both activation and hover-state color changes until validation succeeds.
+func disabledPrimaryButton(theme *material.Theme, label string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		style := material.Button(theme, button, label)
-		style.Background = disabledButtonColor
-		style.Color = disabledButtonTextColor
-		style.CornerRadius = unit.Dp(4)
-		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
-		return style.Layout(gtx)
+		return roundedPanel(gtx, disabledButtonColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}.Layout(gtx, bodyText(theme, label, disabledButtonTextColor))
+		})
 	}
 }
 

@@ -323,7 +323,7 @@ func (ui *DesktopUI) layoutShipDateModal(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.layoutShipDateCalendar(gtx) }),
 		}
-		confirmButton := disabledPrimaryButton(ui.theme, &ui.orders.view.confirmShipDateButton, "Confirm ship date")
+		confirmButton := disabledPrimaryButton(ui.theme, "Confirm ship date")
 		if shipDateValid {
 			confirmButton = primaryButton(ui.theme, &ui.orders.view.confirmShipDateButton, "Confirm ship date")
 		}
