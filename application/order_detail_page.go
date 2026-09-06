@@ -183,7 +183,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 }
 
 // layoutShipmentForm renders every package required to create the first shipment for an otherwise unshipped order.
-// It exposes a readable, alphabetically sorted carrier menu and requires every package to be complete before confirmation can be enabled.
+// It exposes a readable, alphabetically sorted carrier menu, compact typed-input feedback, and requires every package to be complete before confirmation can be enabled.
 func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 	view := &ui.orders.view
 	children := []layout.FlexChild{
@@ -197,18 +197,11 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 		if packageIndex > 0 {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 		}
+		validationMessage := shipmentValidationMessage(shipment, view.orderDetail.TotalPayoutMinor)
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, material.H6(ui.theme, "Package "+itoa(packageIndex+1)).Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if len(view.shipmentForm) == 1 {
-							return layout.Dimensions{}
-						}
-						return underlinedTextAction(ui.theme, &shipment.removeButton, "Remove package")(gtx)
-					}),
-				)
+				return layoutShipmentPackageHeader(gtx, ui, shipment, packageIndex+1, len(view.shipmentForm), validationMessage)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Carrier").Layout),
@@ -268,6 +261,36 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 		}),
 	)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// layoutShipmentPackageHeader renders a package number, any compact typed-input validation message, and the optional removal action.
+// validationMessage is empty until a field contains invalid input, keeping untouched package forms visually quiet.
+func layoutShipmentPackageHeader(gtx layout.Context, ui *DesktopUI, shipment *shipmentFormPackage, packageNumber, packageCount int, validationMessage string) layout.Dimensions {
+	children := []layout.FlexChild{
+		layout.Rigid(material.H6(ui.theme, "Package "+itoa(packageNumber)).Layout),
+	}
+	if validationMessage != "" {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				style := material.Label(ui.theme, unit.Sp(12), validationMessage)
+				style.Color = dangerColor
+				style.MaxLines = 2
+				return style.Layout(gtx)
+			}),
+		)
+	} else {
+		children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}))
+	}
+	if packageCount > 1 {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(underlinedTextAction(ui.theme, &shipment.removeButton, "Remove package")),
+		)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
 // shipmentPanel groups existing or newly entered shipment information on a neutral surface that does not compete with item cards.

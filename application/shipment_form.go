@@ -185,6 +185,58 @@ func labelCostBelowHalfPayout(amountMinor, totalPayoutMinor int64) bool {
 	return totalPayoutMinor > 0 && amountMinor >= 0 && amountMinor <= (totalPayoutMinor-1)/2
 }
 
+// shipmentValidationMessage returns compact, field-specific feedback for a package only after the user entered an invalid value.
+// Blank untouched fields intentionally produce no message so a new form does not look erroneous before the user begins entering shipment data.
+func shipmentValidationMessage(shipment *shipmentFormPackage, totalPayoutMinor *int64) string {
+	if shipment == nil {
+		return ""
+	}
+	messages := make([]string, 0, 2)
+	if message := trackingValidationMessage(shipment.carrier, shipment.trackingNumber.Text()); message != "" {
+		messages = append(messages, message)
+	}
+	if message := labelCostValidationMessage(shipment.labelCost.Text(), totalPayoutMinor); message != "" {
+		messages = append(messages, message)
+	}
+	return strings.Join(messages, " • ")
+}
+
+// trackingValidationMessage describes an invalid typed tracking value for carriers with strict documented rules.
+// It returns no message for blank input or carriers that do not yet have a specified validation format.
+func trackingValidationMessage(carrier, value string) string {
+	if strings.TrimSpace(value) == "" || validTrackingNumber(carrier, value) {
+		return ""
+	}
+	switch carrier {
+	case "UPS":
+		return "Tracking: use 18 letters/numbers beginning 1Z"
+	case "FEDEX":
+		return "Tracking: use 12, 14, 15, 20, or 22 digits"
+	case "USPS":
+		return "Tracking: use 20/22 digits or 2 letters, 9 digits, 2 letters"
+	default:
+		return ""
+	}
+}
+
+// labelCostValidationMessage describes a malformed or over-limit typed label cost without warning for a blank untouched field.
+func labelCostValidationMessage(value string, totalPayoutMinor *int64) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	amountMinor, valid := parseDollarAmount(value)
+	if !valid {
+		return "Label cost: enter a valid dollar amount"
+	}
+	if totalPayoutMinor == nil || *totalPayoutMinor <= 0 {
+		return "Label cost: payout unavailable"
+	}
+	if !labelCostBelowHalfPayout(amountMinor, *totalPayoutMinor) {
+		return "Label cost: must be less than 50% of payout"
+	}
+	return ""
+}
+
 // parseDollarAmount converts a non-negative dollar value with at most two decimal places into integer cents.
 // It accepts an optional dollar sign because pasted accounting values commonly include one, and it rejects overflow rather than rounding money.
 func parseDollarAmount(value string) (int64, bool) {

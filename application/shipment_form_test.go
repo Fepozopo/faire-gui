@@ -147,6 +147,38 @@ func TestLabelCostMustBeBelowHalfPayout(t *testing.T) {
 	}
 }
 
+// TestShipmentValidationMessages verifies typed invalid values receive concise field-specific feedback while blank untouched fields remain quiet.
+func TestShipmentValidationMessages(t *testing.T) {
+	t.Parallel()
+
+	payoutMinor := int64(10000)
+	tests := []struct {
+		name     string
+		carrier  string
+		tracking string
+		cost     string
+		want     string
+	}{
+		{name: "blank untouched package", carrier: "UPS", want: ""},
+		{name: "invalid UPS", carrier: "UPS", tracking: "1Z123", want: "Tracking: use 18 letters/numbers beginning 1Z"},
+		{name: "invalid FedEx", carrier: "FEDEX", tracking: "ABC", want: "Tracking: use 12, 14, 15, 20, or 22 digits"},
+		{name: "invalid USPS", carrier: "USPS", tracking: "ABC", want: "Tracking: use 20/22 digits or 2 letters, 9 digits, 2 letters"},
+		{name: "invalid cost", carrier: "UPS", tracking: "1Z999AA10123456784", cost: "abc", want: "Label cost: enter a valid dollar amount"},
+		{name: "cost at limit", carrier: "UPS", tracking: "1Z999AA10123456784", cost: "50", want: "Label cost: must be less than 50% of payout"},
+		{name: "two invalid fields", carrier: "UPS", tracking: "invalid", cost: "50", want: "Tracking: use 18 letters/numbers beginning 1Z • Label cost: must be less than 50% of payout"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			shipment := completeShipmentFormPackage(test.carrier, test.tracking, test.cost)
+			if got := shipmentValidationMessage(shipment, &payoutMinor); got != test.want {
+				t.Fatalf("shipmentValidationMessage() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // TestSupportedCarriersAreAlphabeticalAndComplete verifies the dropdown exposes the documented carrier values in readable alphabetical order.
 func TestSupportedCarriersAreAlphabeticalAndComplete(t *testing.T) {
 	t.Parallel()
