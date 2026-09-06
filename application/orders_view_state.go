@@ -18,12 +18,14 @@ type shipmentTrackingControlKey struct {
 // shipmentFormPackage owns the persistent controls and selected carrier for one unsubmitted shipment.
 // Gio requires the editors and clickables to survive frame boundaries so typed values and pointer gestures retain their identity; packages are stored by pointer to prevent slice growth from copying live widgets.
 type shipmentFormPackage struct {
-	carrier        string
-	trackingNumber widget.Editor
-	labelCost      widget.Editor
-	carrierButton  widget.Clickable
-	carrierOptions [supportedCarrierCount]widget.Clickable
-	removeButton   widget.Clickable
+	carrier          string
+	trackingNumber   widget.Editor
+	labelCost        widget.Editor
+	carrierButton    widget.Clickable
+	carrierOptions   [supportedCarrierCount]widget.Clickable
+	removeButton     widget.Clickable
+	trackingFocused  bool
+	labelCostFocused bool
 }
 
 // newShipmentFormPackage creates a blank package that defaults to UPS and accepts one-line values only.

@@ -434,7 +434,7 @@ func (ui *DesktopUI) submitShipmentForm() {
 	if ui.orders.view.shipmentSubmitting || ui.orders.view.orderDetailID == "" || ui.orders.view.orderDetailConnectionID != ui.activeConnectionID || ui.orders.store == nil || ui.manager == nil {
 		return
 	}
-	request, valid := shipmentRequestFromForm(ui.orders.view.shipmentForm)
+	request, valid := shipmentRequestFromForm(ui.orders.view.shipmentForm, ui.orders.view.orderDetail.TotalPayoutMinor)
 	if !valid {
 		return
 	}

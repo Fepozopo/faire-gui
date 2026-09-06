@@ -4,6 +4,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"gioui.org/layout"
 
 	"github.com/Fepozopo/faire-gui/faire"
 )
@@ -45,17 +48,18 @@ var supportedCarriers = [supportedCarrierCount]supportedCarrier{
 	{Value: "USPS", Label: "USPS"},
 }
 
-// shipmentFormIsValid reports whether every visible package has a carrier, tracking number, and non-negative dollar amount.
-// Submission deliberately requires all packages to be valid, preventing an added but incomplete package from being silently ignored.
-func shipmentFormIsValid(packages []*shipmentFormPackage) bool {
-	if len(packages) == 0 {
+// shipmentFormIsValid reports whether every visible package has a supported valid tracking number and a cost strictly below half the total payout.
+// Submission deliberately requires all packages to be valid, preventing an added but incomplete or invalid package from being silently ignored.
+func shipmentFormIsValid(packages []*shipmentFormPackage, totalPayoutMinor *int64) bool {
+	if len(packages) == 0 || totalPayoutMinor == nil || *totalPayoutMinor <= 0 {
 		return false
 	}
 	for _, shipment := range packages {
-		if shipment == nil || strings.TrimSpace(shipment.carrier) == "" || strings.TrimSpace(shipment.trackingNumber.Text()) == "" {
+		if shipment == nil || strings.TrimSpace(shipment.carrier) == "" || !validTrackingNumber(shipment.carrier, shipment.trackingNumber.Text()) {
 			return false
 		}
-		if _, valid := parseDollarAmount(shipment.labelCost.Text()); !valid {
+		amountMinor, valid := parseDollarAmount(shipment.labelCost.Text())
+		if !valid || !labelCostBelowHalfPayout(amountMinor, *totalPayoutMinor) {
 			return false
 		}
 	}
@@ -64,8 +68,8 @@ func shipmentFormIsValid(packages []*shipmentFormPackage) bool {
 
 // shipmentRequestFromForm converts fully validated package controls into Faire's batch shipment request.
 // It returns false instead of a partial request when any package is invalid so callers cannot submit only a subset of visible packages.
-func shipmentRequestFromForm(packages []*shipmentFormPackage) (faire.AddShipmentsRequest, bool) {
-	if !shipmentFormIsValid(packages) {
+func shipmentRequestFromForm(packages []*shipmentFormPackage, totalPayoutMinor *int64) (faire.AddShipmentsRequest, bool) {
+	if !shipmentFormIsValid(packages, totalPayoutMinor) {
 		return faire.AddShipmentsRequest{}, false
 	}
 
@@ -73,7 +77,7 @@ func shipmentRequestFromForm(packages []*shipmentFormPackage) (faire.AddShipment
 	for _, shipment := range packages {
 		amountMinor, _ := parseDollarAmount(shipment.labelCost.Text())
 		carrier := strings.TrimSpace(shipment.carrier)
-		trackingNumber := strings.TrimSpace(shipment.trackingNumber.Text())
+		trackingNumber := normalizedTrackingNumber(carrier, shipment.trackingNumber.Text())
 		currency := shipmentCurrency
 		shippingType := faire.ShippingTypeShipOnYourOwn
 		request.Shipments = append(request.Shipments, faire.Shipment{
@@ -84,6 +88,101 @@ func shipmentRequestFromForm(packages []*shipmentFormPackage) (faire.AddShipment
 		})
 	}
 	return request, true
+}
+
+// normalizeShipmentFormBlurredFields writes canonical tracking numbers and dollar amounts back to editors when they lose focus.
+// This makes the displayed values match the request payload without interrupting a user while they are still typing.
+func (view *ordersViewState) normalizeShipmentFormBlurredFields(gtx layout.Context) {
+	for _, shipment := range view.shipmentForm {
+		if shipment == nil {
+			continue
+		}
+		trackingFocused := gtx.Focused(&shipment.trackingNumber)
+		if shipment.trackingFocused && !trackingFocused {
+			shipment.trackingNumber.SetText(normalizedTrackingNumber(shipment.carrier, shipment.trackingNumber.Text()))
+		}
+		shipment.trackingFocused = trackingFocused
+
+		labelCostFocused := gtx.Focused(&shipment.labelCost)
+		if shipment.labelCostFocused && !labelCostFocused {
+			if amountMinor, valid := parseDollarAmount(shipment.labelCost.Text()); valid {
+				shipment.labelCost.SetText(formatDollarAmount(amountMinor))
+			}
+		}
+		shipment.labelCostFocused = labelCostFocused
+	}
+}
+
+// validTrackingNumber applies the selected carrier's rules after removing all whitespace and dashes.
+// Only UPS, FedEx, and USPS have strict documented validation; other carriers remain valid when their normalized tracking number is non-empty.
+func validTrackingNumber(carrier, value string) bool {
+	value = normalizedTrackingNumber(carrier, value)
+	switch carrier {
+	case "UPS":
+		return len(value) == 18 && strings.HasPrefix(value, "1Z") && asciiAlphanumeric(value)
+	case "FEDEX":
+		return (len(value) == 12 || len(value) == 14 || len(value) == 15 || len(value) == 20 || len(value) == 22) && asciiDigits(value)
+	case "USPS":
+		if (len(value) == 20 || len(value) == 22) && asciiDigits(value) {
+			return true
+		}
+		return len(value) == 13 && asciiLetters(value[:2]) && asciiDigits(value[2:11]) && asciiLetters(value[11:])
+	default:
+		return value != ""
+	}
+}
+
+// normalizedTrackingNumber removes user-friendly separators and uppercases carriers whose valid tracking numbers may include letters.
+// The returned value is both validated and sent to Faire, ensuring API input matches the user-visible canonical form after blur.
+func normalizedTrackingNumber(carrier, value string) string {
+	value = strings.Map(func(character rune) rune {
+		if character == '-' || unicode.IsSpace(character) {
+			return -1
+		}
+		return character
+	}, value)
+	if carrier == "UPS" || carrier == "USPS" {
+		return strings.ToUpper(value)
+	}
+	return value
+}
+
+// asciiAlphanumeric reports whether value contains only ASCII letters and digits.
+func asciiAlphanumeric(value string) bool {
+	for index := range len(value) {
+		character := value[index]
+		if !((character >= '0' && character <= '9') || (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiDigits reports whether value contains only ASCII digits.
+func asciiDigits(value string) bool {
+	for index := range len(value) {
+		if value[index] < '0' || value[index] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiLetters reports whether value contains only ASCII letters.
+func asciiLetters(value string) bool {
+	for index := range len(value) {
+		character := value[index]
+		if !((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// labelCostBelowHalfPayout reports whether amountMinor is strictly less than half of the positive payout total.
+// Integer arithmetic avoids floating-point rounding and correctly handles odd-cent payouts, such as allowing 499 cents for a 999-cent payout.
+func labelCostBelowHalfPayout(amountMinor, totalPayoutMinor int64) bool {
+	return totalPayoutMinor > 0 && amountMinor >= 0 && amountMinor <= (totalPayoutMinor-1)/2
 }
 
 // parseDollarAmount converts a non-negative dollar value with at most two decimal places into integer cents.
@@ -116,6 +215,11 @@ func parseDollarAmount(value string) (int64, bool) {
 		return 0, false
 	}
 	return dollars*100 + cents, true
+}
+
+// formatDollarAmount converts non-negative cents into a two-decimal dollar string for a blurred label-cost field.
+func formatDollarAmount(amountMinor int64) string {
+	return strconv.FormatInt(amountMinor/100, 10) + "." + strconv.FormatInt(amountMinor%100+100, 10)[1:]
 }
 
 // resetShipmentForm replaces all unsubmitted package controls with one blank UPS package and closes any carrier menu.

@@ -11,7 +11,7 @@ import (
 )
 
 // Detail is the display-ready, read-only representation of one locally stored Order.
-// It intentionally contains approved text fields, including free-shipping eligibility and reason, plus the typed original-order navigation ID and its formatted display label, without exposing a raw API object or serialized snapshot to layout code.
+// It contains approved text fields, navigation identifiers, and the exact total-payout cents needed to validate a new shipment's label cost without exposing a raw API object or serialized snapshot to layout code.
 type Detail struct {
 	OrderID                faire.OrderID
 	DisplayID              string
@@ -34,6 +34,7 @@ type Detail struct {
 	ShippingAddress        DetailAddress
 	Commission             string
 	TotalPayout            string
+	TotalPayoutMinor       *int64
 	IsFreeShipping         string
 	FreeShippingReason     string
 	PendingCancellation    string
@@ -114,7 +115,9 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		detail.Customer = "—"
 	}
 	if order.PayoutCosts != nil && order.PayoutCosts.TotalPayout != nil && order.PayoutCosts.TotalPayout.AmountMinor != nil && order.PayoutCosts.TotalPayout.Currency != nil {
-		detail.TotalPayout = formatMoney(*order.PayoutCosts.TotalPayout.AmountMinor, *order.PayoutCosts.TotalPayout.Currency)
+		amountMinor := *order.PayoutCosts.TotalPayout.AmountMinor
+		detail.TotalPayoutMinor = &amountMinor
+		detail.TotalPayout = formatMoney(amountMinor, *order.PayoutCosts.TotalPayout.Currency)
 	} else {
 		detail.TotalPayout = "—"
 	}

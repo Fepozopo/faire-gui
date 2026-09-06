@@ -127,6 +127,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 // It drains every action event even while confirmation is disabled, preventing a prior disabled click from submitting a later valid form.
 func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 	view := &ui.orders.view
+	view.normalizeShipmentFormBlurredFields(gtx)
 	addPackageClicked := view.addPackageButton.Clicked(gtx)
 	confirmShipmentsClicked := view.confirmShipmentsButton.Clicked(gtx)
 	if view.shipmentSubmitting {
@@ -175,7 +176,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 		ui.invalidate()
 		return
 	}
-	if confirmShipmentsClicked && shipmentFormIsValid(view.shipmentForm) {
+	if confirmShipmentsClicked && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
 		ui.submitShipmentForm()
 		ui.invalidate()
 	}
@@ -258,7 +259,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 				layout.Rigid(underlinedTextAction(ui.theme, &view.addPackageButton, "Add package")),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentFormIsValid(view.shipmentForm) && !view.shipmentSubmitting {
+					if shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting {
 						return primaryButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
 					}
 					return disabledShipmentButton(ui.theme, "Confirm")(gtx)
