@@ -188,6 +188,47 @@ func TestMoveToProcessingSendsOptionalExpectedShipDate(t *testing.T) {
 	}
 }
 
+// TestUpdateItemsAvailabilitySerializesVariantMap verifies selected variants submit one zero-availability batch using the documented variant-keyed endpoint.
+func TestUpdateItemsAvailabilitySerializesVariantMap(t *testing.T) {
+	client := newTestClient(t, func(request *http.Request) *http.Response {
+		if request.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", request.Method)
+		}
+		if request.URL.Path != "/orders/order-123/items/availability" {
+			t.Fatalf("path = %q, want item availability endpoint", request.URL.Path)
+		}
+		var payload map[string]map[string]map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode availability payload: %v", err)
+		}
+		availabilities := payload["availabilities"]
+		if len(availabilities) != 2 {
+			t.Fatalf("availabilities = %#v, want two variants", availabilities)
+		}
+		if first := availabilities["variant-1"]; len(first) != 1 || first["available_quantity"] != float64(0) {
+			t.Fatalf("variant-1 payload = %#v, want only available_quantity: 0", first)
+		}
+		if second := availabilities["variant-2"]; len(second) != 1 || second["available_quantity"] != float64(0) {
+			t.Fatalf("variant-2 payload = %#v, want only available_quantity: 0", second)
+		}
+		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
+	})
+
+	zero := int64(0)
+	order, err := client.Orders.UpdateItemsAvailability(context.Background(), OrderID("order-123"), UpdateOrderItemsAvailabilityRequest{
+		Availabilities: map[VariantID]ItemAvailability{
+			"variant-1": {AvailableQuantity: &zero},
+			"variant-2": {AvailableQuantity: Ptr(int64(0))},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateItemsAvailability() error = %v", err)
+	}
+	if order.ID == nil || *order.ID != "order-123" || order.State == nil || *order.State != OrderStateProcessing {
+		t.Fatalf("UpdateItemsAvailability() order = %#v", order)
+	}
+}
+
 // TestMoveToProcessingOmitsExpectedShipDate verifies the processing endpoint receives no expected date field when the caller preserves a requested date.
 func TestMoveToProcessingOmitsExpectedShipDate(t *testing.T) {
 	client := newTestClient(t, func(request *http.Request) *http.Response {

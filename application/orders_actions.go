@@ -80,7 +80,19 @@ type shipmentSubmissionResult struct {
 	ApplyNewOrdersCount bool
 }
 
-// orderProcessingResult carries one completed selected-order processing batch back to the Gio frame loop.
+// itemAvailabilityResult carries a completed item-availability submission back to the frame loop.
+// It contains only safe status text or a typed persisted detail model, never credentials or a raw Faire response.
+type itemAvailabilityResult struct {
+	RequestID           uint64
+	ConnectionID        string
+	OrderID             faire.OrderID
+	Detail              orders.Detail
+	Status              string
+	NewOrdersCount      int
+	ApplyNewOrdersCount bool
+}
+
+// orderProcessingResult carries one completed selected-order processing batch back to the frame loop.
 // ProcessedIDs identify only successful endpoint calls, Rows replaces visible safe table projections, and Status never exposes API bodies or order details.
 type orderProcessingResult struct {
 	RequestID           uint64
@@ -188,6 +200,27 @@ func shipmentSubmissionErrorMessage(err error) string {
 	return "Shipment information could not be added. Check the saved connection and try again."
 }
 
+// itemAvailabilityErrorMessage converts an availability endpoint failure into safe feedback while retaining the user's draft for retry.
+// It deliberately omits raw API response bodies because they can contain private order and account information.
+func itemAvailabilityErrorMessage(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "Updating item availability was canceled."
+	}
+	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
+		switch apiError.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."
+		case http.StatusTooManyRequests:
+			return "Faire is rate limiting requests. Wait a moment, then try again."
+		case http.StatusBadRequest:
+			return "Faire rejected the item availability update. Check the selected items and try again."
+		default:
+			return fmt.Sprintf("Faire could not update item availability (HTTP %d). Try again later.", apiError.StatusCode)
+		}
+	}
+	return "Item availability could not be updated. Check the saved connection and try again."
+}
+
 // moveToProcessingErrorMessage converts a processing endpoint failure into safe, actionable UI feedback.
 // It deliberately omits response bodies because they can contain private order or account information.
 func moveToProcessingErrorMessage(err error) string {
@@ -241,9 +274,12 @@ func (ui *DesktopUI) setActiveConnection(connection connections.Connection) {
 	// A completion from the prior connection must not overwrite this connection's Orders status.
 	ui.orders.exportRequestID++
 	ui.orders.detailRequestID++
+	ui.orders.availabilityRequestID++
 	ui.orders.view.exporting = false
 	ui.orders.view.orderDetailOpen = false
 	ui.orders.view.orderDetailLoading = false
+	ui.orders.view.availabilitySubmitting = false
+	ui.orders.view.resetPendingUnavailable()
 	ui.orders.view.orderDetail = orders.Detail{}
 	ui.orders.view.orderDetailID = ""
 	ui.orders.view.orderDetailConnectionID = ""
@@ -435,6 +471,8 @@ func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
 	ui.orders.view.orderDetailID, ui.orders.view.orderDetailConnectionID = orderID, connectionID
 	ui.orders.view.orderDetail = orders.Detail{}
 	ui.orders.view.shipmentSubmitting = false
+	ui.orders.view.availabilitySubmitting = false
+	ui.orders.view.resetPendingUnavailable()
 	ui.orders.view.resetShipmentForm()
 	ui.orders.view.detailList.Position.First = 0
 	ui.orders.view.detailList.Position.Offset = 0
@@ -444,13 +482,27 @@ func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
 	})
 }
 
-// refreshOrderDetail explicitly retrieves the currently open order and atomically replaces its local snapshot without advancing the feed checkpoint.
+// refreshOrderDetail asks the user to discard local availability choices before replacing the open order with Faire's latest data.
+// A refresh never silently removes unsubmitted availability decisions.
 func (ui *DesktopUI) refreshOrderDetail() {
+	if ui.orders.view.availabilitySubmitting {
+		return
+	}
+	if ui.orders.view.hasPendingUnavailable() {
+		ui.orders.view.availabilityDiscardRefreshOpen = true
+		return
+	}
+	ui.refreshOrderDetailNow()
+}
+
+// refreshOrderDetailNow explicitly retrieves the currently open order and atomically replaces its local snapshot without advancing the feed checkpoint.
+// Callers must first resolve any local availability draft so the fetched detail cannot discard it without user intent.
+func (ui *DesktopUI) refreshOrderDetailNow() {
 	if ui.orders.view.orderDetailID == "" || ui.orders.view.orderDetailConnectionID != ui.activeConnectionID || ui.orders.store == nil || ui.manager == nil {
 		ui.orders.view.orderDetailStatus = "Order details cannot be refreshed until an active saved connection is available."
 		return
 	}
-	if ui.orders.view.orderDetailLoading || ui.orders.view.state.Loading {
+	if ui.orders.view.orderDetailLoading || ui.orders.view.state.Loading || ui.orders.view.availabilitySubmitting {
 		return
 	}
 	ui.orders.detailRequestID++
@@ -483,6 +535,29 @@ func (ui *DesktopUI) submitShipmentForm() {
 	})
 }
 
+// submitItemAvailability validates the local unavailable-item draft and starts one asynchronous Faire availability update.
+// The request is built on the frame goroutine from immutable presentation values before a worker starts.
+func (ui *DesktopUI) submitItemAvailability() {
+	view := &ui.orders.view
+	if view.availabilitySubmitting || view.orderDetailID == "" || view.orderDetailConnectionID != ui.activeConnectionID || !itemAvailabilityVisible(view.orderDetail) || ui.orders.store == nil || ui.manager == nil {
+		return
+	}
+	request, valid := availabilityRequestFromDraft(view.orderDetail.Items, view.pendingUnavailable)
+	if !valid {
+		view.orderDetailStatus = "The selected items cannot be reported unavailable. Refresh the order and try again."
+		return
+	}
+	ui.orders.availabilityRequestID++
+	requestID := ui.orders.availabilityRequestID
+	connectionID, orderID := ui.activeConnectionID, view.orderDetailID
+	view.availabilitySubmitting = true
+	view.availabilityConfirmOpen = false
+	view.orderDetailStatus = "Updating item availability with Faire…"
+	ui.orders.startWorker(func() {
+		ui.orders.updateItemsAvailabilityAndPersistDetail(requestID, connectionID, orderID, request)
+	})
+}
+
 // addShipmentsAndPersistDetail submits a validated shipment batch, persists Faire's returned order, and publishes display-safe detail.
 // request was built on the frame goroutine, and all errors are converted to safe status text before the result is queued.
 func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint64, connectionID string, orderID faire.OrderID, request faire.AddShipmentsRequest) {
@@ -511,6 +586,36 @@ func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint6
 		result.ApplyNewOrdersCount = true
 	}
 	controller.publishShipmentResult(result)
+}
+
+// updateItemsAvailabilityAndPersistDetail submits one variant-keyed availability batch, persists Faire's returned order, and publishes a display-safe result.
+// request was captured on the frame goroutine, and all failures preserve only safe retry guidance for the user.
+func (controller *ordersController) updateItemsAvailabilityAndPersistDetail(requestID uint64, connectionID string, orderID faire.OrderID, request faire.UpdateOrderItemsAvailabilityRequest) {
+	if controller.manager == nil {
+		controller.publishItemAvailabilityResult(itemAvailabilityResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Item availability cannot be updated until an active saved connection is available."})
+		return
+	}
+	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
+	if err != nil {
+		controller.publishItemAvailabilityResult(itemAvailabilityResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: itemAvailabilityErrorMessage(err)})
+		return
+	}
+	order, err := client.Orders.UpdateItemsAvailability(controller.ctx, orderID, request)
+	if err != nil {
+		controller.publishItemAvailabilityResult(itemAvailabilityResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: itemAvailabilityErrorMessage(err)})
+		return
+	}
+	record, err := controller.persistRemoteOrder(connectionID, order)
+	if err != nil {
+		controller.publishItemAvailabilityResult(itemAvailabilityResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
+		return
+	}
+	result := itemAvailabilityResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)}
+	if count, found := newOrdersCount(controller.ctx, controller.store, connectionID); found {
+		result.NewOrdersCount = count
+		result.ApplyNewOrdersCount = true
+	}
+	controller.publishItemAvailabilityResult(result)
 }
 
 // startMoveSelectedOrdersToProcessing validates the selected order scope and starts a non-blocking bulk processing request.
@@ -684,6 +789,11 @@ func (ui *DesktopUI) drainOrderDetailResults() {
 // drainShipmentSubmissionResults delegates current shipment-submission result validation to the feature controller.
 func (ui *DesktopUI) drainShipmentSubmissionResults() {
 	ui.orders.drainShipmentResults(ui.activeConnectionID)
+}
+
+// drainItemAvailabilityResults delegates current availability-submission result validation to the feature controller.
+func (ui *DesktopUI) drainItemAvailabilityResults() {
+	ui.orders.drainItemAvailabilityResults(ui.activeConnectionID)
 }
 
 // drainOrderProcessingResults applies current selected-order processing outcomes on Gio's frame goroutine.

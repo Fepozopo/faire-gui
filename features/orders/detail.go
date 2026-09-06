@@ -42,13 +42,17 @@ type Detail struct {
 }
 
 // DetailItem is the display-ready subset of one ordered product or variant.
+// VariantID and OrderedQuantity retain the minimum validated identity and quantity needed to report an item unavailable without exposing a raw API object to layout code.
 type DetailItem struct {
-	ProductName    string
-	VariantName    string
-	SKU            string
-	Quantity       string
-	Price          string
-	Customizations []DetailCustomization
+	ProductName          string
+	VariantName          string
+	SKU                  string
+	Quantity             string
+	Price                string
+	VariantID            faire.VariantID
+	OrderedQuantity      int64
+	AvailabilityEligible bool
+	Customizations       []DetailCustomization
 }
 
 // DetailCustomization is one approved retailer-provided item customization value.
@@ -150,13 +154,24 @@ func presentDetailItems(items []faire.OrderItem) []DetailItem {
 		if item.Price != nil && item.Price.AmountMinor != nil && item.Price.Currency != nil {
 			price = formatMoney(*item.Price.AmountMinor, *item.Price.Currency)
 		}
+		variantID := faire.VariantID("")
+		if item.VariantID != nil {
+			variantID = *item.VariantID
+		}
+		orderedQuantity := int64(0)
+		if item.Quantity != nil {
+			orderedQuantity = *item.Quantity
+		}
 		presented[index] = DetailItem{
-			ProductName:    safeDetailText(optionalText(item.ProductName)),
-			VariantName:    safeDetailText(optionalText(item.VariantName)),
-			SKU:            safeDetailText(optionalText(item.SKU)),
-			Quantity:       quantity,
-			Price:          price,
-			Customizations: presentDetailCustomizations(item.Customizations),
+			ProductName:          safeDetailText(optionalText(item.ProductName)),
+			VariantName:          safeDetailText(optionalText(item.VariantName)),
+			SKU:                  safeDetailText(optionalText(item.SKU)),
+			Quantity:             quantity,
+			Price:                price,
+			VariantID:            variantID,
+			OrderedQuantity:      orderedQuantity,
+			AvailabilityEligible: variantID != "" && orderedQuantity > 0,
+			Customizations:       presentDetailCustomizations(item.Customizations),
 		}
 	}
 	return presented

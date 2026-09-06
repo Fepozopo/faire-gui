@@ -15,19 +15,20 @@ import (
 )
 
 var (
-	cardBackground          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	selectionBarColor       = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
-	formBackground          = selectionBarColor
-	shipmentPanelBackground = color.NRGBA{R: 238, G: 238, B: 238, A: 255}
-	disabledButtonColor     = color.NRGBA{R: 210, G: 210, B: 210, A: 255}
-	disabledButtonTextColor = color.NRGBA{R: 112, G: 112, B: 112, A: 255}
-	mutedTextColor          = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
-	dangerColor             = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
-	modalScrimColor         = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
-	panelBorderColor        = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
-	activityColor           = color.NRGBA{R: 246, G: 239, B: 219, A: 255}
-	primaryButtonColor      = color.NRGBA{R: 74, G: 85, B: 104, A: 255}
-	primaryButtonText       = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	cardBackground             = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	selectionBarColor          = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
+	unavailableDraftBackground = color.NRGBA{R: 251, G: 239, B: 236, A: 255}
+	formBackground             = selectionBarColor
+	shipmentPanelBackground    = color.NRGBA{R: 238, G: 238, B: 238, A: 255}
+	disabledButtonColor        = color.NRGBA{R: 210, G: 210, B: 210, A: 255}
+	disabledButtonTextColor    = color.NRGBA{R: 112, G: 112, B: 112, A: 255}
+	mutedTextColor             = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	dangerColor                = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
+	modalScrimColor            = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
+	panelBorderColor           = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
+	activityColor              = color.NRGBA{R: 246, G: 239, B: 219, A: 255}
+	primaryButtonColor         = color.NRGBA{R: 74, G: 85, B: 104, A: 255}
+	primaryButtonText          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )
 
 // inputField draws an editor on a white surface with enough padding for a practical touch and mouse target.

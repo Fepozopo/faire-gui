@@ -52,17 +52,19 @@ type ordersController struct {
 	workers *sync.WaitGroup
 	view    ordersViewState
 
-	loadResults       chan orderLoadResult
-	detailResults     chan orderDetailResult
-	shipmentResults   chan shipmentSubmissionResult
-	processingResults chan orderProcessingResult
-	exportResults     chan orderExportResult
-	dataActionResults chan ordersDataActionEvent
-	invalidate        func()
+	loadResults         chan orderLoadResult
+	detailResults       chan orderDetailResult
+	shipmentResults     chan shipmentSubmissionResult
+	availabilityResults chan itemAvailabilityResult
+	processingResults   chan orderProcessingResult
+	exportResults       chan orderExportResult
+	dataActionResults   chan ordersDataActionEvent
+	invalidate          func()
 
 	loadRequestID          uint64
 	detailRequestID        uint64
 	shipmentRequestID      uint64
+	availabilityRequestID  uint64
 	processingRequestID    uint64
 	exportRequestID        uint64
 	dataStatusRequestID    uint64
@@ -73,18 +75,19 @@ type ordersController struct {
 // ctx defines worker cancellation, store scopes local persistence, manager constructs authenticated clients by connection ID, workers tracks owned asynchronous work for shutdown, and invalidate requests a safe redraw after a result is queued.
 func newOrdersController(ctx context.Context, store ordersstore.Store, manager *connections.Manager, workers *sync.WaitGroup, invalidate func()) *ordersController {
 	return &ordersController{
-		ctx:               ctx,
-		store:             store,
-		manager:           manager,
-		workers:           workers,
-		view:              newOrdersViewState(),
-		loadResults:       make(chan orderLoadResult, 4),
-		detailResults:     make(chan orderDetailResult, 2),
-		shipmentResults:   make(chan shipmentSubmissionResult, 1),
-		processingResults: make(chan orderProcessingResult, 1),
-		exportResults:     make(chan orderExportResult, 1),
-		dataActionResults: make(chan ordersDataActionEvent, 2),
-		invalidate:        invalidate,
+		ctx:                 ctx,
+		store:               store,
+		manager:             manager,
+		workers:             workers,
+		view:                newOrdersViewState(),
+		loadResults:         make(chan orderLoadResult, 4),
+		detailResults:       make(chan orderDetailResult, 2),
+		shipmentResults:     make(chan shipmentSubmissionResult, 1),
+		availabilityResults: make(chan itemAvailabilityResult, 1),
+		processingResults:   make(chan orderProcessingResult, 1),
+		exportResults:       make(chan orderExportResult, 1),
+		dataActionResults:   make(chan ordersDataActionEvent, 2),
+		invalidate:          invalidate,
 	}
 }
 
@@ -220,6 +223,19 @@ func (controller *ordersController) publishOrderDetailResult(result orderDetailR
 func (controller *ordersController) publishShipmentResult(result shipmentSubmissionResult) {
 	select {
 	case controller.shipmentResults <- result:
+	case <-controller.ctx.Done():
+		return
+	}
+	if controller.invalidate != nil {
+		controller.invalidate()
+	}
+}
+
+// publishItemAvailabilityResult sends one availability-submission outcome unless application shutdown has begun.
+// Results contain only display-safe order detail or status text and are applied exclusively by the frame goroutine.
+func (controller *ordersController) publishItemAvailabilityResult(result itemAvailabilityResult) {
+	select {
+	case controller.availabilityResults <- result:
 	case <-controller.ctx.Done():
 		return
 	}
@@ -389,6 +405,32 @@ func (controller *ordersController) drainShipmentResults(activeConnectionID stri
 			controller.view.orderDetail = result.Detail
 			controller.view.orderDetailStatus = "Shipment information was added."
 			controller.view.resetShipmentForm()
+		default:
+			return
+		}
+	}
+}
+
+// drainItemAvailabilityResults applies only the latest availability result for the active order and connection.
+// Failed updates retain the local draft for retry, while a persisted success replaces the detail and clears that draft.
+func (controller *ordersController) drainItemAvailabilityResults(activeConnectionID string) {
+	for {
+		select {
+		case result := <-controller.availabilityResults:
+			if result.RequestID != controller.availabilityRequestID || result.ConnectionID != activeConnectionID || result.OrderID != controller.view.orderDetailID {
+				continue
+			}
+			controller.view.availabilitySubmitting = false
+			if result.ApplyNewOrdersCount {
+				controller.view.newCount = result.NewOrdersCount
+			}
+			if result.Status != "" {
+				controller.view.orderDetailStatus = result.Status
+				continue
+			}
+			controller.view.orderDetail = result.Detail
+			controller.view.orderDetailStatus = "Item availability was updated."
+			controller.view.resetPendingUnavailable()
 		default:
 			return
 		}
