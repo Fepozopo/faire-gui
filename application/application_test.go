@@ -590,6 +590,33 @@ func TestOrderExportCompletionStatusReportsPartialPackingSlipFailures(t *testing
 	}
 }
 
+// TestPackingSlipExportCompletionStatusOmitsCSV verifies the standalone packing-slip action reports only its PDF artifacts.
+func TestPackingSlipExportCompletionStatusOmitsCSV(t *testing.T) {
+	t.Parallel()
+
+	message := packingSlipExportCompletionStatus("faire-selected-orders-20260321142530", packingSlipSummary{downloaded: 2, combined: true})
+	want := "Saved 2 packing slips in faire-selected-orders-20260321142530. Also created all-packing-slips.pdf."
+	if message != want || strings.Contains(message, "CSV") {
+		t.Fatalf("packing-slip completion message = %q, want %q without CSV", message, want)
+	}
+}
+
+// TestPackingSlipOnlyCompletionMessageUsesPDFSummary verifies the export completion dialog does not render an empty CSV filename for the standalone action.
+func TestPackingSlipOnlyCompletionMessageUsesPDFSummary(t *testing.T) {
+	t.Parallel()
+
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.orders.view.packingSlipsOnly = true
+	ui.orders.view.packingSlipExportFolder = "faire-selected-orders-20260321142530"
+	ui.orders.view.packingSlipExportCount = 1
+	ui.orders.view.packingSlipExportCombined = true
+
+	want := "Saved 1 packing slip in faire-selected-orders-20260321142530. Also created all-packing-slips.pdf."
+	if message := ui.orderExportCompletionMessage(); message != want {
+		t.Fatalf("orderExportCompletionMessage() = %q, want %q", message, want)
+	}
+}
+
 // TestDrainStartupResultsMakesTheApplicationInteractive verifies background startup data becomes UI-owned only on the frame goroutine.
 func TestDrainStartupResultsMakesTheApplicationInteractive(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "Preparing local data…")

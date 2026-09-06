@@ -112,7 +112,7 @@ type localCursorPayload struct {
 	OrderID   string     `json:"order_id"`
 }
 
-// orderExportKind identifies the server-defined set of orders written to a CSV file.
+// orderExportKind identifies an order scope used by CSV exports and packing-slip artifact names.
 type orderExportKind string
 
 // orderExportOptions describes the per-export CSV and packing-slip choices selected in the dialog.
@@ -137,12 +137,12 @@ const (
 	orderExportNew orderExportKind = "new"
 	// orderExportBackordered writes every currently backordered Faire order.
 	orderExportBackordered orderExportKind = "backordered"
-	// orderExportSelected writes every order selected in the current Orders table.
+	// orderExportSelected identifies every order selected in the current Orders table.
 	orderExportSelected orderExportKind = "selected"
 )
 
 // orderExportResult carries credential-safe export completion, blocking, and saved-artifact state to the frame loop.
-// PackingSlipFolder is set only for packing-slip exports, while PackingSlipFailures records safe partial-completion counts.
+// Filename is set for CSV exports, while packing-slip fields describe the PDF folder, safe partial-completion counts, and combined-document outcome.
 type orderExportResult struct {
 	RequestID           uint64
 	Status              string
@@ -150,6 +150,7 @@ type orderExportResult struct {
 	PackingSlipFolder   string
 	PackingSlipCount    int
 	PackingSlipFailures int
+	PackingSlipCombined bool
 	Blocked             bool
 	Completed           bool
 }
@@ -1031,6 +1032,7 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind, options orderExportO
 		ui.orders.view.state.Status = "Select one or more orders before exporting selected orders."
 		return
 	}
+	ui.orders.view.packingSlipsOnly = false
 	ui.orders.view.exporting = true
 	ui.orders.exportRequestID++
 	requestID := ui.orders.exportRequestID
@@ -1038,6 +1040,33 @@ func (ui *DesktopUI) startOrderExport(kind orderExportKind, options orderExportO
 	ui.orders.view.state.Status = "Exporting orders…"
 	ui.orders.startWorker(func() {
 		ui.orders.exportOrders(requestID, connectionID, kind, selectedIDs, options)
+	})
+}
+
+// startSelectedPackingSlipExport validates the selected Orders rows and downloads their PDFs without creating a CSV.
+// It captures the selection before starting a worker so frame-loop state remains safe while Faire requests and filesystem writes are in progress.
+func (ui *DesktopUI) startSelectedPackingSlipExport() {
+	if ui.manager == nil || ui.activeConnectionID == "" {
+		ui.orders.view.state.Status = "Choose an active saved connection before printing packing slips."
+		return
+	}
+	if ui.orders.view.state.Loading || ui.orders.view.exporting {
+		ui.orders.view.state.Status = "Wait for the current Orders operation to finish before printing packing slips."
+		return
+	}
+	selectedIDs := selectedOrderIDs(ui.orders.view.state.SelectedIDs)
+	if len(selectedIDs) == 0 {
+		ui.orders.view.state.Status = "Select one or more orders before printing packing slips."
+		return
+	}
+	ui.orders.view.packingSlipsOnly = true
+	ui.orders.view.exporting = true
+	ui.orders.exportRequestID++
+	requestID := ui.orders.exportRequestID
+	connectionID := ui.activeConnectionID
+	ui.orders.view.state.Status = "Downloading packing slips…"
+	ui.orders.startWorker(func() {
+		ui.orders.exportSelectedPackingSlips(requestID, connectionID, selectedIDs)
 	})
 }
 
@@ -1091,6 +1120,40 @@ func (controller *ordersController) exportOrders(requestID uint64, connectionID 
 		PackingSlipFolder:   packingSlipFolder,
 		PackingSlipCount:    packingSlipSummary.downloaded,
 		PackingSlipFailures: packingSlipSummary.failures,
+		PackingSlipCombined: packingSlipSummary.combined,
+		Completed:           true,
+	})
+}
+
+// exportSelectedPackingSlips retrieves complete selected orders, then saves their individual and combined packing-slip PDFs without creating a CSV.
+// requestID identifies the worker, connectionID scopes credentials, and selectedIDs capture the immutable Orders selection from the frame loop.
+func (controller *ordersController) exportSelectedPackingSlips(requestID uint64, connectionID string, selectedIDs []faire.OrderID) {
+	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
+	if err != nil {
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: packingSlipExportErrorMessage(err)})
+		return
+	}
+	source, err := exportSelectedOrders(controller.ctx, client.Orders, selectedIDs)
+	if err != nil {
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: packingSlipExportErrorMessage(err)})
+		return
+	}
+	folder, summary, err := writePackingSlipExport(controller.ctx, client.Orders, source)
+	if err != nil {
+		status := "Could not save packing slips to Downloads. Check folder permissions and try again."
+		if errors.Is(err, context.Canceled) {
+			status = packingSlipExportErrorMessage(err)
+		}
+		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: status})
+		return
+	}
+	controller.publishOrderExportResult(orderExportResult{
+		RequestID:           requestID,
+		Status:              packingSlipExportCompletionStatus(folder, summary),
+		PackingSlipFolder:   folder,
+		PackingSlipCount:    summary.downloaded,
+		PackingSlipFailures: summary.failures,
+		PackingSlipCombined: summary.combined,
 		Completed:           true,
 	})
 }
@@ -1177,7 +1240,21 @@ func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, sou
 	return summary, nil
 }
 
-// createPackingSlipExportDirectory creates one owner-only timestamped folder under Downloads for a CSV and its packing-slip PDFs.
+// writePackingSlipExport creates a selected-order Downloads folder and saves one PDF per order plus the combined PDF without creating a CSV.
+// ctx cancels PDF work, service retrieves the PDFs, source identifies complete selected orders, and it returns the user-facing folder name with a safe summary or an error.
+func writePackingSlipExport(ctx context.Context, service *faire.OrdersService, source []faire.Order) (folder string, summary packingSlipSummary, err error) {
+	directory, folder, err := createPackingSlipExportDirectory(orderExportSelected)
+	if err != nil {
+		return "", packingSlipSummary{}, err
+	}
+	summary, err = downloadPackingSlips(ctx, service, source, directory)
+	if err != nil {
+		return "", packingSlipSummary{}, err
+	}
+	return folder, summary, nil
+}
+
+// createPackingSlipExportDirectory creates one owner-only timestamped folder under Downloads for packing-slip export artifacts.
 // kind identifies the exported scope, and it returns the absolute directory and its user-facing folder name or a filesystem error.
 func createPackingSlipExportDirectory(kind orderExportKind) (directory, folder string, err error) {
 	downloadsDirectory, err := downloadsDirectory()
@@ -1256,6 +1333,21 @@ func safeFilenameComponent(value string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "._")
+}
+
+// packingSlipExportCompletionStatus returns a safe completion message for a packing-slip-only export.
+// folder identifies the user-visible Downloads subdirectory, summary contains only artifact counts and combined-file status, and the returned message excludes private order details.
+func packingSlipExportCompletionStatus(folder string, summary packingSlipSummary) string {
+	status := "Saved " + packingSlipCountLabel(summary.downloaded) + " in " + folder + "."
+	if summary.combined {
+		status += " Also created " + combinedPackingSlipsFilename + "."
+	} else if summary.downloaded > 0 {
+		status += " The combined packing-slip PDF could not be created."
+	}
+	if summary.failures > 0 {
+		status += " " + packingSlipCountLabel(summary.failures) + " could not be downloaded."
+	}
+	return status
 }
 
 // orderExportCompletionStatus returns a safe completion message for CSV-only, complete packing-slip, and partial packing-slip exports.
@@ -1419,6 +1511,25 @@ func ordersExportErrorMessage(err error) string {
 		}
 	}
 	return "Orders could not be exported. Check the saved connection and try again."
+}
+
+// packingSlipExportErrorMessage converts a packing-slip download failure to credential-safe user feedback.
+// err is the underlying client, Faire API, or cancellation failure, and the returned message intentionally omits private API details.
+func packingSlipExportErrorMessage(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "Packing-slip download was canceled."
+	}
+	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
+		switch apiError.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."
+		case http.StatusTooManyRequests:
+			return "Faire is rate limiting requests. Wait a moment, then print packing slips again."
+		default:
+			return fmt.Sprintf("Faire could not download packing slips (HTTP %d). Try again later.", apiError.StatusCode)
+		}
+	}
+	return "Packing slips could not be downloaded. Check the saved connection and try again."
 }
 
 // publishOrderExportResult sends an export result unless application shutdown has begun.

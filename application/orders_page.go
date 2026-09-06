@@ -261,7 +261,7 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 }
 
 // layoutOrderActionBar renders selection context and bulk actions on a muted toolbar that spans the available table width.
-// Order details are opened directly from each row's order-number control, while ship-date editing is enabled only for a non-empty selection.
+// Order details are opened directly from each row's order-number control, while packing-slip printing and ship-date editing are enabled only for a non-empty selection.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return layout.Background{}.Layout(gtx,
@@ -270,6 +270,15 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(20), Bottom: unit.Dp(10), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				packingSlipsEnabled := len(ui.orders.view.state.SelectedIDs) > 0 && !ui.orders.view.exporting
+				if packingSlipsEnabled && ui.orders.view.printPackingSlipsButton.Clicked(gtx) {
+					ui.startSelectedPackingSlipExport()
+					ui.invalidate()
+				}
+				packingSlipsAction := disabledUnderlinedTextAction(ui.theme, "Print packing slips")
+				if packingSlipsEnabled {
+					packingSlipsAction = underlinedTextAction(ui.theme, &ui.orders.view.printPackingSlipsButton, "Print packing slips")
+				}
 				shipDateEnabled := len(ui.orders.view.state.SelectedIDs) > 0 && !ui.orders.view.processingOrders
 				if shipDateEnabled && ui.orders.view.editShipDateButton.Clicked(gtx) {
 					now := time.Now()
@@ -286,6 +295,8 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.exportMenuButton, "Export")),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+					layout.Rigid(packingSlipsAction),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 					layout.Rigid(shipDateAction),
 				)
 			})
@@ -533,12 +544,18 @@ func (ui *DesktopUI) layoutOrderExportMenu(gtx layout.Context) layout.Dimensions
 	})
 }
 
-// layoutOrderExportProgressDialog blocks further interaction while a CSV export and any selected packing slips are being written.
-// It closes automatically when the export worker publishes its completion, blocked, or error result.
+// layoutOrderExportProgressDialog blocks further interaction while a CSV export or packing-slip-only download is being written.
+// It closes automatically when the worker publishes its completion, blocked, or error result.
 func (ui *DesktopUI) layoutOrderExportProgressDialog(gtx layout.Context) layout.Dimensions {
-	return modalPanel(gtx, ui, "Exporting orders", func(gtx layout.Context) layout.Dimensions {
+	title := "Exporting orders"
+	message := "Your export is in progress. This window will close automatically when it is complete."
+	if ui.orders.view.packingSlipsOnly {
+		title = "Downloading packing slips"
+		message = "Your packing slips are being saved in Downloads. This window will close automatically when they are complete."
+	}
+	return modalPanel(gtx, ui, title, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(bodyText(ui.theme, "Your export is in progress. This window will close automatically when it is complete.", mutedTextColor)),
+			layout.Rigid(bodyText(ui.theme, message, mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 			layout.Rigid(bodyText(ui.theme, "Downloading selected packing slips may take a little longer.", mutedTextColor)),
 		)
@@ -622,7 +639,7 @@ func (ui *DesktopUI) layoutCSVExportBlockedDialog(gtx layout.Context) layout.Dim
 	})
 }
 
-// layoutCSVExportCompletedDialog confirms the CSV location and any complete or partial packing-slip outcome after artifacts are safely written.
+// layoutCSVExportCompletedDialog confirms CSV or packing-slip-only artifact locations after files are safely written.
 // gtx supplies the current frame, and the returned dimensions render the safe completion summary and close action.
 func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.Dimensions {
 	if ui.orders.view.closeCSVExportCompleted.Clicked(gtx) {
@@ -631,9 +648,15 @@ func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.D
 		ui.orders.view.packingSlipExportFolder = ""
 		ui.orders.view.packingSlipExportCount = 0
 		ui.orders.view.packingSlipExportFailure = 0
+		ui.orders.view.packingSlipExportCombined = false
+		ui.orders.view.packingSlipsOnly = false
 		ui.invalidate()
 	}
-	return modalPanel(gtx, ui, "Export complete", func(gtx layout.Context) layout.Dimensions {
+	title := "Export complete"
+	if ui.orders.view.packingSlipsOnly {
+		title = "Packing slips complete"
+	}
+	return modalPanel(gtx, ui, title, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(bodyText(ui.theme, ui.orderExportCompletionMessage(), mutedTextColor)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
@@ -642,14 +665,24 @@ func (ui *DesktopUI) layoutCSVExportCompletedDialog(gtx layout.Context) layout.D
 	})
 }
 
-// orderExportCompletionMessage returns the dialog summary for a CSV-only, complete packing-slip, or partial packing-slip export.
+// orderExportCompletionMessage returns the dialog summary for a CSV, packing-slip-only, complete, or partial export.
 // It has no parameters and returns safe text derived only from already-saved artifact names and counts.
 func (ui *DesktopUI) orderExportCompletionMessage() string {
+	if ui.orders.view.packingSlipsOnly {
+		return packingSlipExportCompletionStatus(ui.orders.view.packingSlipExportFolder, packingSlipSummary{
+			downloaded: ui.orders.view.packingSlipExportCount,
+			failures:   ui.orders.view.packingSlipExportFailure,
+			combined:   ui.orders.view.packingSlipExportCombined,
+		})
+	}
 	message := "Saved in Downloads as " + ui.orders.view.csvExportCompletedFile + "."
 	if ui.orders.view.packingSlipExportFolder == "" {
 		return message
 	}
 	message += " Saved " + packingSlipCountLabel(ui.orders.view.packingSlipExportCount) + " in " + ui.orders.view.packingSlipExportFolder + "."
+	if ui.orders.view.packingSlipExportCombined {
+		message += " Also created " + combinedPackingSlipsFilename + "."
+	}
 	if ui.orders.view.packingSlipExportFailure > 0 {
 		message += " " + packingSlipCountLabel(ui.orders.view.packingSlipExportFailure) + " could not be downloaded."
 	}

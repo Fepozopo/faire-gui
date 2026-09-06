@@ -334,7 +334,7 @@ func (controller *ordersController) drainProcessingResults(activeConnectionID st
 }
 
 // drainExportResults accepts only results for the current export request and updates export presentation state.
-// It runs on the frame goroutine and retains only intentional artifact names and safe partial-failure counts.
+// It runs on the frame goroutine and retains only intentional artifact names, combined-PDF state, and safe partial-failure counts.
 func (controller *ordersController) drainExportResults() {
 	for {
 		select {
@@ -352,6 +352,7 @@ func (controller *ordersController) drainExportResults() {
 				controller.view.packingSlipExportFolder = result.PackingSlipFolder
 				controller.view.packingSlipExportCount = result.PackingSlipCount
 				controller.view.packingSlipExportFailure = result.PackingSlipFailures
+				controller.view.packingSlipExportCombined = result.PackingSlipCombined
 				controller.view.csvExportCompletedOpen = true
 			}
 		default:

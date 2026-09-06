@@ -82,6 +82,8 @@ type ordersViewState struct {
 	packingSlipExportFolder        string
 	packingSlipExportCount         int
 	packingSlipExportFailure       int
+	packingSlipExportCombined      bool
+	packingSlipsOnly               bool
 	dataDialog                     ordersDataDialogState
 
 	list       widget.List
@@ -103,6 +105,7 @@ type ordersViewState struct {
 	cancelAvailabilityButton    widget.Clickable
 	confirmDiscardRefreshButton widget.Clickable
 	cancelDiscardRefreshButton  widget.Clickable
+	printPackingSlipsButton     widget.Clickable
 	editShipDateButton          widget.Clickable
 	previousShipDateMonth       widget.Clickable
 	nextShipDateMonth           widget.Clickable
