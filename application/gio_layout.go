@@ -15,16 +15,19 @@ import (
 )
 
 var (
-	cardBackground     = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	selectionBarColor  = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
-	formBackground     = selectionBarColor
-	mutedTextColor     = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
-	dangerColor        = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
-	modalScrimColor    = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
-	panelBorderColor   = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
-	activityColor      = color.NRGBA{R: 246, G: 239, B: 219, A: 255}
-	primaryButtonColor = color.NRGBA{R: 74, G: 85, B: 104, A: 255}
-	primaryButtonText  = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	cardBackground          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	selectionBarColor       = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
+	formBackground          = selectionBarColor
+	shipmentPanelBackground = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
+	disabledButtonColor     = color.NRGBA{R: 210, G: 210, B: 210, A: 255}
+	disabledButtonTextColor = color.NRGBA{R: 112, G: 112, B: 112, A: 255}
+	mutedTextColor          = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	dangerColor             = color.NRGBA{R: 176, G: 39, B: 39, A: 255}
+	modalScrimColor         = color.NRGBA{R: 0, G: 0, B: 0, A: 110}
+	panelBorderColor        = color.NRGBA{R: 221, G: 221, B: 221, A: 255}
+	activityColor           = color.NRGBA{R: 246, G: 239, B: 219, A: 255}
+	primaryButtonColor      = color.NRGBA{R: 74, G: 85, B: 104, A: 255}
+	primaryButtonText       = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 )
 
 // inputField draws an editor on a white surface with enough padding for a practical touch and mouse target.
@@ -220,6 +223,21 @@ func linkLabel(gtx layout.Context, theme *material.Theme, button *widget.Clickab
 			}),
 		)
 	})
+}
+
+// underlinedTextAction renders a compact, always-underlined text action with a pointer cursor.
+// The underline is permanent so secondary actions, such as adding a shipment package, remain visually distinct from filled buttons.
+func underlinedTextAction(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
+			style := material.Body1(theme, label)
+			style.Color = mutedTextColor
+			dimensions := style.Layout(gtx)
+			underlineHeight := max(gtx.Dp(unit.Dp(1)), 1)
+			paint.FillShape(gtx.Ops, style.Color, clip.Rect(image.Rect(0, max(dimensions.Size.Y-underlineHeight, 0), dimensions.Size.X, dimensions.Size.Y)).Op())
+			return dimensions
+		})
+	}
 }
 
 // fill paints the full available layout area with a solid color.
