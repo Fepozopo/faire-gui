@@ -1125,20 +1125,15 @@ func (controller *ordersController) exportOrders(requestID uint64, connectionID 
 	})
 }
 
-// exportSelectedPackingSlips retrieves complete selected orders, then saves their individual and combined packing-slip PDFs without creating a CSV.
-// requestID identifies the worker, connectionID scopes credentials, and selectedIDs capture the immutable Orders selection from the frame loop.
+// exportSelectedPackingSlips saves the selected orders' individual and combined packing-slip PDFs without creating a CSV or fetching order details.
+// requestID identifies the worker, connectionID scopes credentials, and selectedIDs capture the immutable Orders selection used directly by Faire's packing-slip endpoint.
 func (controller *ordersController) exportSelectedPackingSlips(requestID uint64, connectionID string, selectedIDs []faire.OrderID) {
 	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
 	if err != nil {
 		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: packingSlipExportErrorMessage(err)})
 		return
 	}
-	source, err := exportSelectedOrders(controller.ctx, client.Orders, selectedIDs)
-	if err != nil {
-		controller.publishOrderExportResult(orderExportResult{RequestID: requestID, Status: packingSlipExportErrorMessage(err)})
-		return
-	}
-	folder, summary, err := writePackingSlipExport(controller.ctx, client.Orders, source)
+	folder, summary, err := writePackingSlipExport(controller.ctx, client.Orders, selectedIDs)
 	if err != nil {
 		status := "Could not save packing slips to Downloads. Check folder permissions and try again."
 		if errors.Is(err, context.Canceled) {
@@ -1193,27 +1188,67 @@ func writeOrderExport(ctx context.Context, service *faire.OrdersService, kind or
 	return filename, folder, summary, nil
 }
 
+// packingSlipRequest identifies one direct Faire packing-slip request and its collision-safe private filename.
+// orderID is passed to Faire's packing-slip endpoint, while filename is written only under the user-requested export directory.
+type packingSlipRequest struct {
+	orderID  faire.OrderID
+	filename string
+}
+
 // downloadPackingSlips retrieves and writes one PDF per export order, then merges all successfully saved PDFs into all-packing-slips.pdf.
-// ctx cancels the batch, service downloads PDFs using Faire's default timezone, source identifies orders, directory receives private files, and the returned summary excludes private order and transport details.
+// ctx cancels the batch, service downloads PDFs, source supplies order IDs and display-ID filenames, directory receives private files, and the returned summary excludes private order and transport details.
 func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, source []faire.Order, directory string) (packingSlipSummary, error) {
-	summary := packingSlipSummary{}
 	usedNames := make(map[string]struct{}, len(source))
-	mergedSources := make([]gpdf.Source, 0, len(source))
+	requests := make([]packingSlipRequest, 0, len(source))
+	failures := 0
 	for index, order := range source {
+		if order.ID == nil || *order.ID == "" {
+			failures++
+			continue
+		}
+		requests = append(requests, packingSlipRequest{orderID: *order.ID, filename: packingSlipFilename(order, index, usedNames)})
+	}
+	summary, err := downloadPackingSlipRequests(ctx, service, requests, directory)
+	summary.failures += failures
+	return summary, err
+}
+
+// downloadPackingSlipsForOrderIDs downloads a selected order ID directly from Faire's packing-slip endpoint without retrieving its order details.
+// ctx cancels the batch, service performs one PDF request per ID, selectedIDs provide deterministic request order and locally derived display-ID filenames, directory receives private files, and the returned summary excludes private order details.
+func downloadPackingSlipsForOrderIDs(ctx context.Context, service *faire.OrdersService, selectedIDs []faire.OrderID, directory string) (packingSlipSummary, error) {
+	usedNames := make(map[string]struct{}, len(selectedIDs))
+	requests := make([]packingSlipRequest, 0, len(selectedIDs))
+	failures := 0
+	for index, orderID := range selectedIDs {
+		if orderID == "" {
+			failures++
+			continue
+		}
+		displayID := orders.DisplayIDFromOrderID(orderID)
+		order := faire.Order{ID: &orderID, DisplayID: &displayID}
+		requests = append(requests, packingSlipRequest{orderID: orderID, filename: packingSlipFilename(order, index, usedNames)})
+	}
+	summary, err := downloadPackingSlipRequests(ctx, service, requests, directory)
+	summary.failures += failures
+	return summary, err
+}
+
+// downloadPackingSlipRequests writes one PDF for every request and merges successful PDFs into all-packing-slips.pdf.
+// ctx cancels the batch, service calls Faire's PDF endpoint once per request, requests supply IDs and filenames, directory receives private files, and the returned summary excludes private order and transport details.
+func downloadPackingSlipRequests(ctx context.Context, service *faire.OrdersService, requests []packingSlipRequest, directory string) (packingSlipSummary, error) {
+	summary := packingSlipSummary{}
+	mergedSources := make([]gpdf.Source, 0, len(requests))
+	for _, request := range requests {
 		if err := ctx.Err(); err != nil {
 			return packingSlipSummary{}, err
 		}
-		if order.ID == nil || *order.ID == "" {
-			summary.failures++
-			continue
-		}
-		pdf, err := service.DownloadPackingSlipPDF(ctx, *order.ID)
+		// Faire's packing-slip endpoint accepts an order ID directly, so no order-detail request is needed for this batch.
+		pdf, err := service.DownloadPackingSlipPDF(ctx, request.orderID)
 		if err != nil {
 			summary.failures++
 			continue
 		}
-		filename := packingSlipFilename(order, index, usedNames)
-		if err := os.WriteFile(filepath.Join(directory, filename), pdf, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, request.filename), pdf, 0o600); err != nil {
 			summary.failures++
 			continue
 		}
@@ -1240,14 +1275,14 @@ func downloadPackingSlips(ctx context.Context, service *faire.OrdersService, sou
 	return summary, nil
 }
 
-// writePackingSlipExport creates a selected-order Downloads folder and saves one PDF per order plus the combined PDF without creating a CSV.
-// ctx cancels PDF work, service retrieves the PDFs, source identifies complete selected orders, and it returns the user-facing folder name with a safe summary or an error.
-func writePackingSlipExport(ctx context.Context, service *faire.OrdersService, source []faire.Order) (folder string, summary packingSlipSummary, err error) {
+// writePackingSlipExport creates a selected-order Downloads folder and saves one PDF per selected ID plus the combined PDF without creating a CSV.
+// ctx cancels PDF work, service retrieves the PDFs, selectedIDs are sent directly to Faire's packing-slip endpoint, and it returns the user-facing folder name with a safe summary or an error.
+func writePackingSlipExport(ctx context.Context, service *faire.OrdersService, selectedIDs []faire.OrderID) (folder string, summary packingSlipSummary, err error) {
 	directory, folder, err := createPackingSlipExportDirectory(orderExportSelected)
 	if err != nil {
 		return "", packingSlipSummary{}, err
 	}
-	summary, err = downloadPackingSlips(ctx, service, source, directory)
+	summary, err = downloadPackingSlipsForOrderIDs(ctx, service, selectedIDs, directory)
 	if err != nil {
 		return "", packingSlipSummary{}, err
 	}

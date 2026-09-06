@@ -515,6 +515,46 @@ func TestDownloadPackingSlipsCreatesCombinedPDF(t *testing.T) {
 	}
 }
 
+// TestDownloadPackingSlipsForOrderIDsUsesOnlyPDFRequests verifies the standalone action makes exactly one packing-slip API request per selected order.
+func TestDownloadPackingSlipsForOrderIDsUsesOnlyPDFRequests(t *testing.T) {
+	t.Parallel()
+
+	pdf := packingSlipTestPDF(t)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.Method != http.MethodGet {
+			t.Fatalf("method = %q, want %q", request.Method, http.MethodGet)
+		}
+		switch request.URL.Path {
+		case "/orders/bo_order-a/packing-slip-pdf", "/orders/bo_order-b/packing-slip-pdf":
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = writer.Write(pdf)
+		default:
+			t.Fatalf("unexpected request path %q; standalone packing slips must not fetch order details", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, err := faire.NewClient(faire.Config{BaseURL: server.URL, AccessToken: "test-token"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	directory := t.TempDir()
+	summary, err := downloadPackingSlipsForOrderIDs(context.Background(), client.Orders, []faire.OrderID{"bo_order-a", "bo_order-b"}, directory)
+	if err != nil {
+		t.Fatalf("downloadPackingSlipsForOrderIDs() error = %v", err)
+	}
+	if requests != 2 || summary != (packingSlipSummary{downloaded: 2, combined: true}) {
+		t.Fatalf("requests = %d and summary = %#v, want exactly two PDF requests and two saved packing slips", requests, summary)
+	}
+	for _, filename := range []string{"ORDER-A.pdf", "ORDER-B.pdf", combinedPackingSlipsFilename} {
+		if _, err := os.Stat(filepath.Join(directory, filename)); err != nil {
+			t.Fatalf("Stat(%s) error = %v", filename, err)
+		}
+	}
+}
+
 // TestDownloadPackingSlipsRetainsSuccessfulPDFs verifies one failed download preserves successful individual and combined packing-slip PDFs.
 func TestDownloadPackingSlipsRetainsSuccessfulPDFs(t *testing.T) {
 	t.Parallel()

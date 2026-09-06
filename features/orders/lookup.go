@@ -38,6 +38,16 @@ func OrderIDFromDisplayID(displayID string) (faire.OrderID, error) {
 	return faire.OrderID("bo_" + strings.ToLower(normalized)), nil
 }
 
+// DisplayIDFromOrderID derives Faire's visible display ID from an order ID for local presentation and filenames.
+// orderID is expected to use Faire's bo_ prefix; the prefix is removed case-insensitively and the remainder is uppercased without making an API request.
+func DisplayIDFromOrderID(orderID faire.OrderID) string {
+	value := string(orderID)
+	if len(value) >= len("bo_") && strings.EqualFold(value[:len("bo_")], "bo_") {
+		value = value[len("bo_"):]
+	}
+	return strings.ToUpper(value)
+}
+
 // isASCIIAlphaNumeric avoids accepting visually similar Unicode characters in an
 // identifier that is later used as part of an API request path.
 func isASCIIAlphaNumeric(character rune) bool {

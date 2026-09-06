@@ -18,6 +18,21 @@ func TestOrderIDFromDisplayID(t *testing.T) {
 	}
 }
 
+// TestDisplayIDFromOrderID verifies Faire order IDs are converted locally to their visible uppercase display IDs.
+func TestDisplayIDFromOrderID(t *testing.T) {
+	t.Parallel()
+
+	for orderID, want := range map[faire.OrderID]string{
+		"bo_83bavnwg8v": "83BAVNWG8V",
+		"BO_83bavnwg8v": "83BAVNWG8V",
+		"83bavnwg8v":    "83BAVNWG8V",
+	} {
+		if got := DisplayIDFromOrderID(orderID); got != want {
+			t.Errorf("DisplayIDFromOrderID(%q) = %q, want %q", orderID, got, want)
+		}
+	}
+}
+
 // TestOrderIDFromDisplayIDRejectsUnsafeInput verifies only canonical ASCII display IDs become API IDs.
 func TestOrderIDFromDisplayIDRejectsUnsafeInput(t *testing.T) {
 	inputs := []string{"", "#", "bo_anmq69yvjb", "ANMQ69YVJ!", "ＡＮＭＱ６９ＹＶＪＢ", "# #ANMQ69YVJB"}
