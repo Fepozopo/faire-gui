@@ -15,6 +15,27 @@ type shipmentTrackingControlKey struct {
 	shipmentIndex int
 }
 
+// shipmentFormPackage owns the persistent controls and selected carrier for one unsubmitted shipment.
+// Gio requires the editors and clickables to survive frame boundaries so typed values and pointer gestures retain their identity; packages are stored by pointer to prevent slice growth from copying live widgets.
+type shipmentFormPackage struct {
+	carrier          string
+	trackingNumber   widget.Editor
+	labelCost        widget.Editor
+	carrierButton    widget.Clickable
+	carrierOptions   [supportedCarrierCount]widget.Clickable
+	removeButton     widget.Clickable
+	trackingFocused  bool
+	labelCostFocused bool
+}
+
+// newShipmentFormPackage creates a blank package that defaults to UPS and accepts one-line values only.
+func newShipmentFormPackage() *shipmentFormPackage {
+	shipment := &shipmentFormPackage{carrier: "UPS"}
+	shipment.trackingNumber.SingleLine = true
+	shipment.labelCost.SingleLine = true
+	return shipment
+}
+
 // ordersViewState owns all Orders-only frame-loop presentation state and Gio controls.
 // Its values are initialized once with the DesktopUI and may be read or mutated only on
 // Gio's frame goroutine so immediate-mode controls retain their identity between frames.
@@ -31,6 +52,9 @@ type ordersViewState struct {
 	orderDetailStatus        string
 	orderDetailID            faire.OrderID
 	orderDetailConnectionID  string
+	shipmentForm             []*shipmentFormPackage
+	carrierMenuPackage       int
+	shipmentSubmitting       bool
 	exportDialog             orderExportDialogState
 	pendingStates            map[faire.OrderState]struct{}
 	statesDialogOpen         bool
@@ -53,6 +77,8 @@ type ordersViewState struct {
 	cancelDataAction          widget.Clickable
 	backToOrdersButton        widget.Clickable
 	refreshDetailButton       widget.Clickable
+	addPackageButton          widget.Clickable
+	confirmShipmentsButton    widget.Clickable
 	loadMoreButton            widget.Clickable
 	clearSearchButton         widget.Clickable
 	stateFilterButton         widget.Clickable
@@ -86,11 +112,12 @@ type ordersViewState struct {
 // It returns a fully initialized view state whose lists and editors are safe to retain across Gio frames.
 func newOrdersViewState() ordersViewState {
 	view := ordersViewState{
-		pendingStates:    make(map[faire.OrderState]struct{}),
-		rowControls:      make(map[faire.OrderID]*widget.Clickable),
-		detailControls:   make(map[faire.OrderID]*widget.Clickable),
-		trackingControls: make(map[shipmentTrackingControlKey]*widget.Clickable),
-		stateControls:    make(map[faire.OrderState]*widget.Clickable),
+		pendingStates:      make(map[faire.OrderState]struct{}),
+		rowControls:        make(map[faire.OrderID]*widget.Clickable),
+		detailControls:     make(map[faire.OrderID]*widget.Clickable),
+		trackingControls:   make(map[shipmentTrackingControlKey]*widget.Clickable),
+		stateControls:      make(map[faire.OrderState]*widget.Clickable),
+		carrierMenuPackage: -1,
 	}
 	view.list.Axis = layout.Vertical
 	view.detailList.Axis = layout.Vertical
