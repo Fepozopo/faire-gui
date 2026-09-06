@@ -13,7 +13,7 @@ import (
 
 const (
 	// supportedCarrierCount is the fixed number of carrier choices Faire documents for shipment creation.
-	supportedCarrierCount = 18
+	supportedCarrierCount = 3
 	// shipmentCurrency is the USD currency code paired with the dollar-denominated label-cost field.
 	shipmentCurrency = "USD"
 )
@@ -27,23 +27,26 @@ type supportedCarrier struct {
 
 // supportedCarriers contains every documented carrier in alphabetical label order.
 // Keeping API values separate from labels preserves Faire's wire format while presenting readable text to users.
+//
+// Commented-out carriers are not yet supported by this application,
+// but they remain in the source code to preserve the original alphabetical order and to simplify future expansion.
 var supportedCarriers = [supportedCarrierCount]supportedCarrier{
-	{Value: "AUSTRALIA_POST", Label: "Australia Post"},
-	{Value: "CANADA_POST", Label: "Canada Post"},
-	{Value: "CANPAR", Label: "Canpar"},
-	{Value: "DHL_ECOMMERCE", Label: "DHL eCommerce"},
-	{Value: "DHL_EXPRESS", Label: "DHL Express"},
-	{Value: "DPD", Label: "DPD"},
-	{Value: "DPDUK", Label: "DPD UK"},
-	{Value: "EVRI", Label: "Evri"},
+	// {Value: "AUSTRALIA_POST", Label: "Australia Post"},
+	// {Value: "CANADA_POST", Label: "Canada Post"},
+	// {Value: "CANPAR", Label: "Canpar"},
+	// {Value: "DHL_ECOMMERCE", Label: "DHL eCommerce"},
+	// {Value: "DHL_EXPRESS", Label: "DHL Express"},
+	// {Value: "DPD", Label: "DPD"},
+	// {Value: "DPDUK", Label: "DPD UK"},
+	// {Value: "EVRI", Label: "Evri"},
 	{Value: "FEDEX", Label: "FedEx"},
-	{Value: "GSO", Label: "GSO"},
-	{Value: "INTERLINK_EXPRESS", Label: "Interlink Express"},
-	{Value: "LA_POSTE", Label: "La Poste"},
-	{Value: "PARCELFORCE", Label: "Parcelforce"},
-	{Value: "POSTNL", Label: "PostNL"},
-	{Value: "PUROLATOR", Label: "Purolator"},
-	{Value: "ROYAL_MAIL", Label: "Royal Mail"},
+	// {Value: "GSO", Label: "GSO"},
+	// {Value: "INTERLINK_EXPRESS", Label: "Interlink Express"},
+	// {Value: "LA_POSTE", Label: "La Poste"},
+	// {Value: "PARCELFORCE", Label: "Parcelforce"},
+	// {Value: "POSTNL", Label: "PostNL"},
+	// {Value: "PUROLATOR", Label: "Purolator"},
+	// {Value: "ROYAL_MAIL", Label: "Royal Mail"},
 	{Value: "UPS", Label: "UPS"},
 	{Value: "USPS", Label: "USPS"},
 }
