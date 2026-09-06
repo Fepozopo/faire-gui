@@ -260,8 +260,8 @@ func (ui *DesktopUI) dateFilterField(gtx layout.Context, editor *widget.Editor, 
 	return inputField(gtx, ui.theme, editor, hint)
 }
 
-// layoutOrderActionBar renders selection context and export actions on a muted toolbar that spans the available table width.
-// Order details are opened directly from each row's order-number control.
+// layoutOrderActionBar renders selection context and bulk actions on a muted toolbar that spans the available table width.
+// Order details are opened directly from each row's order-number control, while ship-date editing is enabled only for a non-empty selection.
 func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return layout.Background{}.Layout(gtx,
@@ -270,15 +270,196 @@ func (ui *DesktopUI) layoutOrderActionBar(gtx layout.Context) layout.Dimensions 
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(20), Bottom: unit.Dp(10), Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				shipDateEnabled := len(ui.orders.view.state.SelectedIDs) > 0 && !ui.orders.view.processingOrders
+				if shipDateEnabled && ui.orders.view.editShipDateButton.Clicked(gtx) {
+					now := time.Now()
+					ui.orders.view.shipDateDialog = shipDateDialogState{open: true, month: calendarMonthStart(now)}
+					ui.invalidate()
+				}
+				shipDateAction := disabledUnderlinedTextAction(ui.theme, "Edit ship date")
+				if shipDateEnabled {
+					shipDateAction = underlinedTextAction(ui.theme, &ui.orders.view.editShipDateButton, "Edit ship date")
+				}
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(bodyText(ui.theme, ui.selectedOrdersLabel(), mutedTextColor)),
 					// The wider gap separates selection feedback from its related bulk action.
 					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 					layout.Rigid(primaryButton(ui.theme, &ui.orders.view.exportMenuButton, "Export")),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+					layout.Rigid(shipDateAction),
 				)
 			})
 		},
 	)
+}
+
+// layoutShipDateModal renders the selected-orders calendar and starts processing only after a calendar day is chosen.
+// Orders with matching requested and expected ship dates still move to processing without modifying either existing date.
+func (ui *DesktopUI) layoutShipDateModal(gtx layout.Context) layout.Dimensions {
+	if ui.orders.view.cancelShipDateButton.Clicked(gtx) {
+		ui.orders.view.shipDateDialog = shipDateDialogState{}
+		ui.invalidate()
+	}
+	if ui.orders.view.previousShipDateMonth.Clicked(gtx) {
+		ui.orders.view.shipDateDialog.month = ui.orders.view.shipDateDialog.month.AddDate(0, -1, 0)
+		ui.invalidate()
+	}
+	if ui.orders.view.nextShipDateMonth.Clicked(gtx) {
+		ui.orders.view.shipDateDialog.month = ui.orders.view.shipDateDialog.month.AddDate(0, 1, 0)
+		ui.invalidate()
+	}
+	selected := ui.orders.view.shipDateDialog.selected
+	shipDateValid := validShipDate(selected, time.Now())
+	confirmClicked := ui.orders.view.confirmShipDateButton.Clicked(gtx)
+	if shipDateValid && confirmClicked {
+		ui.startMoveSelectedOrdersToProcessing(selected.Format("2006-01-02"))
+		ui.invalidate()
+	}
+	return modalPanel(gtx, ui, "Edit ship date", func(gtx layout.Context) layout.Dimensions {
+		children := []layout.FlexChild{
+			layout.Rigid(bodyText(ui.theme, "Select the date you expect to ship the selected orders.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(bodyText(ui.theme, "Orders with a requested ship date already have a matching expected ship date. They will move to processing without changing either date.", mutedTextColor)),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.layoutShipDateCalendar(gtx) }),
+		}
+		confirmButton := disabledPrimaryButton(ui.theme, &ui.orders.view.confirmShipDateButton, "Confirm ship date")
+		if shipDateValid {
+			confirmButton = primaryButton(ui.theme, &ui.orders.view.confirmShipDateButton, "Confirm ship date")
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
+			layout.Rigid(confirmButton),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(primaryButton(ui.theme, &ui.orders.view.cancelShipDateButton, "Cancel")),
+		)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
+}
+
+// layoutShipDateCalendar renders one six-week calendar grid for the modal's mutable display month.
+// Gio buttons are retained in Orders state, allowing each day to preserve its gesture identity between frames.
+func (ui *DesktopUI) layoutShipDateCalendar(gtx layout.Context) layout.Dimensions {
+	dialog := &ui.orders.view.shipDateDialog
+	if dialog.month.IsZero() {
+		dialog.month = calendarMonthStart(time.Now())
+	}
+	month := calendarMonthStart(dialog.month)
+	start := calendarGridStart(month)
+	today := calendarDay(time.Now())
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(primaryButton(ui.theme, &ui.orders.view.previousShipDateMonth, "‹")),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, material.H6(ui.theme, month.Format("January 2006")).Layout)
+				}),
+				layout.Rigid(primaryButton(ui.theme, &ui.orders.view.nextShipDateMonth, "›")),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			labels := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+			children := make([]layout.FlexChild, 0, len(labels))
+			for _, label := range labels {
+				label := label
+				children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, material.Label(ui.theme, unit.Sp(12), label).Layout)
+				}))
+			}
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			weeks := make([]layout.FlexChild, 0, 6)
+			for week := 0; week < 6; week++ {
+				week := week
+				weeks = append(weeks, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					days := make([]layout.FlexChild, 0, 7)
+					for dayIndex := 0; dayIndex < 7; dayIndex++ {
+						buttonIndex := week*7 + dayIndex
+						date := start.AddDate(0, 0, buttonIndex)
+						dateValid := validShipDate(date, today)
+						dateClicked := ui.orders.view.shipDateDayButtons[buttonIndex].Clicked(gtx)
+						if dateValid && dateClicked {
+							dialog.selected = calendarDay(date)
+							if date.Month() != month.Month() {
+								dialog.month = calendarMonthStart(date)
+							}
+							ui.invalidate()
+						}
+						calendarDate := date
+						calendarDateValid := dateValid
+						calendarButtonIndex := buttonIndex
+						days = append(days, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Top: unit.Dp(2), Right: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return calendarDateButton(gtx, ui.theme, &ui.orders.view.shipDateDayButtons[calendarButtonIndex], calendarDate, calendarDate.Month() == month.Month(), calendarDateEqual(dialog.selected, calendarDate), calendarDateValid)
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, days...)
+				}))
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, weeks...)
+		}),
+	)
+}
+
+// calendarDateButton renders one compact calendar day with the same slate selected treatment as primary application actions.
+// button owns the day interaction, date provides the user-visible day number, inMonth mutes adjacent-month days, selected controls emphasis, and enabled prevents choosing past dates.
+func calendarDateButton(gtx layout.Context, theme *material.Theme, button *widget.Clickable, date time.Time, inMonth, selected, enabled bool) layout.Dimensions {
+	background, textColor := cardBackground, mutedTextColor
+	if !enabled {
+		background, textColor = disabledButtonColor, disabledButtonTextColor
+	} else if selected {
+		background, textColor = primaryButtonColor, primaryButtonText
+	} else if !inMonth {
+		textColor = disabledButtonTextColor
+	}
+	child := func(gtx layout.Context) layout.Dimensions {
+		return outlinedPanel(gtx, background, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(2), Bottom: unit.Dp(8), Left: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				style := material.Body2(theme, itoa(date.Day()))
+				style.Color = textColor
+				return layout.Center.Layout(gtx, style.Layout)
+			})
+		})
+	}
+	if !enabled {
+		return child(gtx)
+	}
+	return clickableWithPointer(gtx, button, child)
+}
+
+// calendarMonthStart returns the first local calendar day of value's month.
+// It removes clock time so calendar comparisons are stable across daylight-saving transitions.
+func calendarMonthStart(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, value.Location())
+}
+
+// calendarGridStart returns the Sunday on or before the first day of month for a six-week calendar grid.
+func calendarGridStart(month time.Time) time.Time {
+	month = calendarMonthStart(month)
+	return month.AddDate(0, 0, -int(month.Weekday()))
+}
+
+// calendarDay returns value's local midnight while retaining its location for date-only API formatting.
+func calendarDay(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
+}
+
+// calendarDateEqual reports whether two values represent the same local calendar day.
+func calendarDateEqual(left, right time.Time) bool {
+	return !left.IsZero() && left.Year() == right.Year() && left.Month() == right.Month() && left.Day() == right.Day()
+}
+
+// validShipDate reports whether value is today or later in the local calendar.
+// value is the selected or rendered date, while current supplies the user's current local day for deterministic validation and testing.
+func validShipDate(value, current time.Time) bool {
+	if value.IsZero() {
+		return false
+	}
+	return !calendarDay(value).Before(calendarDay(current))
 }
 
 // selectedOrdersLabel returns the current bulk-selection count for the Orders action bar.

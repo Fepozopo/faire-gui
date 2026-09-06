@@ -117,6 +117,14 @@ type ordersDataDialogState struct {
 	connectionID string
 }
 
+// shipDateDialogState retains the calendar month and selected date for a bulk processing action.
+// Dates remain local calendar days because Faire's processing endpoint accepts a date rather than a timestamp.
+type shipDateDialogState struct {
+	open     bool
+	month    time.Time
+	selected time.Time
+}
+
 // profileLoadResult transports a credential-safe asynchronous profile-loading result to the UI frame loop.
 // It contains user-safe profile status only; Orders cache actions use ordersDataActionEvent instead.
 type profileLoadResult struct {
@@ -230,6 +238,8 @@ func (ui *DesktopUI) Layout(gtx layout.Context) layout.Dimensions {
 				return ui.layoutConnectionPicker(gtx)
 			case ui.orders.view.statesDialogOpen:
 				return ui.layoutStatesDialog(gtx)
+			case ui.orders.view.shipDateDialog.open:
+				return ui.layoutShipDateModal(gtx)
 			case ui.orders.view.exportDialog.open:
 				return ui.layoutOrderExportMenu(gtx)
 			case ui.orders.view.exporting:
@@ -274,7 +284,7 @@ func (ui *DesktopUI) layoutStartup(gtx layout.Context) layout.Dimensions {
 // handleTabClicks selects a tab from persistent clickable state before laying out the active content.
 // Processing clicks before rendering ensures each click affects the same frame that consumes it, unless a modal, including export progress, owns input.
 func (ui *DesktopUI) handleTabClicks(gtx layout.Context) {
-	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.orders.view.dataDialog.open || ui.connectionPickerOpen || ui.orders.view.statesDialogOpen || ui.orders.view.exportDialog.open || ui.orders.view.exporting || ui.orders.view.csvExportBlockedOpen || ui.orders.view.csvExportCompletedOpen {
+	if ui.updateDialog.open || ui.updateCheckDialog.open || ui.deleteDialog.open || ui.orders.view.dataDialog.open || ui.connectionPickerOpen || ui.orders.view.statesDialogOpen || ui.orders.view.shipDateDialog.open || ui.orders.view.exportDialog.open || ui.orders.view.exporting || ui.orders.view.csvExportBlockedOpen || ui.orders.view.csvExportCompletedOpen {
 		return
 	}
 	for index := range ui.tabButtons {

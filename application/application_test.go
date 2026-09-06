@@ -882,3 +882,78 @@ func TestExplicitEnvironmentTokenRejectsEmptyVariables(t *testing.T) {
 		t.Fatal("explicitEnvironmentToken() error = nil, want missing-or-empty variable error")
 	}
 }
+
+// TestProcessingRequestForOrderPreservesRequestedShipDates verifies requested ship dates suppress the optional expected date payload.
+func TestProcessingRequestForOrderPreservesRequestedShipDates(t *testing.T) {
+	expected := "2026-09-10"
+	requested := "2026-09-12T00:00:00Z"
+
+	if request := processingRequestForOrder(&faire.Order{RequestedShipDate: &requested}, expected); request.ExpectedShipDate != nil {
+		t.Fatalf("request for requested date = %#v, want omitted expected ship date", request)
+	}
+	if request := processingRequestForOrder(&faire.Order{}, expected); request.ExpectedShipDate == nil || *request.ExpectedShipDate != expected {
+		t.Fatalf("request without requested date = %#v, want expected date %q", request, expected)
+	}
+	if request := processingRequestForOrder(nil, expected); request.ExpectedShipDate != nil {
+		t.Fatalf("request without a fetched order = %#v, want omitted expected ship date", request)
+	}
+}
+
+// TestCalendarGridStartUsesSundayAndPreservesDateOnlyValues verifies the calendar supports a deterministic six-week Sunday-first layout.
+func TestCalendarGridStartUsesSundayAndPreservesDateOnlyValues(t *testing.T) {
+	month := time.Date(2026, time.September, 14, 16, 30, 0, 0, time.Local)
+	start := calendarGridStart(month)
+	if start.Weekday() != time.Sunday || start.Format("2006-01-02") != "2026-08-30" {
+		t.Fatalf("calendarGridStart() = %s (%s), want Sunday 2026-08-30", start.Format(time.RFC3339), start.Weekday())
+	}
+	day := calendarDay(month)
+	if day.Hour() != 0 || day.Minute() != 0 || day.Location() != time.Local {
+		t.Fatalf("calendarDay() = %s, want local midnight", day.Format(time.RFC3339))
+	}
+}
+
+// TestValidShipDateRejectsPastDates verifies that confirmation is available only for local calendar dates today or later.
+func TestValidShipDateRejectsPastDates(t *testing.T) {
+	current := time.Date(2026, time.September, 6, 14, 30, 0, 0, time.Local)
+	if validShipDate(time.Date(2026, time.September, 5, 23, 59, 0, 0, time.Local), current) {
+		t.Fatal("past ship date is valid")
+	}
+	if !validShipDate(time.Date(2026, time.September, 6, 0, 0, 0, 0, time.Local), current) {
+		t.Fatal("today's ship date is invalid")
+	}
+	if !validShipDate(time.Date(2026, time.September, 7, 0, 0, 0, 0, time.Local), current) {
+		t.Fatal("future ship date is invalid")
+	}
+	if validShipDate(time.Time{}, current) {
+		t.Fatal("empty ship date is valid")
+	}
+}
+
+// TestDrainProcessingResultsUpdatesVisibleRowsAndSelection verifies successful processing updates the table and leaves failed orders selected.
+func TestDrainProcessingResultsUpdatesVisibleRowsAndSelection(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.activeConnectionID = "connection-a"
+	ui.orders.processingRequestID = 1
+	ui.orders.view.processingOrders = true
+	ui.orders.view.state.SelectedIDs = map[faire.OrderID]struct{}{"order-1": {}, "order-2": {}}
+	ui.orders.view.state.Rows = []orders.Row{{ID: "order-1", Status: "New"}, {ID: "order-2", Status: "New"}}
+	ui.orders.processingResults <- orderProcessingResult{
+		RequestID:    1,
+		ConnectionID: "connection-a",
+		ProcessedIDs: []faire.OrderID{"order-1"},
+		Rows:         map[faire.OrderID]orders.Row{"order-1": {ID: "order-1", Status: "Processing"}},
+		Status:       "Moved 1 selected order to processing.",
+	}
+
+	ui.drainOrderProcessingResults()
+
+	if ui.orders.view.processingOrders || ui.orders.view.state.Rows[0].Status != "Processing" || ui.orders.view.state.Status != "Moved 1 selected order to processing." {
+		t.Fatalf("processing result application = %#v", ui.orders.view)
+	}
+	if _, selected := ui.orders.view.state.SelectedIDs["order-1"]; selected {
+		t.Fatal("processed order remains selected")
+	}
+	if _, selected := ui.orders.view.state.SelectedIDs["order-2"]; !selected {
+		t.Fatal("failed order was removed from selection")
+	}
+}

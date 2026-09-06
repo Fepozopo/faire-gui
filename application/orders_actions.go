@@ -80,6 +80,20 @@ type shipmentSubmissionResult struct {
 	ApplyNewOrdersCount bool
 }
 
+// orderProcessingResult carries one completed selected-order processing batch back to the Gio frame loop.
+// ProcessedIDs identify only successful endpoint calls, Rows replaces visible safe table projections, and Status never exposes API bodies or order details.
+type orderProcessingResult struct {
+	RequestID           uint64
+	ConnectionID        string
+	ProcessedIDs        []faire.OrderID
+	Rows                map[faire.OrderID]orders.Row
+	Status              string
+	ExpectedDateOmitted int
+	LookupFailures      int
+	PersistenceFailures int
+	ProcessingFailures  int
+}
+
 // localCursorPayload is the non-sensitive worker-only encoding of a local SQLite keyset cursor.
 type localCursorPayload struct {
 	SortAtUTC *time.Time `json:"sort_at_utc,omitempty"`
@@ -172,6 +186,27 @@ func shipmentSubmissionErrorMessage(err error) string {
 		}
 	}
 	return "Shipment information could not be added. Check the saved connection and try again."
+}
+
+// moveToProcessingErrorMessage converts a processing endpoint failure into safe, actionable UI feedback.
+// It deliberately omits response bodies because they can contain private order or account information.
+func moveToProcessingErrorMessage(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "Moving selected orders to processing was canceled."
+	}
+	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
+		switch apiError.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."
+		case http.StatusTooManyRequests:
+			return "Faire is rate limiting requests. Wait a moment, then try again."
+		case http.StatusBadRequest:
+			return "Faire rejected one or more selected orders. Check their status and try again."
+		default:
+			return fmt.Sprintf("Faire could not move selected orders to processing (HTTP %d). Try again later.", apiError.StatusCode)
+		}
+	}
+	return "Selected orders could not be moved to processing. Check the saved connection and try again."
 }
 
 // invalidOrdersRequestMessage identifies only the safe synchronization phase of a rejected Faire request.
@@ -478,6 +513,129 @@ func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint6
 	controller.publishShipmentResult(result)
 }
 
+// startMoveSelectedOrdersToProcessing validates the selected order scope and starts a non-blocking bulk processing request.
+// expectedShipDate is a calendar date selected in the modal; orders with matching requested and expected dates omit it so both existing dates remain unchanged.
+func (ui *DesktopUI) startMoveSelectedOrdersToProcessing(expectedShipDate string) {
+	ui.orders.view.shipDateDialog = shipDateDialogState{}
+	if ui.manager == nil || ui.orders.store == nil || ui.activeConnectionID == "" {
+		ui.orders.view.state.Status = "Choose an active saved connection with local order storage before editing ship dates."
+		return
+	}
+	if ui.orders.view.processingOrders || ui.orders.view.state.Loading {
+		ui.orders.view.state.Status = "Wait for the current Orders operation to finish before editing ship dates."
+		return
+	}
+	selectedIDs := selectedOrderIDs(ui.orders.view.state.SelectedIDs)
+	if len(selectedIDs) == 0 {
+		ui.orders.view.state.Status = "Select one or more orders before editing ship dates."
+		return
+	}
+	ui.orders.processingRequestID++
+	requestID := ui.orders.processingRequestID
+	connectionID := ui.activeConnectionID
+	ui.orders.view.processingOrders = true
+	ui.orders.view.state.Status = "Moving selected orders to processing…"
+	ui.orders.startWorker(func() {
+		ui.orders.moveSelectedOrdersToProcessing(requestID, connectionID, selectedIDs, expectedShipDate)
+	})
+}
+
+// moveSelectedOrdersToProcessing fetches each selected order before processing so its matching requested and expected ship dates are never modified.
+// It continues after individual failures, persists successful endpoint responses, and publishes only safe row/status data to the frame loop.
+func (controller *ordersController) moveSelectedOrdersToProcessing(requestID uint64, connectionID string, selectedIDs []faire.OrderID, expectedShipDate string) {
+	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
+	if err != nil {
+		controller.publishOrderProcessingResult(orderProcessingResult{RequestID: requestID, ConnectionID: connectionID, Status: moveToProcessingErrorMessage(err)})
+		return
+	}
+	result := orderProcessingResult{
+		RequestID:    requestID,
+		ConnectionID: connectionID,
+		Rows:         make(map[faire.OrderID]orders.Row, len(selectedIDs)),
+	}
+	for _, orderID := range selectedIDs {
+		if err := controller.ctx.Err(); err != nil {
+			result.Status = moveToProcessingErrorMessage(err)
+			controller.publishOrderProcessingResult(result)
+			return
+		}
+		order, lookupErr := client.Orders.Get(controller.ctx, orderID)
+		request := processingRequestForOrder(order, expectedShipDate)
+		if lookupErr != nil {
+			// When the fresh lookup fails, omit the optional date rather than risk replacing an unknown requested date.
+			request = faire.MoveOrderToProcessingRequest{}
+			result.LookupFailures++
+		} else if request.ExpectedShipDate == nil {
+			result.ExpectedDateOmitted++
+		}
+		updated, processErr := client.Orders.MoveToProcessing(controller.ctx, orderID, request)
+		if processErr != nil {
+			result.ProcessingFailures++
+			continue
+		}
+		result.ProcessedIDs = append(result.ProcessedIDs, orderID)
+		if _, persistErr := controller.persistRemoteOrder(connectionID, updated); persistErr != nil {
+			result.PersistenceFailures++
+			continue
+		}
+		result.Rows[orderID] = orders.PresentRow(*updated)
+	}
+	result.Status = processingCompletionStatus(result)
+	controller.publishOrderProcessingResult(result)
+}
+
+// processingRequestForOrder builds the endpoint payload for one freshly retrieved order.
+// expectedShipDate is omitted whenever order has a requested ship date so Faire preserves the matching requested and expected dates already on that order.
+func processingRequestForOrder(order *faire.Order, expectedShipDate string) faire.MoveOrderToProcessingRequest {
+	if order == nil || (order.RequestedShipDate != nil && strings.TrimSpace(*order.RequestedShipDate) != "") || expectedShipDate == "" {
+		return faire.MoveOrderToProcessingRequest{}
+	}
+	return faire.MoveOrderToProcessingRequest{ExpectedShipDate: &expectedShipDate}
+}
+
+// processingCompletionStatus summarizes a completed batch without revealing order identifiers or remote response details.
+// It reports partial success and local-persistence caveats so users can safely refresh or retry the remaining selection.
+func processingCompletionStatus(result orderProcessingResult) string {
+	processed := len(result.ProcessedIDs)
+	if processed == 0 {
+		return "No selected orders could be moved to processing. The selected orders remain available to retry."
+	}
+	status := "Moved " + itoa(processed) + " selected order"
+	if processed != 1 {
+		status += "s"
+	}
+	status += " to processing."
+	if result.ExpectedDateOmitted > 0 {
+		status += " The existing requested and expected ship dates were left unchanged for " + itoa(result.ExpectedDateOmitted) + " order"
+		if result.ExpectedDateOmitted != 1 {
+			status += "s"
+		}
+		status += "."
+	}
+	if result.LookupFailures > 0 {
+		status += " The expected ship date was omitted for " + itoa(result.LookupFailures) + " order"
+		if result.LookupFailures != 1 {
+			status += "s"
+		}
+		status += " whose current details could not be retrieved."
+	}
+	if result.ProcessingFailures > 0 {
+		status += " " + itoa(result.ProcessingFailures) + " order"
+		if result.ProcessingFailures != 1 {
+			status += "s"
+		}
+		status += " could not be moved and remain selected."
+	}
+	if result.PersistenceFailures > 0 {
+		status += " Local data could not be updated for " + itoa(result.PersistenceFailures) + " processed order"
+		if result.PersistenceFailures != 1 {
+			status += "s"
+		}
+		status += "; refresh orders to update the table."
+	}
+	return status
+}
+
 // loadOrderDetail reads and deserializes one private snapshot in a worker, publishing only its typed presentation model.
 func loadOrderDetail(ctx context.Context, store ordersstore.Store, requestID uint64, connectionID string, orderID faire.OrderID, publish func(orderDetailResult)) {
 	snapshot, err := store.Snapshot(ctx, connectionID, string(orderID))
@@ -509,6 +667,11 @@ func (ui *DesktopUI) drainOrderDetailResults() {
 // drainShipmentSubmissionResults delegates current shipment-submission result validation to the feature controller.
 func (ui *DesktopUI) drainShipmentSubmissionResults() {
 	ui.orders.drainShipmentResults(ui.activeConnectionID)
+}
+
+// drainOrderProcessingResults applies current selected-order processing outcomes on Gio's frame goroutine.
+func (ui *DesktopUI) drainOrderProcessingResults() {
+	ui.orders.drainProcessingResults(ui.activeConnectionID)
 }
 
 // requestOrdersDataAction opens explicit confirmation for a connection-scoped local-data delete or rebuild operation.

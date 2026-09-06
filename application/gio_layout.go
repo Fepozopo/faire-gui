@@ -109,6 +109,19 @@ func primaryButton(theme *material.Theme, button *widget.Clickable, label string
 	return filledButton(theme, button, label, primaryButtonColor)
 }
 
+// disabledPrimaryButton creates a non-interactive gray version of the standard primary-button treatment.
+// button retains its stable Gio identity while callers drain and ignore clicks until their validation condition is satisfied.
+func disabledPrimaryButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		style := material.Button(theme, button, label)
+		style.Background = disabledButtonColor
+		style.Color = disabledButtonTextColor
+		style.CornerRadius = unit.Dp(4)
+		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
+		return style.Layout(gtx)
+	}
+}
+
 // dangerButton creates the red filled treatment reserved for destructive Delete actions.
 // The returned widget matches primary-button sizing while retaining a visually distinct destructive color.
 func dangerButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
@@ -237,6 +250,19 @@ func underlinedTextAction(theme *material.Theme, button *widget.Clickable, label
 			paint.FillShape(gtx.Ops, style.Color, clip.Rect(image.Rect(0, max(dimensions.Size.Y-underlineHeight, 0), dimensions.Size.X, dimensions.Size.Y)).Op())
 			return dimensions
 		})
+	}
+}
+
+// disabledUnderlinedTextAction renders a non-interactive underlined secondary action without a pointer cursor.
+// It communicates that a required selection is absent while preserving the action bar's stable layout.
+func disabledUnderlinedTextAction(theme *material.Theme, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		style := material.Body1(theme, label)
+		style.Color = disabledButtonTextColor
+		dimensions := style.Layout(gtx)
+		underlineHeight := max(gtx.Dp(unit.Dp(1)), 1)
+		paint.FillShape(gtx.Ops, style.Color, clip.Rect(image.Rect(0, max(dimensions.Size.Y-underlineHeight, 0), dimensions.Size.X, dimensions.Size.Y)).Op())
+		return dimensions
 	}
 }
 

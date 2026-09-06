@@ -55,6 +55,7 @@ type ordersController struct {
 	loadResults       chan orderLoadResult
 	detailResults     chan orderDetailResult
 	shipmentResults   chan shipmentSubmissionResult
+	processingResults chan orderProcessingResult
 	exportResults     chan orderExportResult
 	dataActionResults chan ordersDataActionEvent
 	invalidate        func()
@@ -62,6 +63,7 @@ type ordersController struct {
 	loadRequestID          uint64
 	detailRequestID        uint64
 	shipmentRequestID      uint64
+	processingRequestID    uint64
 	exportRequestID        uint64
 	dataStatusRequestID    uint64
 	dataActionConnectionID string
@@ -79,6 +81,7 @@ func newOrdersController(ctx context.Context, store ordersstore.Store, manager *
 		loadResults:       make(chan orderLoadResult, 4),
 		detailResults:     make(chan orderDetailResult, 2),
 		shipmentResults:   make(chan shipmentSubmissionResult, 1),
+		processingResults: make(chan orderProcessingResult, 1),
 		exportResults:     make(chan orderExportResult, 1),
 		dataActionResults: make(chan ordersDataActionEvent, 2),
 		invalidate:        invalidate,
@@ -272,6 +275,44 @@ func (controller *ordersController) drainLoadResults(activeConnectionID string) 
 			controller.view.state.Status = result.Status
 		default:
 			return dataStatus, applyDataStatus
+		}
+	}
+}
+
+// publishOrderProcessingResult sends one bulk processing outcome unless application shutdown has begun.
+// Results contain only safe status text, successful IDs, and table presentation rows for the Gio frame goroutine.
+func (controller *ordersController) publishOrderProcessingResult(result orderProcessingResult) {
+	select {
+	case controller.processingResults <- result:
+	case <-controller.ctx.Done():
+		return
+	}
+	if controller.invalidate != nil {
+		controller.invalidate()
+	}
+}
+
+// drainProcessingResults applies only the latest active-connection bulk processing result to retained Orders state.
+// Successfully processed orders leave the selection while failures remain selected so the user can correct or retry them.
+func (controller *ordersController) drainProcessingResults(activeConnectionID string) {
+	for {
+		select {
+		case result := <-controller.processingResults:
+			if result.RequestID != controller.processingRequestID || result.ConnectionID != activeConnectionID {
+				continue
+			}
+			controller.view.processingOrders = false
+			for _, orderID := range result.ProcessedIDs {
+				delete(controller.view.state.SelectedIDs, orderID)
+			}
+			for index, row := range controller.view.state.Rows {
+				if replacement, found := result.Rows[row.ID]; found {
+					controller.view.state.Rows[index] = replacement
+				}
+			}
+			controller.view.state.Status = result.Status
+		default:
+			return
 		}
 	}
 }

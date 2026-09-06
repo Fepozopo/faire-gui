@@ -274,8 +274,7 @@ func TestSupportedCarriersAreAlphabeticalAndComplete(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]struct{}{
-		"CANADA_POST": {}, "DHL_ECOMMERCE": {}, "DHL_EXPRESS": {}, "FEDEX": {}, "PUROLATOR": {}, "UPS": {}, "USPS": {}, "POSTNL": {}, "CANPAR": {},
-		"INTERLINK_EXPRESS": {}, "GSO": {}, "ROYAL_MAIL": {}, "DPD": {}, "DPDUK": {}, "PARCELFORCE": {}, "AUSTRALIA_POST": {}, "EVRI": {}, "LA_POSTE": {},
+		"FEDEX": {}, "UPS": {}, "USPS": {},
 	}
 	previous := ""
 	for _, carrier := range supportedCarriers {

@@ -160,6 +160,52 @@ func TestDownloadPackingSlipPDFBuildsPDFRequest(t *testing.T) {
 	}
 }
 
+// TestMoveToProcessingSendsOptionalExpectedShipDate verifies the processing endpoint receives its exact path, method, and JSON payload.
+func TestMoveToProcessingSendsOptionalExpectedShipDate(t *testing.T) {
+	client := newTestClient(t, func(request *http.Request) *http.Response {
+		if request.Method != http.MethodPut {
+			t.Fatalf("method = %q, want PUT", request.Method)
+		}
+		if request.URL.Path != "/orders/order-123/processing" {
+			t.Fatalf("path = %q, want processing endpoint", request.URL.Path)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode processing payload: %v", err)
+		}
+		if payload["expected_ship_date"] != "2026-09-10" || len(payload) != 1 {
+			t.Fatalf("payload = %#v, want only expected ship date", payload)
+		}
+		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
+	})
+
+	order, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{ExpectedShipDate: Ptr("2026-09-10")})
+	if err != nil {
+		t.Fatalf("MoveToProcessing() error = %v", err)
+	}
+	if order.ID == nil || *order.ID != "order-123" || order.State == nil || *order.State != OrderStateProcessing {
+		t.Fatalf("MoveToProcessing() order = %#v", order)
+	}
+}
+
+// TestMoveToProcessingOmitsExpectedShipDate verifies the processing endpoint receives no expected date field when the caller preserves a requested date.
+func TestMoveToProcessingOmitsExpectedShipDate(t *testing.T) {
+	client := newTestClient(t, func(request *http.Request) *http.Response {
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode processing payload: %v", err)
+		}
+		if len(payload) != 0 {
+			t.Fatalf("payload = %#v, want no expected ship date", payload)
+		}
+		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
+	})
+
+	if _, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{}); err != nil {
+		t.Fatalf("MoveToProcessing() error = %v", err)
+	}
+}
+
 // TestProductUpdatePreservesExplicitFalse verifies optional pointer fields can serialize intentional false values.
 func TestProductUpdatePreservesExplicitFalse(t *testing.T) {
 	client := newTestClient(t, func(request *http.Request) *http.Response {

@@ -68,6 +68,8 @@ type ordersViewState struct {
 	carrierMenuPackage       int
 	shipmentSubmitting       bool
 	exportDialog             orderExportDialogState
+	shipDateDialog           shipDateDialogState
+	processingOrders         bool
 	pendingStates            map[faire.OrderState]struct{}
 	statesDialogOpen         bool
 	csvExportBlockedOpen     bool
@@ -91,6 +93,12 @@ type ordersViewState struct {
 	refreshDetailButton       widget.Clickable
 	addPackageButton          widget.Clickable
 	confirmShipmentsButton    widget.Clickable
+	editShipDateButton        widget.Clickable
+	previousShipDateMonth     widget.Clickable
+	nextShipDateMonth         widget.Clickable
+	confirmShipDateButton     widget.Clickable
+	cancelShipDateButton      widget.Clickable
+	shipDateDayButtons        [42]widget.Clickable
 	loadMoreButton            widget.Clickable
 	clearSearchButton         widget.Clickable
 	stateFilterButton         widget.Clickable
