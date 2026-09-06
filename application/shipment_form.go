@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"gioui.org/layout"
+	"gioui.org/widget"
 
 	"github.com/Fepozopo/faire-gui/faire"
 )
@@ -69,6 +70,20 @@ func shipmentFormIsValid(packages []*shipmentFormPackage, totalPayoutMinor *int6
 	return true
 }
 
+// shipmentFormReadyForConfirmation reports whether every package has a current successful blur or carrier-change validation result.
+// It intentionally reads cached results instead of rechecking editor text during layout, keeping Confirm disabled until edited fields are validated again.
+func shipmentFormReadyForConfirmation(packages []*shipmentFormPackage, totalPayoutMinor *int64) bool {
+	if len(packages) == 0 || totalPayoutMinor == nil || *totalPayoutMinor <= 0 {
+		return false
+	}
+	for _, shipment := range packages {
+		if shipment == nil || strings.TrimSpace(shipment.carrier) == "" || !shipment.trackingValidation.valid || !shipment.labelCostValidation.valid || !shipment.labelCostValidationMatchesPayout(totalPayoutMinor) {
+			return false
+		}
+	}
+	return true
+}
+
 // shipmentRequestFromForm converts fully validated package controls into Faire's batch shipment request.
 // It returns false instead of a partial request when any package is invalid so callers cannot submit only a subset of visible packages.
 func shipmentRequestFromForm(packages []*shipmentFormPackage, totalPayoutMinor *int64) (faire.AddShipmentsRequest, bool) {
@@ -93,27 +108,115 @@ func shipmentRequestFromForm(packages []*shipmentFormPackage, totalPayoutMinor *
 	return request, true
 }
 
-// normalizeShipmentFormBlurredFields writes canonical tracking numbers and dollar amounts back to editors when they lose focus.
-// This makes the displayed values match the request payload without interrupting a user while they are still typing.
-func (view *ordersViewState) normalizeShipmentFormBlurredFields(gtx layout.Context) {
+// updateShipmentFormValidation records user edits, validates completed fields on blur, and refreshes label-cost results when the payout changes.
+// Change events clear stale feedback immediately, while blur and carrier selection are the only normal paths that evaluate typed values.
+func (view *ordersViewState) updateShipmentFormValidation(gtx layout.Context, totalPayoutMinor *int64) {
 	for _, shipment := range view.shipmentForm {
 		if shipment == nil {
 			continue
 		}
+
+		trackingChanged := shipmentEditorChanged(gtx, &shipment.trackingNumber)
 		trackingFocused := gtx.Focused(&shipment.trackingNumber)
+		if trackingChanged {
+			shipment.clearTrackingValidation()
+		}
 		if shipment.trackingFocused && !trackingFocused {
-			shipment.trackingNumber.SetText(normalizedTrackingNumber(shipment.carrier, shipment.trackingNumber.Text()))
+			shipment.validateTracking()
 		}
 		shipment.trackingFocused = trackingFocused
 
+		labelCostChanged := shipmentEditorChanged(gtx, &shipment.labelCost)
 		labelCostFocused := gtx.Focused(&shipment.labelCost)
+		if labelCostChanged {
+			shipment.clearLabelCostValidation()
+		}
 		if shipment.labelCostFocused && !labelCostFocused {
-			if amountMinor, valid := parseDollarAmount(shipment.labelCost.Text()); valid {
-				shipment.labelCost.SetText(formatDollarAmount(amountMinor))
-			}
+			shipment.validateLabelCost(totalPayoutMinor)
+		} else if !labelCostFocused && shipment.labelCostValidation.completed && !shipment.labelCostValidationMatchesPayout(totalPayoutMinor) {
+			shipment.validateLabelCost(totalPayoutMinor)
 		}
 		shipment.labelCostFocused = labelCostFocused
 	}
+}
+
+// shipmentEditorChanged drains one editor's Gio events and reports whether the user changed its text.
+// Draining events before layout keeps cached validation state synchronized with input while discarding unrelated editor events the shipment form does not act on.
+func shipmentEditorChanged(gtx layout.Context, editor *widget.Editor) bool {
+	changed := false
+	for {
+		event, ok := editor.Update(gtx)
+		if !ok {
+			return changed
+		}
+		if _, changedEvent := event.(widget.ChangeEvent); changedEvent {
+			changed = true
+		}
+	}
+}
+
+// clearTrackingValidation marks tracking as pending after the user edits it and removes any obsolete feedback.
+func (shipment *shipmentFormPackage) clearTrackingValidation() {
+	shipment.trackingValidation = shipmentFieldValidation{}
+}
+
+// clearLabelCostValidation marks label cost as pending after the user edits it and removes any obsolete feedback.
+func (shipment *shipmentFormPackage) clearLabelCostValidation() {
+	shipment.labelCostValidation = shipmentFieldValidation{}
+}
+
+// validateTracking normalizes and validates a nonblank tracking number using the package's currently selected carrier.
+// Blank values deliberately remain message-free but invalid, allowing the form to stay quiet until the user supplies required input.
+func (shipment *shipmentFormPackage) validateTracking() {
+	value := shipment.trackingNumber.Text()
+	if strings.TrimSpace(value) == "" {
+		shipment.trackingValidation = shipmentFieldValidation{completed: true}
+		return
+	}
+
+	value = normalizedTrackingNumber(shipment.carrier, value)
+	shipment.trackingNumber.SetText(value)
+	message := trackingValidationMessage(shipment.carrier, value)
+	shipment.trackingValidation = shipmentFieldValidation{completed: true, valid: message == "", message: message}
+}
+
+// validateLabelCost formats a valid nonblank amount and evaluates it against the payout snapshot used by this order detail.
+// Blank values deliberately remain message-free but invalid, and the recorded payout allows later order-detail refreshes to invalidate stale results.
+func (shipment *shipmentFormPackage) validateLabelCost(totalPayoutMinor *int64) {
+	shipment.labelCostValidationPayoutAvailable = totalPayoutMinor != nil && *totalPayoutMinor > 0
+	if shipment.labelCostValidationPayoutAvailable {
+		shipment.labelCostValidationPayoutMinor = *totalPayoutMinor
+	}
+
+	value := shipment.labelCost.Text()
+	if strings.TrimSpace(value) == "" {
+		shipment.labelCostValidation = shipmentFieldValidation{completed: true}
+		return
+	}
+
+	if amountMinor, valid := parseDollarAmount(value); valid {
+		shipment.labelCost.SetText(formatDollarAmount(amountMinor))
+	}
+	message := labelCostValidationMessage(shipment.labelCost.Text(), totalPayoutMinor)
+	shipment.labelCostValidation = shipmentFieldValidation{completed: true, valid: message == "", message: message}
+}
+
+// labelCostValidationMatchesPayout reports whether a cached label-cost result was evaluated against the currently displayed payout.
+// A mismatched payout cannot enable Confirm because the allowed cost limit is derived from that value.
+func (shipment *shipmentFormPackage) labelCostValidationMatchesPayout(totalPayoutMinor *int64) bool {
+	payoutAvailable := totalPayoutMinor != nil && *totalPayoutMinor > 0
+	return shipment.labelCostValidationPayoutAvailable == payoutAvailable && (!payoutAvailable || shipment.labelCostValidationPayoutMinor == *totalPayoutMinor)
+}
+
+// setCarrier changes the package carrier and immediately revalidates a supplied tracking number against the new carrier's rules.
+// An empty tracking field stays quiet and invalid, while a nonblank one receives timely carrier-specific feedback without waiting for another blur.
+func (shipment *shipmentFormPackage) setCarrier(carrier string) {
+	shipment.carrier = carrier
+	if strings.TrimSpace(shipment.trackingNumber.Text()) == "" {
+		shipment.clearTrackingValidation()
+		return
+	}
+	shipment.validateTracking()
 }
 
 // validTrackingNumber applies the selected carrier's rules after removing all whitespace and dashes.
@@ -188,17 +291,17 @@ func labelCostBelowHalfPayout(amountMinor, totalPayoutMinor int64) bool {
 	return totalPayoutMinor > 0 && amountMinor >= 0 && amountMinor <= (totalPayoutMinor-1)/2
 }
 
-// shipmentValidationMessage returns compact, field-specific feedback for a package only after the user entered an invalid value.
-// Blank untouched fields intentionally produce no message so a new form does not look erroneous before the user begins entering shipment data.
-func shipmentValidationMessage(shipment *shipmentFormPackage, totalPayoutMinor *int64) string {
+// shipmentValidationMessage returns compact feedback from completed field validations for one package.
+// It does not inspect editor text, so active edits clear stale feedback without revalidating until blur or an applicable carrier change.
+func shipmentValidationMessage(shipment *shipmentFormPackage) string {
 	if shipment == nil {
 		return ""
 	}
 	messages := make([]string, 0, 2)
-	if message := trackingValidationMessage(shipment.carrier, shipment.trackingNumber.Text()); message != "" {
+	if message := shipment.trackingValidation.message; message != "" {
 		messages = append(messages, message)
 	}
-	if message := labelCostValidationMessage(shipment.labelCost.Text(), totalPayoutMinor); message != "" {
+	if message := shipment.labelCostValidation.message; message != "" {
 		messages = append(messages, message)
 	}
 	return strings.Join(messages, " • ")

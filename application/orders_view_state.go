@@ -15,17 +15,29 @@ type shipmentTrackingControlKey struct {
 	shipmentIndex int
 }
 
-// shipmentFormPackage owns the persistent controls and selected carrier for one unsubmitted shipment.
+// shipmentFieldValidation is the most recent completed result for one shipment input.
+// completed distinguishes a field still being edited from a completed invalid field; valid remains false in both cases so Confirm cannot use an out-of-date result, and message is retained only after a completed validation finds an error.
+type shipmentFieldValidation struct {
+	completed bool
+	valid     bool
+	message   string
+}
+
+// shipmentFormPackage owns the persistent controls, selected carrier, and completed validation state for one unsubmitted shipment.
 // Gio requires the editors and clickables to survive frame boundaries so typed values and pointer gestures retain their identity; packages are stored by pointer to prevent slice growth from copying live widgets.
 type shipmentFormPackage struct {
-	carrier          string
-	trackingNumber   widget.Editor
-	labelCost        widget.Editor
-	carrierButton    widget.Clickable
-	carrierOptions   [supportedCarrierCount]widget.Clickable
-	removeButton     widget.Clickable
-	trackingFocused  bool
-	labelCostFocused bool
+	carrier                            string
+	trackingNumber                     widget.Editor
+	labelCost                          widget.Editor
+	carrierButton                      widget.Clickable
+	carrierOptions                     [supportedCarrierCount]widget.Clickable
+	removeButton                       widget.Clickable
+	trackingFocused                    bool
+	labelCostFocused                   bool
+	trackingValidation                 shipmentFieldValidation
+	labelCostValidation                shipmentFieldValidation
+	labelCostValidationPayoutMinor     int64
+	labelCostValidationPayoutAvailable bool
 }
 
 // newShipmentFormPackage creates a blank package that defaults to UPS and accepts one-line values only.

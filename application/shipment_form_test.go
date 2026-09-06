@@ -172,10 +172,100 @@ func TestShipmentValidationMessages(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			shipment := completeShipmentFormPackage(test.carrier, test.tracking, test.cost)
-			if got := shipmentValidationMessage(shipment, &payoutMinor); got != test.want {
+			shipment.validateTracking()
+			shipment.validateLabelCost(&payoutMinor)
+			if got := shipmentValidationMessage(shipment); got != test.want {
 				t.Fatalf("shipmentValidationMessage() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// TestShipmentValidationWaitsForBlur verifies an edit clears stale feedback, disables confirmation, and does not become valid again until a completed validation runs.
+func TestShipmentValidationWaitsForBlur(t *testing.T) {
+	t.Parallel()
+
+	payoutMinor := int64(10000)
+	shipment := completeShipmentFormPackage("UPS", "1Z999AA10123456784", "13.50")
+	shipment.validateTracking()
+	shipment.validateLabelCost(&payoutMinor)
+	packages := []*shipmentFormPackage{shipment}
+	if !shipmentFormReadyForConfirmation(packages, &payoutMinor) {
+		t.Fatal("shipmentFormReadyForConfirmation() = false after valid completed fields, want true")
+	}
+
+	shipment.trackingNumber.SetText("1Z123")
+	shipment.clearTrackingValidation()
+	if shipment.trackingValidation.valid || shipmentValidationMessage(shipment) != "" {
+		t.Fatalf("edited tracking validation = %#v, message = %q, want pending without feedback", shipment.trackingValidation, shipmentValidationMessage(shipment))
+	}
+	if shipmentFormReadyForConfirmation(packages, &payoutMinor) {
+		t.Fatal("shipmentFormReadyForConfirmation() = true while tracking is pending, want false")
+	}
+
+	shipment.validateTracking()
+	if got := shipmentValidationMessage(shipment); got != "Tracking: use 18 letters/numbers beginning 1Z" {
+		t.Fatalf("shipmentValidationMessage() after invalid blur = %q, want tracking feedback", got)
+	}
+
+	shipment.trackingNumber.SetText("1Z999AA10123456784")
+	shipment.clearTrackingValidation()
+	if got := shipmentValidationMessage(shipment); got != "" {
+		t.Fatalf("shipmentValidationMessage() while corrected tracking is pending = %q, want empty", got)
+	}
+	shipment.validateTracking()
+	if !shipmentFormReadyForConfirmation(packages, &payoutMinor) {
+		t.Fatal("shipmentFormReadyForConfirmation() = false after corrected tracking blur, want true")
+	}
+}
+
+// TestCarrierChangeRevalidatesNonblankTracking verifies a carrier switch immediately applies the replacement tracking rules without disturbing label-cost validation.
+func TestCarrierChangeRevalidatesNonblankTracking(t *testing.T) {
+	t.Parallel()
+
+	payoutMinor := int64(10000)
+	shipment := completeShipmentFormPackage("UPS", "1Z999AA10123456784", "13.50")
+	shipment.validateTracking()
+	shipment.validateLabelCost(&payoutMinor)
+
+	shipment.setCarrier("FEDEX")
+	if shipment.trackingValidation.valid {
+		t.Fatal("tracking validation remains valid after selecting FedEx for a UPS number, want false")
+	}
+	if got := shipmentValidationMessage(shipment); got != "Tracking: use 12, 14, 15, 20, or 22 digits" {
+		t.Fatalf("shipmentValidationMessage() after carrier switch = %q, want FedEx feedback", got)
+	}
+	if !shipment.labelCostValidation.valid {
+		t.Fatal("label-cost validation changed after carrier switch, want preserved valid result")
+	}
+
+	shipment.trackingNumber.SetText("")
+	shipment.setCarrier("USPS")
+	if shipment.trackingValidation.completed || shipmentValidationMessage(shipment) != "" {
+		t.Fatalf("blank tracking after carrier switch = %#v, message = %q, want pending without feedback", shipment.trackingValidation, shipmentValidationMessage(shipment))
+	}
+}
+
+// TestLabelCostValidationTracksPayout verifies a payout change invalidates cached label-cost approval until the amount is checked against the new limit.
+func TestLabelCostValidationTracksPayout(t *testing.T) {
+	t.Parallel()
+
+	initialPayoutMinor := int64(10000)
+	updatedPayoutMinor := int64(9000)
+	shipment := completeShipmentFormPackage("UPS", "1Z999AA10123456784", "49.99")
+	shipment.validateTracking()
+	shipment.validateLabelCost(&initialPayoutMinor)
+	packages := []*shipmentFormPackage{shipment}
+	if !shipmentFormReadyForConfirmation(packages, &initialPayoutMinor) {
+		t.Fatal("shipmentFormReadyForConfirmation() = false for initial valid payout, want true")
+	}
+	if shipmentFormReadyForConfirmation(packages, &updatedPayoutMinor) {
+		t.Fatal("shipmentFormReadyForConfirmation() = true with an unvalidated updated payout, want false")
+	}
+
+	shipment.validateLabelCost(&updatedPayoutMinor)
+	if got := shipmentValidationMessage(shipment); got != "Label cost: must be less than 50% of payout" {
+		t.Fatalf("shipmentValidationMessage() after payout update = %q, want payout feedback", got)
 	}
 }
 

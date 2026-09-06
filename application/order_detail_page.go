@@ -124,10 +124,10 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 }
 
 // handleShipmentFormEvents applies empty-shipment form interactions before the form is laid out for the current frame.
-// It drains every action event even while confirmation is disabled, preventing a prior disabled click from submitting a later valid form.
+// It updates field validation from editor events first and drains every action event even while confirmation is disabled, preventing a prior disabled click from submitting a later valid form.
 func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 	view := &ui.orders.view
-	view.normalizeShipmentFormBlurredFields(gtx)
+	view.updateShipmentFormValidation(gtx, view.orderDetail.TotalPayoutMinor)
 	addPackageClicked := view.addPackageButton.Clicked(gtx)
 	confirmShipmentsClicked := view.confirmShipmentsButton.Clicked(gtx)
 	if view.shipmentSubmitting {
@@ -162,7 +162,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 		}
 		for carrierIndex := range supportedCarriers {
 			if shipment.carrierOptions[carrierIndex].Clicked(gtx) {
-				shipment.carrier = supportedCarriers[carrierIndex].Value
+				shipment.setCarrier(supportedCarriers[carrierIndex].Value)
 				view.carrierMenuPackage = -1
 				ui.invalidate()
 				return
@@ -176,14 +176,14 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 		ui.invalidate()
 		return
 	}
-	if confirmShipmentsClicked && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
+	if confirmShipmentsClicked && shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
 		ui.submitShipmentForm()
 		ui.invalidate()
 	}
 }
 
 // layoutShipmentForm renders every package required to create the first shipment for an otherwise unshipped order.
-// It exposes a readable, alphabetically sorted carrier menu, compact typed-input feedback, and requires every package to be complete before confirmation can be enabled.
+// It exposes a readable, alphabetically sorted carrier menu, blur-based validation feedback, and enables confirmation only after every required field has a current valid result.
 func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 	view := &ui.orders.view
 	children := []layout.FlexChild{
@@ -197,7 +197,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 		if packageIndex > 0 {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 		}
-		validationMessage := shipmentValidationMessage(shipment, view.orderDetail.TotalPayoutMinor)
+		validationMessage := shipmentValidationMessage(shipment)
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -252,7 +252,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 				layout.Rigid(underlinedTextAction(ui.theme, &view.addPackageButton, "Add package")),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting {
+					if shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting {
 						return primaryButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
 					}
 					return disabledShipmentButton(ui.theme, "Confirm")(gtx)
@@ -263,8 +263,8 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-// layoutShipmentPackageHeader renders a package number, any compact typed-input validation message, and the optional removal action.
-// validationMessage is empty until a field contains invalid input, keeping untouched package forms visually quiet.
+// layoutShipmentPackageHeader renders a package number, any compact field-validation message, and the optional removal action.
+// validationMessage is empty while fields are untouched or pending after edits, keeping active input visually quiet until blur.
 func layoutShipmentPackageHeader(gtx layout.Context, ui *DesktopUI, shipment *shipmentFormPackage, packageNumber, packageCount int, validationMessage string) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(material.H6(ui.theme, "Package "+itoa(packageNumber)).Layout),
