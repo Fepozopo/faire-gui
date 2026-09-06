@@ -3,6 +3,7 @@ package application
 import (
 	"gioui.org/layout"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
 
 	"github.com/Fepozopo/faire-gui/faire"
@@ -10,8 +11,11 @@ import (
 )
 
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
-// Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links keep their own actions.
+// Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links and the empty-shipment form keep their own actions.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
+	if len(ui.orders.view.orderDetail.Shipments) == 0 && ui.orders.view.orderDetail.OrderID != "" {
+		ui.handleShipmentFormEvents(gtx)
+	}
 	if originalOrderID := ui.orders.view.orderDetail.OriginalOrderID; originalOrderID != "" && ui.orderDetailControlFor(originalOrderID).Clicked(gtx) {
 		ui.openOrder(originalOrderID)
 		ui.invalidate()
@@ -96,12 +100,18 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 		layout.Rigid(material.H6(ui.theme, "Shipments").Layout),
 	}
-	for index, shipment := range detail.Shipments {
-		children = append(children,
-			layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)),
-			layout.Rigid(detailTrackingLine(ui, detail.OrderID, index, shipment)),
-			layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)),
-		)
+	if len(detail.Shipments) == 0 {
+		children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutShipmentForm(gtx, ui)
+		}))
+	} else {
+		for index, shipment := range detail.Shipments {
+			children = append(children,
+				layout.Rigid(detailLine(ui, "Shipment", shipment.Carrier+" · "+shipment.ShippingType)),
+				layout.Rigid(detailTrackingLine(ui, detail.OrderID, index, shipment)),
+				layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)),
+			)
+		}
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout), layout.Rigid(material.H6(ui.theme, "Items").Layout))
 	for index, item := range detail.Items {
@@ -114,6 +124,239 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		}
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// handleShipmentFormEvents applies empty-shipment form interactions before the form is laid out for the current frame.
+// It drains every action event even while confirmation is disabled, preventing a prior disabled click from submitting a later valid form.
+func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
+	view := &ui.orders.view
+	addPackageClicked := view.addPackageButton.Clicked(gtx)
+	confirmShipmentsClicked := view.confirmShipmentsButton.Clicked(gtx)
+	if view.shipmentSubmitting {
+		return
+	}
+
+	for packageIndex := range view.shipmentForm {
+		shipment := view.shipmentForm[packageIndex]
+		if shipment == nil {
+			continue
+		}
+		if len(view.shipmentForm) > 1 && shipment.removeButton.Clicked(gtx) {
+			view.shipmentForm = append(view.shipmentForm[:packageIndex], view.shipmentForm[packageIndex+1:]...)
+			if view.carrierMenuPackage == packageIndex {
+				view.carrierMenuPackage = -1
+			} else if view.carrierMenuPackage > packageIndex {
+				view.carrierMenuPackage--
+			}
+			ui.invalidate()
+			return
+		}
+		if shipment.carrierButton.Clicked(gtx) {
+			if view.carrierMenuPackage == packageIndex {
+				view.carrierMenuPackage = -1
+			} else {
+				view.carrierMenuPackage = packageIndex
+			}
+			ui.invalidate()
+		}
+		if view.carrierMenuPackage != packageIndex {
+			continue
+		}
+		for carrierIndex := range supportedCarriers {
+			if shipment.carrierOptions[carrierIndex].Clicked(gtx) {
+				shipment.carrier = supportedCarriers[carrierIndex].Value
+				view.carrierMenuPackage = -1
+				ui.invalidate()
+				return
+			}
+		}
+	}
+
+	if addPackageClicked {
+		view.shipmentForm = append(view.shipmentForm, newShipmentFormPackage())
+		view.carrierMenuPackage = -1
+		ui.invalidate()
+		return
+	}
+	if confirmShipmentsClicked && shipmentFormIsValid(view.shipmentForm) {
+		ui.submitShipmentForm()
+		ui.invalidate()
+	}
+}
+
+// layoutShipmentForm renders every package required to create the first shipment for an otherwise unshipped order.
+// It exposes a readable, alphabetically sorted carrier menu and requires every package to be complete before confirmation can be enabled.
+func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
+	view := &ui.orders.view
+	children := []layout.FlexChild{
+		layout.Rigid(bodyText(ui.theme, "Add shipment information to confirm fulfillment.", mutedTextColor)),
+	}
+	for packageIndex := range view.shipmentForm {
+		shipment := view.shipmentForm[packageIndex]
+		if shipment == nil {
+			continue
+		}
+		if packageIndex > 0 {
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, material.H6(ui.theme, "Package "+itoa(packageIndex+1)).Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if len(view.shipmentForm) == 1 {
+							return layout.Dimensions{}
+						}
+						return quietButton(ui.theme, &shipment.removeButton, "Remove package")(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Carrier").Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return carrierSelectField(gtx, ui.theme, shipment, carrierLabel(shipment.carrier))
+			}),
+		)
+		if view.carrierMenuPackage == packageIndex {
+			children = append(children,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return carrierMenu(gtx, ui.theme, shipment)
+				}),
+			)
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+					layout.Flexed(3, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Tracking number").Layout),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return outlinedInputField(gtx, ui.theme, &shipment.trackingNumber, "Tracking number")
+							}),
+						)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Flexed(2, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(material.Label(ui.theme, unit.Sp(13), "Label cost").Layout),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return dollarInputField(gtx, ui.theme, &shipment.labelCost, "0.00")
+							}),
+						)
+					}),
+				)
+			}),
+		)
+	}
+	children = append(children,
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(quietButton(ui.theme, &view.addPackageButton, "Add package")),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if shipmentFormIsValid(view.shipmentForm) && !view.shipmentSubmitting {
+						return primaryButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
+					}
+					return disabledShipmentButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
+				}),
+			)
+		}),
+	)
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// carrierLabel returns the readable display label for an API carrier value, retaining unknown text to avoid hiding an unexpected selection.
+func carrierLabel(value string) string {
+	for _, carrier := range supportedCarriers {
+		if carrier.Value == value {
+			return carrier.Label
+		}
+	}
+	return value
+}
+
+// carrierSelectField draws a carrier dropdown trigger using the same outlined border as the Orders search field.
+// shipment retains its click state and label identifies the currently selected documented carrier.
+func carrierSelectField(gtx layout.Context, theme *material.Theme, shipment *shipmentFormPackage, label string) layout.Dimensions {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	return clickableWithPointer(gtx, &shipment.carrierButton, func(gtx layout.Context) layout.Dimensions {
+		return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, material.Body1(theme, label).Layout),
+					layout.Rigid(material.Body1(theme, "⌄").Layout),
+				)
+			})
+		})
+	})
+}
+
+// carrierMenu draws each documented carrier as a persistent clickable option in alphabetical display order.
+func carrierMenu(gtx layout.Context, theme *material.Theme, shipment *shipmentFormPackage) layout.Dimensions {
+	children := make([]layout.FlexChild, 0, len(supportedCarriers))
+	for carrierIndex := range supportedCarriers {
+		carrierIndex := carrierIndex
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			style := material.Button(theme, &shipment.carrierOptions[carrierIndex], supportedCarriers[carrierIndex].Label)
+			style.Background = cardBackground
+			style.Color = mutedTextColor
+			style.CornerRadius = 0
+			style.Inset = layout.Inset{Top: unit.Dp(6), Right: unit.Dp(12), Bottom: unit.Dp(6), Left: unit.Dp(12)}
+			return pointerCursor(gtx, style.Layout)
+		}))
+	}
+	return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
+}
+
+// dollarInputField draws a dollar-prefixed editor with the application's standard subtle outlined border.
+// editor retains the user-entered decimal value, while the prefix communicates that confirmation serializes USD cents.
+func dollarInputField(gtx layout.Context, theme *material.Theme, editor *widget.Editor, hint string) layout.Dimensions {
+	return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(12), Bottom: unit.Dp(10), Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(material.Body1(theme, "$").Layout),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+				layout.Flexed(1, material.Editor(theme, editor, hint).Layout),
+			)
+		})
+	})
+}
+
+// quietButton creates a bordered, neutral button for secondary shipment-form actions such as adding or removing a package.
+// button owns interaction state and label is the visible action text; the returned widget uses the input border color for visual consistency.
+func quietButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(9), Right: unit.Dp(14), Bottom: unit.Dp(9), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				style := material.Button(theme, button, label)
+				style.Background = cardBackground
+				style.Color = mutedTextColor
+				return pointerCursor(gtx, style.Layout)
+			})
+		})
+	}
+}
+
+// disabledShipmentButton draws confirmation in gray while still draining click events to avoid delayed accidental submission.
+// button preserves Gio's event lifecycle, and label explains the unavailable action without presenting a pointer cursor.
+func disabledShipmentButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		style := material.Button(theme, button, label)
+		style.Background = selectionBarColor
+		style.Color = mutedTextColor
+		style.CornerRadius = unit.Dp(4)
+		style.Inset = layout.Inset{Top: unit.Dp(10), Right: unit.Dp(16), Bottom: unit.Dp(10), Left: unit.Dp(16)}
+		return style.Layout(gtx)
+	}
 }
 
 // layoutOrderItem renders one product or variant in a lightly tinted, bordered card.

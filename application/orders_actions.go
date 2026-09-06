@@ -68,6 +68,18 @@ type orderDetailResult struct {
 	ApplyNewOrdersCount bool
 }
 
+// shipmentSubmissionResult carries a completed batch shipment submission back to the frame loop.
+// It keeps the raw API response out of view state while allowing the successful persisted detail to replace the open snapshot.
+type shipmentSubmissionResult struct {
+	RequestID           uint64
+	ConnectionID        string
+	OrderID             faire.OrderID
+	Detail              orders.Detail
+	Status              string
+	NewOrdersCount      int
+	ApplyNewOrdersCount bool
+}
+
 // localCursorPayload is the non-sensitive worker-only encoding of a local SQLite keyset cursor.
 type localCursorPayload struct {
 	SortAtUTC *time.Time `json:"sort_at_utc,omitempty"`
@@ -139,6 +151,27 @@ func ordersLoadErrorMessage(err error) string {
 		}
 	}
 	return "Orders could not be loaded. Check the saved connection and try refreshing."
+}
+
+// shipmentSubmissionErrorMessage converts a shipment endpoint failure into safe, actionable UI feedback.
+// It intentionally omits raw API response bodies because they can contain private order or account information.
+func shipmentSubmissionErrorMessage(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "Adding shipment information was canceled."
+	}
+	if apiError, ok := errors.AsType[*faire.APIError](err); ok {
+		switch apiError.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "Faire rejected this connection's credentials. Update the saved connection or reauthorize it."
+		case http.StatusTooManyRequests:
+			return "Faire is rate limiting requests. Wait a moment, then try again."
+		case http.StatusBadRequest:
+			return "Faire rejected the shipment information. Check every package and try again."
+		default:
+			return fmt.Sprintf("Faire could not add shipment information (HTTP %d). Try again later.", apiError.StatusCode)
+		}
+	}
+	return "Shipment information could not be added. Check the saved connection and try again."
 }
 
 // invalidOrdersRequestMessage identifies only the safe synchronization phase of a rejected Faire request.
@@ -366,6 +399,8 @@ func (ui *DesktopUI) openOrder(orderID faire.OrderID) {
 	ui.orders.view.orderDetailOpen, ui.orders.view.orderDetailLoading = true, true
 	ui.orders.view.orderDetailID, ui.orders.view.orderDetailConnectionID = orderID, connectionID
 	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.shipmentSubmitting = false
+	ui.orders.view.resetShipmentForm()
 	ui.orders.view.detailList.Position.First = 0
 	ui.orders.view.detailList.Position.Offset = 0
 	ui.orders.view.orderDetailStatus = "Opening locally stored order details…"
@@ -391,6 +426,56 @@ func (ui *DesktopUI) refreshOrderDetail() {
 	ui.orders.startWorker(func() {
 		ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
 	})
+}
+
+// submitShipmentForm validates every visible package and starts one asynchronous Faire shipment submission.
+// It retains the entered controls on validation or service failure and captures the active connection scope before work begins.
+func (ui *DesktopUI) submitShipmentForm() {
+	if ui.orders.view.shipmentSubmitting || ui.orders.view.orderDetailID == "" || ui.orders.view.orderDetailConnectionID != ui.activeConnectionID || ui.orders.store == nil || ui.manager == nil {
+		return
+	}
+	request, valid := shipmentRequestFromForm(ui.orders.view.shipmentForm)
+	if !valid {
+		return
+	}
+	ui.orders.shipmentRequestID++
+	requestID := ui.orders.shipmentRequestID
+	connectionID, orderID := ui.activeConnectionID, ui.orders.view.orderDetailID
+	ui.orders.view.shipmentSubmitting = true
+	ui.orders.view.orderDetailStatus = "Adding shipment information to Faire…"
+	ui.orders.startWorker(func() {
+		ui.orders.addShipmentsAndPersistDetail(requestID, connectionID, orderID, request)
+	})
+}
+
+// addShipmentsAndPersistDetail submits a validated shipment batch, persists Faire's returned order, and publishes display-safe detail.
+// request was built on the frame goroutine, and all errors are converted to safe status text before the result is queued.
+func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint64, connectionID string, orderID faire.OrderID, request faire.AddShipmentsRequest) {
+	if controller.manager == nil {
+		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Shipment information cannot be added until an active saved connection is available."})
+		return
+	}
+	client, _, err := controller.manager.Client(controller.ctx, connectionID, connections.ClientOptions{})
+	if err != nil {
+		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: shipmentSubmissionErrorMessage(err)})
+		return
+	}
+	order, err := client.Orders.AddShipments(controller.ctx, orderID, request)
+	if err != nil {
+		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: shipmentSubmissionErrorMessage(err)})
+		return
+	}
+	record, err := controller.persistRemoteOrder(connectionID, order)
+	if err != nil {
+		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
+		return
+	}
+	result := shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)}
+	if count, found := newOrdersCount(controller.ctx, controller.store, connectionID); found {
+		result.NewOrdersCount = count
+		result.ApplyNewOrdersCount = true
+	}
+	controller.publishShipmentResult(result)
 }
 
 // loadOrderDetail reads and deserializes one private snapshot in a worker, publishing only its typed presentation model.
@@ -419,6 +504,11 @@ func loadOrderDetail(ctx context.Context, store ordersstore.Store, requestID uin
 // drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller.
 func (ui *DesktopUI) drainOrderDetailResults() {
 	ui.orders.drainDetailResults(ui.activeConnectionID)
+}
+
+// drainShipmentSubmissionResults delegates current shipment-submission result validation to the feature controller.
+func (ui *DesktopUI) drainShipmentSubmissionResults() {
+	ui.orders.drainShipmentResults(ui.activeConnectionID)
 }
 
 // requestOrdersDataAction opens explicit confirmation for a connection-scoped local-data delete or rebuild operation.

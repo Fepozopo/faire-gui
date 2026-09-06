@@ -54,12 +54,14 @@ type ordersController struct {
 
 	loadResults       chan orderLoadResult
 	detailResults     chan orderDetailResult
+	shipmentResults   chan shipmentSubmissionResult
 	exportResults     chan orderExportResult
 	dataActionResults chan ordersDataActionEvent
 	invalidate        func()
 
 	loadRequestID          uint64
 	detailRequestID        uint64
+	shipmentRequestID      uint64
 	exportRequestID        uint64
 	dataStatusRequestID    uint64
 	dataActionConnectionID string
@@ -76,6 +78,7 @@ func newOrdersController(ctx context.Context, store ordersstore.Store, manager *
 		view:              newOrdersViewState(),
 		loadResults:       make(chan orderLoadResult, 4),
 		detailResults:     make(chan orderDetailResult, 2),
+		shipmentResults:   make(chan shipmentSubmissionResult, 1),
 		exportResults:     make(chan orderExportResult, 1),
 		dataActionResults: make(chan ordersDataActionEvent, 2),
 		invalidate:        invalidate,
@@ -209,6 +212,19 @@ func (controller *ordersController) publishOrderDetailResult(result orderDetailR
 	}
 }
 
+// publishShipmentResult sends one shipment-submission outcome unless application shutdown has begun.
+// Results contain only display-safe order detail or status text and are applied exclusively by the frame goroutine.
+func (controller *ordersController) publishShipmentResult(result shipmentSubmissionResult) {
+	select {
+	case controller.shipmentResults <- result:
+	case <-controller.ctx.Done():
+		return
+	}
+	if controller.invalidate != nil {
+		controller.invalidate()
+	}
+}
+
 // drainLoadResults validates and applies the latest load result on the Gio frame goroutine.
 // It returns a matching local-data status for the shell to mirror in Brand Profile without exposing Orders internals.
 func (controller *ordersController) drainLoadResults(activeConnectionID string) (string, bool) {
@@ -306,6 +322,32 @@ func (controller *ordersController) drainDetailResults(activeConnectionID string
 			}
 			controller.view.orderDetail = result.Detail
 			controller.view.orderDetailStatus = "Showing locally stored order details."
+		default:
+			return
+		}
+	}
+}
+
+// drainShipmentResults applies a current submission result and preserves form data when Faire rejected it.
+// It runs on the frame goroutine so package controls are cleared only after the returned order was persisted successfully.
+func (controller *ordersController) drainShipmentResults(activeConnectionID string) {
+	for {
+		select {
+		case result := <-controller.shipmentResults:
+			if result.RequestID != controller.shipmentRequestID || result.ConnectionID != activeConnectionID || result.OrderID != controller.view.orderDetailID {
+				continue
+			}
+			controller.view.shipmentSubmitting = false
+			if result.ApplyNewOrdersCount {
+				controller.view.newCount = result.NewOrdersCount
+			}
+			if result.Status != "" {
+				controller.view.orderDetailStatus = result.Status
+				continue
+			}
+			controller.view.orderDetail = result.Detail
+			controller.view.orderDetailStatus = "Shipment information was added."
+			controller.view.resetShipmentForm()
 		default:
 			return
 		}
