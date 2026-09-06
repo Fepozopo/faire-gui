@@ -205,7 +205,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 						if len(view.shipmentForm) == 1 {
 							return layout.Dimensions{}
 						}
-						return quietButton(ui.theme, &shipment.removeButton, "Remove package")(gtx)
+						return underlinedTextAction(ui.theme, &shipment.removeButton, "Remove package")(gtx)
 					}),
 				)
 			}),
@@ -351,21 +351,6 @@ func dollarInputField(gtx layout.Context, theme *material.Theme, editor *widget.
 			)
 		})
 	})
-}
-
-// quietButton creates a bordered, neutral button for secondary shipment-form actions such as adding or removing a package.
-// button owns interaction state and label is the visible action text; the returned widget uses the input border color for visual consistency.
-func quietButton(theme *material.Theme, button *widget.Clickable, label string) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(9), Right: unit.Dp(14), Bottom: unit.Dp(9), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				style := material.Button(theme, button, label)
-				style.Background = cardBackground
-				style.Color = mutedTextColor
-				return pointerCursor(gtx, style.Layout)
-			})
-		})
-	}
 }
 
 // disabledShipmentButton draws a static neutral-gray confirmation affordance with no pointer target or hover state.

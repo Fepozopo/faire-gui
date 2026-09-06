@@ -18,7 +18,7 @@ var (
 	cardBackground          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	selectionBarColor       = color.NRGBA{R: 226, G: 231, B: 240, A: 255}
 	formBackground          = selectionBarColor
-	shipmentPanelBackground = color.NRGBA{R: 247, G: 247, B: 247, A: 255}
+	shipmentPanelBackground = color.NRGBA{R: 238, G: 238, B: 238, A: 255}
 	disabledButtonColor     = color.NRGBA{R: 210, G: 210, B: 210, A: 255}
 	disabledButtonTextColor = color.NRGBA{R: 112, G: 112, B: 112, A: 255}
 	mutedTextColor          = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
