@@ -8,11 +8,14 @@ A native desktop application for working with a Faire brand, built with Go and [
 
 - Saves Faire connections securely using the operating system credential store.
 - Shows read-only Faire Brand Profile information for a selected connection.
-- Provides a local-first Orders screen with filtering, sorting, search, selection, pagination, and detail views.
+- Provides a local-first Orders screen with status filters, local date sorting, search, selection, pagination, and detail views.
 - Synchronizes orders from Faire in the background while keeping locally cached rows available.
-- Exports New, Backordered, or selected orders as CSV files.
-- Optionally downloads packing-slip PDFs alongside an export.
+- Moves selected orders to Processing with an expected ship date and supports fulfillment actions from order details.
+- Exports New, Backordered, or selected orders as CSV files, and can download packing slips for selected orders without creating a CSV.
+- Lets users delete or rebuild the connection-scoped local order cache.
 - Checks for compatible application updates on startup or on demand.
+
+Products, Customers, and Analytics are planned navigation surfaces. The current desktop UI provides functional Orders, Brand Profile, Connections, and Settings flows.
 
 ## Quick start
 
@@ -72,15 +75,23 @@ The local cache is scoped to the selected saved connection. You can delete or re
 
 Refreshing an individual order detail or looking up an order by display ID updates the local snapshot for that order. It does not change the list synchronization checkpoint.
 
+### Fulfillment actions
+
+- Select one or more orders and use **Edit ship date** to move them to Processing with a date chosen in the calendar. Orders that already have a requested ship date keep their existing requested and expected dates.
+- Before an order has a shipment, its detail view can mark eligible variants out of stock. The update is sent as one confirmed batch, with a clear warning before submission.
+- Before an order has a shipment, its detail view can add one or more packages with a supported carrier, tracking number, and label cost. Tracking links are opened only for supported official carrier sites.
+- Order details can link to an original order when one exists, and every successful remote change is written back to that order’s local snapshot.
+
 ### CSV and packing-slip exports
 
-CSV exports are written to the current user’s Downloads directory. You can export New orders, Backordered orders, or rows selected in the table.
+CSV exports are written to the current user’s Downloads directory. You can export New orders, Backordered orders, or rows selected in the table. CSV headers are optional.
 
-Packing-slip PDFs are an optional, explicit export choice:
+Packing-slip PDFs are an optional, explicit export choice. You can request them while exporting a CSV or use **Print packing slips** for selected rows without creating a CSV:
 
-- A private Downloads folder is created for the CSV, one PO-named PDF per order, and `all-packing-slips.pdf` containing every successfully downloaded slip.
+- An owner-only, timestamped Downloads folder is created for the requested artifacts.
+- The folder contains one display-ID-based PDF per successfully downloaded order and, when merging succeeds, `all-packing-slips.pdf` containing those slips.
 - PDFs are user-requested files, not cached application data.
-- If one PDF fails, the CSV, any successfully downloaded PDFs, and the combined PDF containing those successful slips are retained.
+- If one PDF fails, the CSV (when requested) and any successfully downloaded PDFs are retained.
 - The app reports only safe success/failure counts rather than private order or API details.
 
 ## Architecture
@@ -147,7 +158,7 @@ The project is intentionally conservative about abstractions:
 - keep the UI responsive by doing I/O outside the Gio frame loop; and
 - favor small feature-specific components over generic task, repository, or database frameworks.
 
-These boundaries make it easier to extend the app—such as by adding Products—without coupling every feature to the desktop shell or the Orders implementation.
+These boundaries make it easier to add future surfaces such as Products without coupling every feature to the desktop shell or the Orders implementation.
 
 ## Development
 
@@ -185,12 +196,14 @@ When changing Orders, keep local-first loading, connection scoping, and stale-re
 
 The direct dependencies are intentionally small:
 
-| Dependency                                                               | Purpose                           |
-| ------------------------------------------------------------------------ | --------------------------------- |
-| [`gioui.org`](https://gioui.org/)                                        | Native immediate-mode desktop UI. |
-| [`github.com/zalando/go-keyring`](https://github.com/zalando/go-keyring) | Credential-store integration.     |
+| Dependency                                                               | Purpose                                |
+| ------------------------------------------------------------------------ | -------------------------------------- |
+| [`gioui.org`](https://gioui.org/)                                        | Native immediate-mode desktop UI.      |
+| [`github.com/gpdf-dev/gpdf`](https://github.com/gpdf-dev/gpdf)           | Combines downloaded packing-slip PDFs. |
+| [`github.com/zalando/go-keyring`](https://github.com/zalando/go-keyring) | Credential-store integration.          |
+| [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite)            | Pure-Go connection-scoped order cache. |
 
-The application also uses the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver through its transitive module dependency. See [`go.mod`](go.mod) and `go.sum` for the complete, versioned dependency set.
+See [`go.mod`](go.mod) and `go.sum` for the complete, versioned dependency set, including indirect module dependencies used by Gio, SQLite, and the platform credential integrations.
 
 ## Configuration
 
@@ -204,7 +217,14 @@ export FAIRE_ACCESS_TOKEN="your-brand-token"
 
 The client sends this value only in the `X-FAIRE-ACCESS-TOKEN` header.
 
-OAuth client configuration requires application credentials and an OAuth access token. `FAIRE_BASE_URL` is optional and is primarily useful for tests or a future non-production environment. See the typed client configuration in [`faire`](faire) for details.
+OAuth client configuration requires application credentials and an OAuth access token:
+
+```sh
+export FAIRE_APP_CREDENTIALS="base64(application-id:application-secret)"
+export FAIRE_OAUTH_ACCESS_TOKEN="your-oauth-token"
+```
+
+Instead of `FAIRE_APP_CREDENTIALS`, set `FAIRE_APPLICATION_ID` and `FAIRE_APPLICATION_SECRET`; the client encodes them safely. `FAIRE_BASE_URL` is optional and is primarily useful for tests or a future non-production environment. See the typed client configuration in [`faire`](faire) for details.
 
 ## Releases and updates
 
