@@ -18,7 +18,7 @@ A native desktop application for working with a Faire brand, built with Go and [
 
 ### Requirements
 
-- Go **1.26.5** or the version declared in [`go.mod`](go.mod).
+- Go **1.27.1** or the version declared in [`go.mod`](go.mod).
 - macOS or Windows for the supported desktop and credential-store integrations.
 - A Faire brand API token to create a direct-token connection in the app.
 

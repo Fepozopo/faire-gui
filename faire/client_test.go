@@ -2,7 +2,7 @@ package faire
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -170,7 +170,7 @@ func TestMoveToProcessingSendsOptionalExpectedShipDate(t *testing.T) {
 			t.Fatalf("path = %q, want processing endpoint", request.URL.Path)
 		}
 		var payload map[string]string
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode processing payload: %v", err)
 		}
 		if payload["expected_ship_date"] != "2026-09-10" || len(payload) != 1 {
@@ -198,7 +198,7 @@ func TestUpdateItemsAvailabilitySerializesVariantMap(t *testing.T) {
 			t.Fatalf("path = %q, want item availability endpoint", request.URL.Path)
 		}
 		var payload map[string]map[string]map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode availability payload: %v", err)
 		}
 		availabilities := payload["availabilities"]
@@ -233,7 +233,7 @@ func TestUpdateItemsAvailabilitySerializesVariantMap(t *testing.T) {
 func TestMoveToProcessingOmitsExpectedShipDate(t *testing.T) {
 	client := newTestClient(t, func(request *http.Request) *http.Response {
 		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode processing payload: %v", err)
 		}
 		if len(payload) != 0 {
@@ -254,7 +254,7 @@ func TestProductUpdatePreservesExplicitFalse(t *testing.T) {
 			t.Fatalf("method = %q", request.Method)
 		}
 		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
 		if value, ok := payload["allow_sales_when_out_of_stock"]; !ok || value != false {

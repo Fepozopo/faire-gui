@@ -3,7 +3,7 @@ package updater
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -247,8 +247,7 @@ func (checker Checker) Check(ctx context.Context) (update Update, available bool
 	}
 
 	var release githubRelease
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxReleaseResponseBytes))
-	if err := decoder.Decode(&release); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(response.Body, maxReleaseResponseBytes), &release); err != nil {
 		return Update{}, false, fmt.Errorf("decode latest release: %w", err)
 	}
 	latest, err := ParseVersion(release.TagName)

@@ -2,7 +2,8 @@ package connections
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -116,7 +117,7 @@ func (r *FileConnectionRepository) read() (connectionFile, error) {
 	defer func() { _ = file.Close() }()
 
 	var metadata connectionFile
-	if err := json.NewDecoder(file).Decode(&metadata); err != nil {
+	if err := json.UnmarshalDecode(jsontext.NewDecoder(file), &metadata); err != nil {
 		if errors.Is(err, io.EOF) {
 			return connectionFile{Version: metadataFileVersion}, nil
 		}
@@ -151,9 +152,8 @@ func (r *FileConnectionRepository) write(metadata connectionFile) error {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("connections: secure temporary metadata file: %w", err)
 	}
-	encoder := json.NewEncoder(temporaryFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(metadata); err != nil {
+	encoder := jsontext.NewEncoder(temporaryFile, jsontext.Multiline(true), jsontext.WithIndent("  "))
+	if err := json.MarshalEncode(encoder, metadata); err != nil {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("connections: encode metadata: %w", err)
 	}

@@ -3,7 +3,7 @@ package faire
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -228,7 +228,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	if destination == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
+	if err := json.UnmarshalRead(response.Body, destination); err != nil {
 		return fmt.Errorf("faire: decode response: %w", err)
 	}
 	return nil

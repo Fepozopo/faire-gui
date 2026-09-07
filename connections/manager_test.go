@@ -60,6 +60,26 @@ func TestManagerDirectTokenConnectionKeepsSecretOutOfMetadata(t *testing.T) {
 	}
 }
 
+// TestFileConnectionRepositoryTreatsEmptyMetadataFileAsEmpty verifies an existing empty metadata file behaves like a new repository.
+func TestFileConnectionRepositoryTreatsEmptyMetadataFileAsEmpty(t *testing.T) {
+	metadataPath := t.TempDir() + "/connections.json"
+	if err := os.WriteFile(metadataPath, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	repository, err := NewFileConnectionRepository(metadataPath)
+	if err != nil {
+		t.Fatalf("NewFileConnectionRepository() error = %v", err)
+	}
+
+	stored, err := repository.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("List() = %#v, want no connections", stored)
+	}
+}
+
 // TestManagerOAuthConnectionBuildsOAuthClient verifies OAuth secrets produce only OAuth request headers.
 func TestManagerOAuthConnectionBuildsOAuthClient(t *testing.T) {
 	manager, _ := newTestManager(t)

@@ -1,6 +1,6 @@
 module github.com/Fepozopo/faire-gui
 
-go 1.26.5
+go 1.27.1
 
 require (
 	gioui.org v0.10.2
