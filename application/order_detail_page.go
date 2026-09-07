@@ -12,6 +12,9 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
+// orderItemAvailabilityColumnWidth reserves space for the longest availability action so changing its label never reflows adjacent item details.
+const orderItemAvailabilityColumnWidth = unit.Dp(256)
+
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
 // Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links and the empty-shipment form keep their own actions.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
@@ -483,6 +486,7 @@ func disabledShipmentButton(theme *material.Theme, label string) layout.Widget {
 
 // layoutOrderItem renders one product or variant in a bordered card with an optional pre-shipment availability action.
 // Matching variants share a draft state and visual treatment because Faire accepts one availability value per variant rather than per order row.
+// Visible actions use a fixed-width fourth column so their state-specific labels cannot reflow the other columns.
 func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, index, total int, availabilityVisible bool) layout.Dimensions {
 	positionLabel := "Item"
 	if total > 1 {
@@ -523,9 +527,11 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							style := material.Label(ui.theme, unit.Sp(12), "Availability")
-							style.Color = mutedTextColor
-							return style.Layout(gtx)
+							return orderItemAvailabilityColumn(gtx, func(gtx layout.Context) layout.Dimensions {
+								style := material.Label(ui.theme, unit.Sp(12), "Availability")
+								style.Color = mutedTextColor
+								return style.Layout(gtx)
+							})
 						}),
 					)
 				}),
@@ -546,7 +552,9 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layoutOrderItemAvailabilityAction(gtx, ui, item, true, selected)
+							return orderItemAvailabilityColumn(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layoutOrderItemAvailabilityAction(gtx, ui, item, true, selected)
+							})
 						}),
 					)
 				}),
@@ -580,7 +588,25 @@ func layoutOrderItem(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, 
 	})
 }
 
+// orderItemAvailabilityColumn lays out an availability label or action at the right edge of a stable column.
+// child renders the label or action, while the fixed column reserves room for the longest action label and keeps all preceding item columns aligned across availability states.
+func orderItemAvailabilityColumn(gtx layout.Context, child layout.Widget) layout.Dimensions {
+	width := gtx.Dp(orderItemAvailabilityColumnWidth)
+	if width > gtx.Constraints.Max.X {
+		width = gtx.Constraints.Max.X
+	}
+	gtx.Constraints.Min.X = width
+	gtx.Constraints.Max.X = width
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+		layout.Rigid(child),
+	)
+}
+
 // layoutOrderItemAvailabilityAction renders a non-interactive placeholder for ineligible or submitting items and a reversible action for eligible drafts.
+// Its natural-width button is right-aligned by orderItemAvailabilityColumn, so a label change does not change the item card's column geometry.
 func layoutOrderItemAvailabilityAction(gtx layout.Context, ui *DesktopUI, item orders.DetailItem, visible, selected bool) layout.Dimensions {
 	if !visible {
 		return layout.Dimensions{}
