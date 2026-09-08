@@ -173,13 +173,13 @@ func TestMoveToProcessingSendsOptionalExpectedShipDate(t *testing.T) {
 		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode processing payload: %v", err)
 		}
-		if payload["expected_ship_date"] != "2026-09-10" || len(payload) != 1 {
-			t.Fatalf("payload = %#v, want only expected ship date", payload)
+		if payload["expected_ship_date"] != "2026-09-10T00:00:00Z" || len(payload) != 1 {
+			t.Fatalf("payload = %#v, want only expected ship date timestamp", payload)
 		}
 		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
 	})
 
-	order, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{ExpectedShipDate: Ptr("2026-09-10")})
+	order, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{ExpectedShipDate: Ptr("2026-09-10T00:00:00Z")})
 	if err != nil {
 		t.Fatalf("MoveToProcessing() error = %v", err)
 	}

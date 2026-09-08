@@ -323,7 +323,7 @@ func (ui *DesktopUI) layoutShipDateModal(gtx layout.Context) layout.Dimensions {
 	shipDateValid := validShipDate(selected, time.Now())
 	confirmClicked := ui.orders.view.confirmShipDateButton.Clicked(gtx)
 	if shipDateValid && confirmClicked {
-		ui.startMoveSelectedOrdersToProcessing(selected.Format("2006-01-02"))
+		ui.startMoveSelectedOrdersToProcessing(expectedShipTimestamp(selected))
 		ui.invalidate()
 	}
 	return modalPanel(gtx, ui, "Edit ship date", func(gtx layout.Context) layout.Dimensions {
@@ -454,9 +454,15 @@ func calendarGridStart(month time.Time) time.Time {
 	return month.AddDate(0, 0, -int(month.Weekday()))
 }
 
-// calendarDay returns value's local midnight while retaining its location for date-only API formatting.
+// calendarDay returns value's local midnight while retaining its location for calendar rendering and comparisons.
 func calendarDay(value time.Time) time.Time {
 	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
+}
+
+// expectedShipTimestamp converts a local calendar selection into Faire's required RFC 3339 timestamp.
+// It preserves the selected year, month, and day at UTC midnight so timezone conversion cannot move the intended ship date.
+func expectedShipTimestamp(value time.Time) string {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
 }
 
 // calendarDateEqual reports whether two values represent the same local calendar day.
