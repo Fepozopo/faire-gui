@@ -460,9 +460,9 @@ func calendarDay(value time.Time) time.Time {
 }
 
 // expectedShipTimestamp converts a local calendar selection into Faire's required RFC 3339 timestamp.
-// It preserves the selected year, month, and day at UTC midnight so timezone conversion cannot move the intended ship date.
+// It preserves the selected year, month, day, and timezone offset at local midnight so Faire and the table retain the intended ship date.
 func expectedShipTimestamp(value time.Time) string {
-	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	return calendarDay(value).Format(time.RFC3339)
 }
 
 // calendarDateEqual reports whether two values represent the same local calendar day.

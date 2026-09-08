@@ -226,10 +226,16 @@ func formatMoney(amountMinor int64, currency string) string {
 	return fmt.Sprintf("%s%s %d.%02d", sign, strings.ToUpper(currency), amountMinor/100, amountMinor%100)
 }
 
-// formatDate converts RFC 3339 timestamps to a stable date-only table label. An
-// unparseable API value is retained rather than discarded, preserving debuggable
+// formatDate converts RFC 3339 timestamps to date-only labels in the user's local timezone.
+// An unparseable API value is retained rather than discarded, preserving debuggable
 // information without risking a request or sensitive-data leak.
 func formatDate(value *string) string {
+	return formatDateInLocation(value, time.Local)
+}
+
+// formatDateInLocation converts value to a date-only label in location for presentation and testing.
+// It returns an em dash for absent values and preserves unparseable API values instead of hiding them.
+func formatDateInLocation(value *string, location *time.Location) string {
 	if value == nil || strings.TrimSpace(*value) == "" {
 		return "—"
 	}
@@ -237,7 +243,7 @@ func formatDate(value *string) string {
 	if err != nil {
 		return *value
 	}
-	return parsed.Format("2006-01-02")
+	return parsed.In(location).Format("2006-01-02")
 }
 
 // titleFromIdentifier makes an unfamiliar uppercase underscore API enum readable.

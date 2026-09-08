@@ -44,7 +44,7 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 	if detail.ShippingAddress.Address1 != address1 || len(detail.Items) != 1 || detail.Items[0].Quantity != "2" || detail.Items[0].Price != "$12.34" || detail.Items[0].VariantID != variantID || detail.Items[0].OrderedQuantity != quantity || !detail.Items[0].AvailabilityEligible || detail.Items[0].Customizations[0].Value != "Hello world" || len(detail.Shipments) != 1 || detail.Shipments[0].TrackingCode != tracking {
 		t.Fatalf("nested detail = %#v", detail)
 	}
-	if detail.Notes != "Leave at desk" || detail.OriginalOrderID != originalOrderID || detail.OriginalOrderDisplayID != "ORIGINAL-ORDER-1" || detail.ShipAfter != "2026-01-05" || detail.RequestedShipDate != "2026-01-06" || detail.ExpectedShipDate != "2026-01-07" || detail.SalesRepName != "Grace Hopper" || detail.IsFreeShipping != "Yes" || detail.FreeShippingReason != "Free Shipping Threshold" || detail.UpdatedAt != "2026-01-03 04:05 UTC" || detail.SyncedAt != "2026-01-04 05:06 UTC" {
+	if detail.Notes != "Leave at desk" || detail.OriginalOrderID != originalOrderID || detail.OriginalOrderDisplayID != "ORIGINAL-ORDER-1" || detail.ShipAfter != localDate(t, shipAfter) || detail.RequestedShipDate != localDate(t, requestedShipDate) || detail.ExpectedShipDate != localDate(t, expectedShipDate) || detail.SalesRepName != "Grace Hopper" || detail.IsFreeShipping != "Yes" || detail.FreeShippingReason != "Free Shipping Threshold" || detail.UpdatedAt != "2026-01-03 04:05 UTC" || detail.SyncedAt != "2026-01-04 05:06 UTC" {
 		t.Fatalf("freshness or safety fields = %#v", detail)
 	}
 }

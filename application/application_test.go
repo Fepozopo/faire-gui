@@ -1001,12 +1001,12 @@ func TestCalendarGridStartUsesSundayAndPreservesDateOnlyValues(t *testing.T) {
 	}
 }
 
-// TestExpectedShipTimestampPreservesCalendarDate verifies selected calendar dates are serialized as Faire-compatible UTC timestamps.
+// TestExpectedShipTimestampPreservesCalendarDate verifies selected calendar dates retain their local offset in Faire-compatible timestamps.
 func TestExpectedShipTimestampPreservesCalendarDate(t *testing.T) {
 	selected := time.Date(2026, time.September, 10, 18, 45, 0, 0, time.FixedZone("UTC-7", -7*60*60))
 
-	if got := expectedShipTimestamp(selected); got != "2026-09-10T00:00:00Z" {
-		t.Fatalf("expectedShipTimestamp() = %q, want UTC midnight on the selected calendar date", got)
+	if got := expectedShipTimestamp(selected); got != "2026-09-10T00:00:00-07:00" {
+		t.Fatalf("expectedShipTimestamp() = %q, want local midnight on the selected calendar date", got)
 	}
 }
 

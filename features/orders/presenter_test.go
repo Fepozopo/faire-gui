@@ -2,9 +2,20 @@ package orders
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Fepozopo/faire-gui/faire"
 )
+
+// localDate returns timestamp's calendar date in the operating system timezone for presentation assertions.
+func localDate(t *testing.T, timestamp string) string {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		t.Fatalf("parse RFC 3339 timestamp %q: %v", timestamp, err)
+	}
+	return parsed.In(time.Local).Format("2006-01-02")
+}
 
 // TestPresentRowFormatsOrdersTableValues verifies the table fields use stable formatting,
 // including the delivery business name, order notes, Faire-supplied payout, commission percentage,
@@ -50,8 +61,8 @@ func TestPresentRowFormatsOrdersTableValues(t *testing.T) {
 		Customer:            businessName,
 		Notes:               "Leave at the side entrance",
 		TotalPayout:         "$9.99",
-		OrderDate:           "2026-01-02",
-		ShipDate:            "2026-01-03",
+		OrderDate:           localDate(t, createdAt),
+		ShipDate:            localDate(t, expectedShipDate),
 		Commission:          "15.00% + $10.00 | First order",
 		Source:              source,
 		PurchaseOrderNumber: "PO-SECRET",
@@ -114,6 +125,16 @@ func TestPresentRowHandlesUnknownStateAndMissingTotalPayout(t *testing.T) {
 	}
 }
 
+// TestFormatDateInLocationUsesLocalCalendarDay verifies timestamps are rendered as the user's local calendar date.
+func TestFormatDateInLocationUsesLocalCalendarDay(t *testing.T) {
+	value := "2026-09-15T00:00:00Z"
+	location := time.FixedZone("UTC-7", -7*60*60)
+
+	if got := formatDateInLocation(&value, location); got != "2026-09-14" {
+		t.Fatalf("formatDateInLocation() = %q, want the local calendar date", got)
+	}
+}
+
 // TestPresentRowUsesExpectedShipDate verifies every order state displays the expected
 // ship date, rather than a requested ship date, and absent expected dates use an em dash.
 func TestPresentRowUsesExpectedShipDate(t *testing.T) {
@@ -129,7 +150,7 @@ func TestPresentRowUsesExpectedShipDate(t *testing.T) {
 		{
 			name:  "new order uses expected ship date instead of requested date",
 			order: faire.Order{State: &newState, RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
-			want:  "2026-04-06",
+			want:  localDate(t, expectedShipDate),
 		},
 		{
 			name:  "new order without expected ship date uses an em dash",
@@ -139,7 +160,7 @@ func TestPresentRowUsesExpectedShipDate(t *testing.T) {
 		{
 			name:  "non-new order uses expected ship date instead of requested date",
 			order: faire.Order{State: &processingState, RequestedShipDate: &requestedShipDate, ExpectedShipDate: &expectedShipDate},
-			want:  "2026-04-06",
+			want:  localDate(t, expectedShipDate),
 		},
 		{
 			name:  "non-new order without expected ship date uses an em dash",
