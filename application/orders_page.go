@@ -53,6 +53,9 @@ func (ui *DesktopUI) layoutOrdersStatus(gtx layout.Context) layout.Dimensions {
 			})
 		})
 	}
+	if ui.orders.view.processingOrders {
+		return layoutOrdersStatusRow(gtx, ui.layoutShipDateEditIndicator)
+	}
 	if ui.orders.view.state.Loading {
 		return layoutOrdersStatusRow(gtx, ui.layoutOrdersRefreshIndicator)
 	}
@@ -84,27 +87,49 @@ func layoutOrdersStatusRow(gtx layout.Context, child layout.Widget) layout.Dimen
 	})
 }
 
-// layoutOrdersRefreshIndicator renders active Orders work as bold, animated text on a pastel yellow fill.
-// It requests the next frame while visible so the trailing dots continue to communicate progress without changing the status row's size.
+// layoutOrdersRefreshIndicator renders active refresh or search work as bold, animated text on a pastel yellow fill.
+// It shares the progress treatment used while ship-date edits are submitted.
 func (ui *DesktopUI) layoutOrdersRefreshIndicator(gtx layout.Context) layout.Dimensions {
+	label := "Refreshing orders"
+	if ui.orders.view.searchActive {
+		label = "Searching orders"
+	}
+	return ui.layoutOrdersActivityIndicator(gtx, label)
+}
+
+// layoutShipDateEditIndicator renders a visible progress state while selected orders receive their chosen ship date.
+// The same yellow animated treatment as refresh makes the asynchronous update unambiguous without changing the status row's size.
+func (ui *DesktopUI) layoutShipDateEditIndicator(gtx layout.Context) layout.Dimensions {
+	return ui.layoutOrdersActivityIndicator(gtx, "Editing ship dates")
+}
+
+// layoutOrdersActivityIndicator renders an animated Orders activity label on the shared pastel yellow surface.
+// It requests the next frame while visible so the one-to-three-dot progress cue advances at a consistent cadence.
+func (ui *DesktopUI) layoutOrdersActivityIndicator(gtx layout.Context, label string) layout.Dimensions {
 	now := gtx.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 	gtx.Execute(op.InvalidateCmd{At: now.Add(400 * time.Millisecond)})
-	style := material.Body1(ui.theme, ordersLoadingLabel(ui.orders.view.searchActive, now))
+	style := material.Body1(ui.theme, ordersActivityLabel(label, now))
 	style.Font.Weight = font.Bold
 	style.Color = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
 	return roundedPanel(gtx, activityColor, style.Layout)
 }
 
-// ordersLoadingLabel returns the current progress label with a one-to-three-dot cycle.
+// ordersLoadingLabel returns the current refresh or search progress label with a one-to-three-dot cycle.
 // search selects the local search label; now determines the animation phase for deterministic rendering and testing.
 func ordersLoadingLabel(search bool, now time.Time) string {
 	label := "Refreshing orders"
 	if search {
 		label = "Searching orders"
 	}
+	return ordersActivityLabel(label, now)
+}
+
+// ordersActivityLabel appends a one-to-three-dot cycle to an active Orders message.
+// label identifies the operation and now determines the deterministic animation phase used by rendering and tests.
+func ordersActivityLabel(label string, now time.Time) string {
 	dotCount := int(now.UnixMilli()/400%3) + 1
 	return label + strings.Repeat(".", dotCount)
 }

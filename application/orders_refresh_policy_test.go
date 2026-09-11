@@ -116,6 +116,14 @@ func TestOrdersLoadingLabelCyclesDots(t *testing.T) {
 	}
 }
 
+// TestOrdersActivityLabelCyclesDots verifies ship-date edits use the same animated suffix as refresh work.
+func TestOrdersActivityLabelCyclesDots(t *testing.T) {
+	startedAt := time.Unix(0, 0)
+	if got, want := ordersActivityLabel("Editing ship dates", startedAt.Add(800*time.Millisecond)), "Editing ship dates..."; got != want {
+		t.Fatalf("ordersActivityLabel() = %q, want %q", got, want)
+	}
+}
+
 // TestHasActiveOrdersDataActionRejectsEmptyConnectionIDs verifies an unselected Orders
 // page reserves only its blank status row rather than showing a local-data action banner.
 func TestHasActiveOrdersDataActionRejectsEmptyConnectionIDs(t *testing.T) {
