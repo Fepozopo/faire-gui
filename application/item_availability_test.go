@@ -57,15 +57,15 @@ func TestItemAvailabilityDraftIsVariantScoped(t *testing.T) {
 	}
 }
 
-// TestAvailabilityAndShipmentEligibilityGuards verifies availability is limited to unshipped orders, new orders cannot create shipments, and pending work blocks shipment confirmation.
+// TestAvailabilityAndShipmentEligibilityGuards verifies availability and shipment creation are limited to accepted, unshipped orders, and pending work blocks shipment confirmation.
 func TestAvailabilityAndShipmentEligibilityGuards(t *testing.T) {
 	newOrder := orders.Detail{OrderID: "order-1", State: faire.OrderStateNew}
 	acceptedOrder := orders.Detail{OrderID: "order-2", State: faire.OrderStateProcessing}
 	shipped := orders.Detail{OrderID: "order-2", State: faire.OrderStateProcessing, Shipments: []orders.DetailShipment{{TrackingCode: "TRACK-1"}}}
 	view := newOrdersViewState()
 
-	if !itemAvailabilityVisible(newOrder) || itemAvailabilityVisible(shipped) {
-		t.Fatalf("availability visibility = {new:%t shipped:%t}, want {true false}", itemAvailabilityVisible(newOrder), itemAvailabilityVisible(shipped))
+	if itemAvailabilityVisible(newOrder) || !itemAvailabilityVisible(acceptedOrder) || itemAvailabilityVisible(shipped) {
+		t.Fatalf("availability visibility = {new:%t accepted:%t shipped:%t}, want {false true false}", itemAvailabilityVisible(newOrder), itemAvailabilityVisible(acceptedOrder), itemAvailabilityVisible(shipped))
 	}
 	if shipmentCreationAllowed(newOrder) || !shipmentCreationAllowed(acceptedOrder) || shipmentCreationAllowed(shipped) {
 		t.Fatalf("shipment creation eligibility = {new:%t accepted:%t shipped:%t}, want {false true false}", shipmentCreationAllowed(newOrder), shipmentCreationAllowed(acceptedOrder), shipmentCreationAllowed(shipped))
@@ -75,6 +75,10 @@ func TestAvailabilityAndShipmentEligibilityGuards(t *testing.T) {
 	ui.submitShipmentForm()
 	if ui.orders.view.orderDetailStatus != "Accept this order before adding shipment information." {
 		t.Fatalf("new-order shipment submission status = %q", ui.orders.view.orderDetailStatus)
+	}
+	ui.submitItemAvailability()
+	if ui.orders.view.orderDetailStatus != "Accept this order before changing item availability." {
+		t.Fatalf("new-order availability submission status = %q", ui.orders.view.orderDetailStatus)
 	}
 	if !shipmentConfirmationAllowed(&view) {
 		t.Fatal("shipmentConfirmationAllowed() = false with no pending availability work, want true")

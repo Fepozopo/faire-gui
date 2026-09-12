@@ -541,9 +541,13 @@ func (ui *DesktopUI) submitShipmentForm() {
 }
 
 // submitItemAvailability validates the local unavailable-item draft and starts one asynchronous Faire availability update.
-// The request is built on the frame goroutine from immutable presentation values before a worker starts.
+// It rejects new orders before a request is built, then captures immutable presentation values on the frame goroutine before a worker starts.
 func (ui *DesktopUI) submitItemAvailability() {
 	view := &ui.orders.view
+	if view.orderDetail.State == faire.OrderStateNew {
+		view.orderDetailStatus = "Accept this order before changing item availability."
+		return
+	}
 	if view.availabilitySubmitting || view.orderDetailID == "" || view.orderDetailConnectionID != ui.activeConnectionID || !itemAvailabilityVisible(view.orderDetail) || ui.orders.store == nil || ui.manager == nil {
 		return
 	}

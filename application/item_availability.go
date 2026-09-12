@@ -12,10 +12,10 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
-// itemAvailabilityVisible reports whether an order remains eligible for item-availability reporting before fulfillment begins.
-// Faire availability controls are intentionally unavailable once a shipment exists, matching the shipment-only fulfillment workflow.
+// itemAvailabilityVisible reports whether an accepted order remains eligible for item-availability reporting before fulfillment begins.
+// Faire availability controls are intentionally unavailable for new or shipped orders, so fulfillment details cannot change until the brand accepts the order.
 func itemAvailabilityVisible(detail orders.Detail) bool {
-	return detail.OrderID != "" && len(detail.Shipments) == 0
+	return detail.OrderID != "" && detail.State != faire.OrderStateNew && len(detail.Shipments) == 0
 }
 
 // shipmentCreationAllowed reports whether an order has been accepted and remains unshipped.
