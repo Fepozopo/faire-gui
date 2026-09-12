@@ -18,6 +18,12 @@ func itemAvailabilityVisible(detail orders.Detail) bool {
 	return detail.OrderID != "" && len(detail.Shipments) == 0
 }
 
+// shipmentCreationAllowed reports whether an order has been accepted and remains unshipped.
+// Faire represents an unaccepted order with the New state, so shipment controls remain unavailable until the order enters a subsequent fulfillment state.
+func shipmentCreationAllowed(detail orders.Detail) bool {
+	return detail.OrderID != "" && detail.State != faire.OrderStateNew && len(detail.Shipments) == 0
+}
+
 // shipmentConfirmationAllowed reports whether an availability draft permits a shipment confirmation.
 // A pending or in-flight availability request must resolve first so the user cannot submit conflicting fulfillment actions.
 func shipmentConfirmationAllowed(view *ordersViewState) bool {

@@ -38,7 +38,7 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 		PayoutCosts: &faire.PayoutCosts{Commission: &faire.Money{AmountMinor: &commission, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
 	}
 	detail := PresentDetail(order, time.Date(2026, 1, 4, 5, 6, 0, 0, time.UTC))
-	if detail.OrderID != orderID || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Commission != "$2.50" || detail.TotalPayout != "$9.99" || detail.TotalPayoutMinor == nil || *detail.TotalPayoutMinor != payout {
+	if detail.OrderID != orderID || detail.State != state || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Commission != "$2.50" || detail.TotalPayout != "$9.99" || detail.TotalPayoutMinor == nil || *detail.TotalPayoutMinor != payout {
 		t.Fatalf("detail = %#v", detail)
 	}
 	if detail.ShippingAddress.Address1 != address1 || len(detail.Items) != 1 || detail.Items[0].Quantity != "2" || detail.Items[0].Price != "$12.34" || detail.Items[0].VariantID != variantID || detail.Items[0].OrderedQuantity != quantity || !detail.Items[0].AvailabilityEligible || detail.Items[0].Customizations[0].Value != "Hello world" || len(detail.Shipments) != 1 || detail.Shipments[0].TrackingCode != tracking {

@@ -20,6 +20,8 @@ const orderItemAvailabilityColumnWidth = unit.Dp(256)
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	if itemAvailabilityVisible(ui.orders.view.orderDetail) {
 		ui.handleItemAvailabilityEvents(gtx)
+	}
+	if shipmentCreationAllowed(ui.orders.view.orderDetail) {
 		ui.handleShipmentFormEvents(gtx)
 	}
 	if originalOrderID := ui.orders.view.orderDetail.OriginalOrderID; originalOrderID != "" && ui.orderDetailControlFor(originalOrderID).Clicked(gtx) {
@@ -188,10 +190,13 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return shipmentPanel(gtx, func(gtx layout.Context) layout.Dimensions {
-			if len(detail.Shipments) == 0 {
+			if len(detail.Shipments) > 0 {
+				return layoutExistingShipments(gtx, ui, detail)
+			}
+			if shipmentCreationAllowed(detail) {
 				return layoutShipmentForm(gtx, ui)
 			}
-			return layoutExistingShipments(gtx, ui, detail)
+			return bodyText(ui.theme, "Accept this order before adding shipment information.", mutedTextColor)(gtx)
 		})
 	}))
 	availabilityVisible := itemAvailabilityVisible(detail)
@@ -212,6 +217,9 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 // It updates field validation from editor events first and drains every action event even while confirmation is disabled, preventing a prior disabled click from submitting a later valid form.
 func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 	view := &ui.orders.view
+	if !shipmentCreationAllowed(view.orderDetail) {
+		return
+	}
 	view.updateShipmentFormValidation(gtx, view.orderDetail.TotalPayoutMinor)
 	addPackageClicked := view.addPackageButton.Clicked(gtx)
 	confirmShipmentsClicked := view.confirmShipmentsButton.Clicked(gtx)
@@ -267,7 +275,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 	}
 }
 
-// layoutShipmentForm renders every package required to create the first shipment for an otherwise unshipped order.
+// layoutShipmentForm renders every package required to create the first shipment for an accepted, otherwise unshipped order.
 // It exposes a readable, alphabetically sorted carrier menu, blur-based validation feedback, and enables confirmation only after every required field has a current valid result. Availability feedback uses the existing top-row space so it never changes the form height.
 func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 	view := &ui.orders.view

@@ -517,8 +517,12 @@ func (ui *DesktopUI) refreshOrderDetailNow() {
 }
 
 // submitShipmentForm validates every visible package and starts one asynchronous Faire shipment submission.
-// It retains the entered controls on validation or service failure and captures the active connection scope before work begins.
+// It rejects unaccepted orders before any request is built, retains entered controls on validation or service failure, and captures the active connection scope before work begins.
 func (ui *DesktopUI) submitShipmentForm() {
+	if !shipmentCreationAllowed(ui.orders.view.orderDetail) {
+		ui.orders.view.orderDetailStatus = "Accept this order before adding shipment information."
+		return
+	}
 	if ui.orders.view.shipmentSubmitting || ui.orders.view.orderDetailID == "" || ui.orders.view.orderDetailConnectionID != ui.activeConnectionID || ui.orders.store == nil || ui.manager == nil {
 		return
 	}

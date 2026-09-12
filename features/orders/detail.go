@@ -11,9 +11,10 @@ import (
 )
 
 // Detail is the display-ready, read-only representation of one locally stored Order.
-// It contains approved text fields, navigation identifiers, and the exact total-payout cents needed to validate a new shipment's label cost without exposing a raw API object or serialized snapshot to layout code.
+// It contains approved text fields, the typed fulfillment state needed to gate shipment creation, navigation identifiers, and the exact total-payout cents needed to validate a new shipment's label cost without exposing a raw API object or serialized snapshot to layout code.
 type Detail struct {
 	OrderID                faire.OrderID
+	State                  faire.OrderState
 	DisplayID              string
 	Status                 string
 	OriginalOrderID        faire.OrderID
@@ -112,6 +113,9 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		FreeShippingReason:     detailFreeShippingReason(order.FreeShippingReason),
 		PendingCancellation:    detailBoolean(order.HasPendingRetailerCancellationRequest),
 		FulfilledByFaire:       detailBoolean(order.IsFulfilledByFaire),
+	}
+	if order.State != nil {
+		detail.State = *order.State
 	}
 	if order.Customer != nil {
 		detail.Customer = safeDetailText(displayCustomer(order.Customer))
