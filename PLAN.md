@@ -1,5 +1,108 @@
 # Sage 100 ↔ Faire Fulfillment Integration Plan
 
+## 0. Agent handoff: current implementation and next work
+
+This section is the authoritative handoff point for a new coding agent. Read this section first, then follow the remaining numbered plan sections for rationale and the complete task checklist.
+
+### Current state
+
+The repository now contains the first **Sage → Faire GUI open-and-review path**. It is implemented but not yet production-verified because this development machine cannot access the Sage 100 2025 workstation.
+
+Implemented behavior:
+
+1. `Sage/LaunchFaireFulfillment.vbs` reads the active Sage Shipping Data Entry document and sends a protocol-v1 snapshot.
+2. On Windows, `application/sage_fulfillment_windows.go` listens for that snapshot on a local named pipe.
+3. `application/sage_fulfillment.go` validates the request, uses the Sage sales source to choose one saved Faire connection, requests foreground focus, opens the order matching the PO/display ID, and creates an in-memory Sage fulfillment session.
+4. Safely matched positive Sage backorders are preselected in the existing Order Details **Mark out of stock** draft. The user still must press the existing **Update availability** confirmation.
+5. Duplicate/missing SKU matches and unresolved kit parents are not guessed; the session banner reports them.
+6. The user can cancel the Sage session. The GUI then sends a typed `CANCELLED` response, and the Sage script makes no writeback changes.
+
+Not implemented yet:
+
+- a completed external-shipment response containing tracking, package allocations, and permitted freight;
+- completing the Sage session after the existing Faire shipment form succeeds;
+- persistence/idempotent replay of sessions and terminal results across a GUI restart;
+- package catalog and ship-code policy import/defaults;
+- an unresolved-mapping review gate or detailed mapping panel;
+- Faire label purchasing, which remains blocked on Faire's future API;
+- manual Sage 100 2025/Windows named-pipe runtime validation.
+
+### Protocol contract that must remain compatible
+
+The current VBScript and Go listener are coupled by this protocol. Do not change one side without changing and testing the other side.
+
+| Direction  | Endpoint/encoding                                                                | Contract                                                                                                                                                                                                                              |
+| ---------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sage → GUI | `\\\\<workstation>\\pipe\\FaireGUIFulfillmentIn`, UTF-16LE with BOM              | JSON is sent as 32 KiB text chunks, followed by a `Done` line.                                                                                                                                                                        |
+| GUI → Sage | `\\\\<workstation>\\pipe\\FaireGUIFulfillmentOut-<request-id>`, ASCII-safe lines | The GUI creates this request-specific pipe before publishing the request to the UI. It writes `RequestID`, `Status`, `SalesOrderNo`, `InvoiceNo`, optional `Tracking`, `PackageItem`, `FreightAmount`, optional `Error`, then `Done`. |
+
+The request ID must remain safe for a Windows pipe suffix and is the future idempotency key. The script currently accepts terminal `COMPLETED`, `CANCELLED`, or `FAILED`; the GUI currently emits `CANCELLED` and early `FAILED` only.
+
+### Key files
+
+| File                                      | Role                                                                                                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Sage/LaunchFaireFulfillment.vbs`         | Sage custom-button bridge. Extracts data, opens the input pipe, waits for a typed terminal response, and owns Sage writeback.                             |
+| `Sage/FieldMappings.json`                 | Data dictionary. `QUANTITYBACKORDERED` and `SO_SALESORDER.UDF_SALES_SOURCE` are proposed mappings pending validation.                                     |
+| `application/sage_fulfillment.go`         | Platform-neutral protocol parsing, session lifecycle, sales-source connection resolution, SKU/kit matching, UI banner, and cancellation.                  |
+| `application/sage_fulfillment_windows.go` | `go-winio` Windows named-pipe transport.                                                                                                                  |
+| `application/sage_fulfillment_other.go`   | Non-Windows cancellation-aware stub for development/test builds.                                                                                          |
+| `application/sage_fulfillment_test.go`    | Tests for UTF-16 decoding, connection resolution, kit-parent mapping, duplicate-SKU rejection, and request-ID validation.                                 |
+| `application/order_detail_page.go`        | Existing Order Details UI; now renders the Sage-session banner and cancellation control.                                                                  |
+| `application/orders_actions.go`           | Existing direct display-ID lookup and detail-result handling; applies Sage preselection after a detail loads.                                             |
+| `features/orders/export.go`               | Existing `BrandID → SalesSource` mapping. The Sage flow reverses it by finding the unique saved connection whose brand maps to the incoming sales source. |
+
+### Required implementation constraints
+
+- Keep all Gio widget/UI state mutation on the frame goroutine. Pipe workers must publish a bounded `sageFulfillmentInbound` value through `DesktopUI.sageFulfillmentRequests`; they must not mutate `DesktopUI` directly.
+- Do not put Faire tokens, Sage credentials, arbitrary Sage field names, or arbitrary method calls in the IPC protocol.
+- Use `setActiveConnection` for connection switching. It invalidates stale connection-scoped results; do not assign `activeConnectionID` directly.
+- Never auto-select availability for an ambiguous SKU, missing eligible Faire variant, or unresolved kit parent.
+- Keep Sage as the writer of Sage records. The GUI must return a narrow typed result, not a generic command stream.
+- Preserve the explicit user confirmation before Faire availability is updated.
+- Keep the current named-pipe output request-specific. The original fixed output pipe was unsafe for concurrent/retried sessions.
+
+### Recommended next implementation task
+
+Implement the **external-shipment completion path** before any label-purchase work:
+
+1. Extend `sageFulfillmentSession` with the approved terminal-result data and an explicit state transition after availability confirmation and shipment submission.
+2. Integrate with the existing shipment flow in `application/order_detail_page.go`, `application/orders_actions.go`, and `application/orders_controller.go`:
+   - prevent completion when the active Sage session has unresolved mappings;
+   - retain the existing explicit availability confirmation requirement;
+   - after a successful external Faire shipment submission, build the typed `COMPLETED` result from the persisted Faire shipment/detail;
+   - include the tracking, package-item allocation, and freight fields the VBScript already validates and writes;
+   - return that result through `session.respond` exactly once.
+3. Persist request ID, document identity, terminal result, and Sage-writeback-pending state before signaling `COMPLETED`. A repeat of the same request ID must replay the result, not create another Faire shipment.
+4. Add a visible post-completion/writeback-pending state and clear it only when the GUI knows the response has been sent. A later enhancement may add an explicit Sage acknowledgement if needed.
+5. Add focused tests for successful completion, retry/idempotency, unresolved-mapping blocking, and failed shipment submission retaining the session.
+
+Do **not** implement direct label purchasing until Faire releases the required API and the API-discovery checklist in section 8 is complete.
+
+### Manual validation still required
+
+Run these on the actual Windows Sage workstation before production use:
+
+- Verify the exact Sage fields `QUANTITYBACKORDERED` and `UDF_SALES_SOURCE$`; change the VBScript and mapping together if different.
+- Verify that the active Shipping Data Entry document has the expected invoice number when the custom button runs.
+- Verify `SO_InvoiceTracking_bus`, `SO_PackageTrackingByItem_bus`, replacement behavior, and `FREIGHTAMT` UI change return values.
+- Verify a Windows user can connect to both named pipes and that a minimized GUI is restored/raised sufficiently. `Gio ActionRaise` is best effort and subject to Windows foreground policy.
+- Verify normal item, all-backordered, kit/component, unmatched-SKU, cancellation, GUI-not-running, and duplicate-click cases using test orders.
+
+### Validation already run
+
+The current code passed:
+
+```text
+go test ./...
+GOOS=windows GOARCH=amd64 go build ./cmd/faire-gui
+git diff --check
+```
+
+No manual Sage or live Windows named-pipe test has been performed.
+
+---
+
 ## 1. Purpose
 
 Build a Sage 100 Shipping Data Entry integration that lets a user make shipment and backorder decisions in Sage, complete the related Faire fulfillment work in the Faire GUI, and return the final shipment data to the still-open Sage session.
@@ -60,9 +163,11 @@ Do **not** retain unchanged:
 
 ### 3.1.1 Initial purpose-built script: `Sage/LaunchFaireFulfillment.vbs`
 
-An initial protocol-v1 bridge has been created. It sends explicit shipped and backordered line quantities, the Faire display ID, the proposed sales-source UDF, kit relationship fields, ship-to data, and freight data through `FaireGUIFulfillmentIn`. It waits for a typed response through `FaireGUIFulfillmentOut`, validates its request/order/invoice identity, and replaces Sage tracking/package records only after validation.
+An initial protocol-v1 bridge has been created. It sends explicit shipped and backordered line quantities, the Faire display ID, the proposed sales-source UDF, kit relationship fields, ship-to data, and freight data through `FaireGUIFulfillmentIn`. It waits for a typed response through a request-specific `FaireGUIFulfillmentOut-<request ID>` pipe, validates its request/order/invoice identity, and replaces Sage tracking/package records only after validation.
 
-The script is **not production-verified**. It requires a compatible GUI named-pipe listener and manual Sage 100 2025 validation of object names, return values, UDF names, field names, and writeback behavior before installation.
+The compatible GUI listener now exists in `application/sage_fulfillment_windows.go`; it parses the UTF-16 Sage payload, creates the request-specific result pipe before the GUI handles the request, and sends only typed terminal responses. The application also has a macOS/Linux stub so development builds remain portable.
+
+This flow is **not production-verified**. Manual Sage 100 2025 and Windows named-pipe validation is still required. The GUI currently supports opening/reviewing/cancelling the Sage session; it does not yet return a completed external-shipment result or persist/replay terminal results.
 
 ### 3.2 Field mappings: `Sage/FieldMappings.json`
 
@@ -202,7 +307,7 @@ Required properties:
 
 ### 5.2 Request shape
 
-The exact serialization format is an implementation decision, but the payload must contain the following logical data.
+Protocol v1 is now implemented as a UTF-16LE JSON request split into lines and terminated by `Done` on `FaireGUIFulfillmentIn`. The response is an ASCII-safe, line-oriented typed result terminated by `Done` on a request-specific `FaireGUIFulfillmentOut-<request ID>` pipe. The payload contains the following logical data.
 
 ```text
 FulfillmentRequest
@@ -419,10 +524,10 @@ The model should include:
 
 Tasks:
 
-- [ ] Define the session model and state transitions.
+- [x] Define the initial in-memory session model, including a request ID, document identity, mapped order ID, status, unresolved mappings, and typed responder.
 - [ ] Persist sessions and terminal results locally.
 - [ ] Ensure reopening the same request ID is idempotent.
-- [ ] Prevent two active workflows from mutating the same Faire order without clear user feedback.
+- [x] Reject a second active Sage workflow with a clear user-facing failure response.
 - [ ] Ensure application restart recovers a pending or completed session.
 - [ ] Provide auditable timestamps and user-visible status without storing secrets in session records.
 
@@ -432,13 +537,13 @@ The exact PO-number rule makes order opening deterministic.
 
 Tasks:
 
-- [ ] Receive the display ID from the Sage request.
-- [ ] Normalize it through the existing display-ID helper.
-- [ ] Look up the local order snapshot first.
-- [ ] Use authenticated direct lookup if the order is absent or stale locally.
-- [ ] Open the existing Order Details view for the resolved order.
-- [ ] Display a clear failure state if the order cannot be found or the active Faire connection is unavailable.
-- [ ] Show a Sage-session banner containing the sales order/invoice reference, ship-via value, and imported shipped/backordered counts.
+- [x] Receive the display ID from the Sage request.
+- [x] Normalize it through the existing display-ID helper.
+- [x] Look up the local order snapshot first.
+- [x] Use the existing authenticated direct-lookup fallback if the order is absent or stale locally.
+- [x] Open the existing Order Details view for the resolved order.
+- [x] Display a clear failure response if the order cannot be found or the sales source does not resolve to one saved Faire connection.
+- [x] Show a Sage-session banner with session status while Sage is waiting. Expand it with sales-order/invoice, ship-via, and quantity counts before production rollout.
 
 ### 7.4 Implement deterministic line mapping
 
@@ -452,14 +557,14 @@ Initial matching order:
 
 Tasks:
 
-- [ ] Define the match key and normalization rules for Sage item codes and Faire SKUs.
-- [ ] Detect duplicate Faire SKUs/variants within an order.
-- [ ] Detect Sage lines with no matching Faire item.
+- [x] Define exact case-insensitive Sage item-code to Faire-SKU matching.
+- [x] Detect duplicate Faire SKUs/variants within an order and leave them unresolved.
+- [x] Detect Sage lines with no matching eligible Faire item and leave them unresolved.
 - [ ] Detect quantity inconsistencies and make them visible.
-- [ ] Mark a variant automatically unavailable only when its source backordered quantity is positive and its match is unambiguous.
-- [ ] Keep all automatic selections reversible using the existing availability draft behavior.
-- [ ] Add a clear unresolved-items panel; never guess silently.
-- [ ] Add unit tests for normal, duplicate-SKU, missing-SKU, kit, and quantity-mismatch cases.
+- [x] Mark a variant automatically unavailable only when its source backordered quantity is positive and its match is unambiguous.
+- [x] Keep all automatic selections reversible using the existing availability draft behavior.
+- [x] Surface unresolved mapping text in the Sage-session status banner; add a dedicated detailed panel before production rollout.
+- [ ] Add unit tests for normal, duplicate-SKU, missing-SKU, kit, and quantity-mismatch cases. Initial tests cover UTF-16 request parsing, kit-parent matching, duplicate-SKU rejection, sales-source connection resolution, and unsafe request IDs.
 
 ### 7.5 Availability confirmation workflow
 
@@ -467,10 +572,10 @@ A Sage backorder means globally unavailable, but the user must retain final cont
 
 Tasks:
 
-- [ ] Prepopulate the existing pending-unavailable draft from matched Sage backorders.
+- [x] Prepopulate the existing pending-unavailable draft from matched Sage backorders.
 - [ ] Visually distinguish items selected from Sage from any items manually selected in Faire.
 - [ ] Show the relevant Sage line/quantity beside imported choices.
-- [ ] Preserve the existing explicit `Update availability (N)` confirmation.
+- [x] Preserve the existing explicit `Update availability (N)` confirmation.
 - [ ] Require unresolved mappings to be reviewed before the user can complete the Sage session.
 - [ ] Retain selected items after a failed Faire availability request so retry does not require rework.
 - [ ] After success, refresh/persist the Faire order detail and advance the fulfillment session state.
@@ -494,11 +599,11 @@ Tasks:
 
 Tasks:
 
-- [ ] Implement the local listener when the GUI starts.
-- [ ] Restore the GUI if minimized and navigate to the correct order session after accepting a request.
-- [ ] Display request status while Sage is waiting.
+- [x] Implement the Windows local listener when the GUI starts, with a non-Windows development stub.
+- [x] Request foreground focus with Gio `ActionRaise` and navigate to the correct order session after accepting a request. Verify minimized-window restoration on the target Windows workstation.
+- [x] Display request status while Sage is waiting.
 - [ ] Prevent the user from accidentally closing an active session without cancellation confirmation.
-- [ ] Offer an explicit Cancel action that returns a `cancelled` result and makes no Sage changes.
+- [x] Offer an explicit Cancel action that returns a `cancelled` result and makes no Sage changes.
 - [ ] Display a clear terminal success state after Sage confirms writeback, or a writeback-pending state when it does not.
 
 ---
@@ -695,10 +800,11 @@ Use a non-production Sage company or controlled test orders.
 
 ### Milestone B — Sage-to-GUI session launch
 
-- [ ] Faire GUI listener accepts a local request.
-- [ ] Sage custom button sends a valid snapshot.
-- [ ] GUI focuses and opens the matching order by the PO/display ID.
-- [ ] Duplicate request handling and unavailable-GUI errors work.
+- [x] Implement the Windows GUI listener and request-specific output-pipe transport.
+- [x] Implement GUI parsing/validation for the Sage snapshot.
+- [x] Implement sales-source connection selection, foreground-focus request, and direct Order Details opening by PO/display ID.
+- [ ] Manually verify the Sage custom button sends a valid snapshot on the target Windows/Sage workstation.
+- [ ] Manually verify duplicate request, unavailable-GUI, and minimized-window behavior.
 
 **Acceptance criterion:** A user can click the Sage button and reliably arrive at the correct Faire Order Details session without changing Faire or Sage data.
 

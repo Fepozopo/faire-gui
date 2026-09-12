@@ -790,9 +790,10 @@ func storedOrderFromSnapshot(snapshot ordersstore.Snapshot, orderID faire.OrderI
 	return order, order.ID != nil && *order.ID == orderID
 }
 
-// drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller.
+// drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller, then imports a completed Sage session's safely mapped backorders.
 func (ui *DesktopUI) drainOrderDetailResults() {
 	ui.orders.drainDetailResults(ui.activeConnectionID)
+	ui.applySageFulfillmentDetail()
 }
 
 // drainShipmentSubmissionResults delegates current shipment-submission result validation to the feature controller.

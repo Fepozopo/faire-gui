@@ -4,7 +4,8 @@
 '
 ' Protocol version 1 uses UTF-16 text named pipes:
 '   \\<workstation>\pipe\FaireGUIFulfillmentIn  receives JSON chunks followed by Done.
-'   \\<workstation>\pipe\FaireGUIFulfillmentOut returns typed result lines followed by Done.
+'   \\<workstation>\pipe\FaireGUIFulfillmentOut-<request ID> returns typed result lines followed by Done.
+' The request-specific output pipe prevents concurrent Sage sessions from receiving another request's result.
 '
 ' Result lines are deliberately whitelisted instead of allowing arbitrary Sage field writes:
 '   RequestID:<id>
@@ -251,7 +252,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		Do
 			On Error Resume Next
 			Err.Clear
-			Set pipeRead = fs.OpenTextFile(GetPipePath(FAIRE_PIPE_OUT), 1)
+			Set pipeRead = fs.OpenTextFile(GetPipePath(FAIRE_PIPE_OUT & "-" & expectedRequestID), 1)
 			If Err.Number = 0 Then Exit Do
 			Err.Clear
 			On Error GoTo 0

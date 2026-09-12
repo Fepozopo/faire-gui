@@ -18,6 +18,7 @@ const orderItemAvailabilityColumnWidth = unit.Dp(256)
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
 // Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links and the empty-shipment form keep their own actions.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
+	ui.handleSageFulfillmentEvents(gtx)
 	if itemAvailabilityVisible(ui.orders.view.orderDetail) {
 		ui.handleItemAvailabilityEvents(gtx)
 	}
@@ -154,6 +155,8 @@ func (ui *DesktopUI) layoutItemAvailabilityHeaderActions(gtx layout.Context) lay
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(material.H4(ui.theme, detail.DisplayID).Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		layout.Rigid(ui.layoutSageFulfillmentSession),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		layout.Rigid(detailLine(ui, "Status", detail.Status)),
 		layout.Rigid(detailOriginalOrderIDLine(ui, detail.OriginalOrderID, detail.OriginalOrderDisplayID)),

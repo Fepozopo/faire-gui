@@ -27,7 +27,7 @@ const (
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, while startup, profile, order, and update work publish only safe results through channels.
+// Its methods run on Gio's frame goroutine, while startup, profile, order, update, and Sage fulfillment workers publish only safe results through channels.
 type DesktopUI struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -81,16 +81,19 @@ type DesktopUI struct {
 	closeUpdateCheckStatus widget.Clickable
 	modalBlocker           widget.Clickable
 
-	rowControls              map[string]*connectionRowControls
-	connectionPickerControls map[string]*widget.Clickable
-	deleteDialog             deleteDialogState
-	updateDialog             updateDialogState
-	updateCheckDialog        updateCheckDialogState
-	results                  chan profileLoadResult
-	connectionCleanupResults chan connectionCleanupResult
-	updateResults            chan updateCheckResult
-	updateInstallResults     chan updateInstallResult
-	startupResults           chan startupResult
+	rowControls                    map[string]*connectionRowControls
+	connectionPickerControls       map[string]*widget.Clickable
+	deleteDialog                   deleteDialogState
+	updateDialog                   updateDialogState
+	updateCheckDialog              updateCheckDialogState
+	results                        chan profileLoadResult
+	connectionCleanupResults       chan connectionCleanupResult
+	updateResults                  chan updateCheckResult
+	updateInstallResults           chan updateInstallResult
+	startupResults                 chan startupResult
+	sageFulfillmentRequests        chan sageFulfillmentInbound
+	sageFulfillment                *sageFulfillmentSession
+	sageFulfillmentListenerStarted bool
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -165,6 +168,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		updateResults:            make(chan updateCheckResult, 1),
 		updateInstallResults:     make(chan updateInstallResult, 1),
 		startupResults:           make(chan startupResult, 1),
+		sageFulfillmentRequests:  make(chan sageFulfillmentInbound, maxSageFulfillmentRequests),
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()

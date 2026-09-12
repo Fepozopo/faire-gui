@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	gioui.org v0.10.2
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/gpdf-dev/gpdf v1.0.12
 	github.com/zalando/go-keyring v0.2.8
 	modernc.org/sqlite v1.41.0

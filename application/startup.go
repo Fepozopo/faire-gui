@@ -14,14 +14,15 @@ type startupResult struct {
 	status      string
 }
 
-// startStartupPreparation begins connection-metadata loading, local Orders database preparation, and an automatic update check after Gio has requested its first frame.
-// It has no parameters or return value; it starts only once, and completion is delivered through startupResults so only Gio's frame goroutine mutates UI state.
+// startStartupPreparation begins the Sage fulfillment listener, connection-metadata loading, local Orders database preparation, and an automatic update check after Gio has requested its first frame.
+// It has no parameters or return value; it starts only once, and the listener plus startup work publish safe values so only Gio's frame goroutine mutates UI state.
 func (ui *DesktopUI) startStartupPreparation() {
 	if ui.startupPreparationStarted {
 		return
 	}
 	ui.startupPreparationStarted = true
 	ui.preparingStartup = true
+	ui.startSageFulfillmentListener()
 	ui.startUpdateCheck(false)
 	ui.startWorker(func() {
 		manager, savedConnections, startupStatus := loadSavedConnections(ui.ctx)
