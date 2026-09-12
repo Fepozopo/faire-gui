@@ -1,0 +1,123 @@
+{
+  "FEDEX": {
+    "Carrier": "FedEx",
+    "Service": "FEDEX_GROUND",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Cost",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": 4.0,
+    "ApplyMarkupPerPackage": false
+  },
+  "FEDEX 3RD PARTY": {
+    "Carrier": "FedEx",
+    "Service": "FEDEX_GROUND",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "THIRD_PARTY",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "FEDEX COLLECT": {
+    "Carrier": "FedEx",
+    "Service": "FEDEX_GROUND",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "COLLECT",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "FF/PRODUCT ONLY": {
+    "Carrier": "UPS",
+    "Service": "Ground",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "FREE FREIGHT": {
+    "Carrier": "UPS",
+    "Service": "Ground",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "UPS": {
+    "Carrier": "UPS",
+    "Service": "Ground",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Cost",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": 4.0,
+    "ApplyMarkupPerPackage": false
+  },
+  "UPS 3RD PARTY": {
+    "Carrier": "UPS",
+    "Service": "Ground",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "THIRD_PARTY",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "UPS COLLECT": {
+    "Carrier": "UPS",
+    "Service": "Ground",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "COLLECT",
+    "FreightWriteback": "Disabled",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": null,
+    "ApplyMarkupPerPackage": null
+  },
+  "UPS 3DAY SELECT": {
+    "Carrier": "UPS",
+    "Service": "3DaySelect",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Cost",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": 4.0,
+    "ApplyMarkupPerPackage": false
+  },
+  "USPS": {
+    "Carrier": "USPS",
+    "Service": "GroundAdvantage",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Cost",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": 4.0,
+    "ApplyMarkupPerPackage": false
+  },
+  "PRIORITY MAIL": {
+    "Carrier": "USPS",
+    "Service": "Priority",
+    "PredefinedPackage": null,
+    "SaturdayDelivery": null,
+    "PaymentParty": "SENDER",
+    "FreightWriteback": "Cost",
+    "AdditionalMarkupPercent": null,
+    "AdditionalMarkupFixed": 4.0,
+    "ApplyMarkupPerPackage": false
+  }
+}
