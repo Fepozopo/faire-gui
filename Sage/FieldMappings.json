@@ -1,72 +1,105 @@
 {
   "Header": {
     "SalesOrderNo": {
-      "SageFieldNames": ["SALESORDERNO"],
+      "SageFieldNames": [
+        "SALESORDERNO"
+      ],
       "DataType": "string"
     },
     "InvoiceNo": {
-      "SageFieldNames": ["INVOICENO"],
+      "SageFieldNames": [
+        "INVOICENO"
+      ],
       "DataType": "string"
     },
     "CustomerPoNo": {
-      "SageFieldNames": ["CUSTOMERPONO"],
+      "SageFieldNames": [
+        "CUSTOMERPONO"
+      ],
       "DataType": "string"
     },
     "SalesSource": {
-      "SageFieldNames": ["SO_SALESORDER.UDF_SALES_SOURCE"],
-      "DataType": "string",
-      "VerificationStatus": "pending Sage 100 2025 validation"
+      "SageFieldNames": [
+        "SO_SALESORDER.UDF_SALE_SOURCE"
+      ],
+      "DataType": "string"
     },
     "ShipVia": {
-      "SageFieldNames": ["SHIPVIA"],
+      "SageFieldNames": [
+        "SHIPVIA"
+      ],
       "DataType": "string"
     },
     "FreightAmt": {
-      "SageFieldNames": ["FREIGHTAMT"],
+      "SageFieldNames": [
+        "FREIGHTAMT"
+      ],
       "DataType": "currency"
     },
     "ShipToName": {
-      "SageFieldNames": ["SHIPTONAME"],
+      "SageFieldNames": [
+        "SHIPTONAME"
+      ],
       "DataType": "string"
     },
     "ShipToCompany": {
-      "SageFieldNames": ["SHIPTOADDRESS3"],
+      "SageFieldNames": [
+        "SHIPTOADDRESS3"
+      ],
       "DataType": "string"
     },
     "ShipToStreet1": {
-      "SageFieldNames": ["SHIPTOADDRESS1"],
+      "SageFieldNames": [
+        "SHIPTOADDRESS1"
+      ],
       "DataType": "string"
     },
     "ShipToStreet2": {
-      "SageFieldNames": ["SHIPTOADDRESS2"],
+      "SageFieldNames": [
+        "SHIPTOADDRESS2"
+      ],
       "DataType": "string"
     },
     "ShipToCity": {
-      "SageFieldNames": ["SHIPTOCITY"],
+      "SageFieldNames": [
+        "SHIPTOCITY"
+      ],
       "DataType": "string"
     },
     "ShipToState": {
-      "SageFieldNames": ["SHIPTOSTATE"],
+      "SageFieldNames": [
+        "SHIPTOSTATE"
+      ],
       "DataType": "string"
     },
     "ShipToZip": {
-      "SageFieldNames": ["SHIPTOZIPCODE"],
+      "SageFieldNames": [
+        "SHIPTOZIPCODE"
+      ],
       "DataType": "string"
     },
     "ShipToResidential": {
-      "SageFieldNames": ["RESIDENTIALADDRESS"],
+      "SageFieldNames": [
+        "RESIDENTIALADDRESS"
+      ],
       "DataType": "yesno"
     },
     "ShipToCountry": {
-      "SageFieldNames": ["SHIPTOCOUNTRYCODE"],
+      "SageFieldNames": [
+        "SHIPTOCOUNTRYCODE"
+      ],
       "DataType": "sagecountrycode"
     },
     "ShipToEmail": {
-      "SageFieldNames": ["EMAILADDRESS"],
+      "SageFieldNames": [
+        "EMAILADDRESS"
+      ],
       "DataType": "string"
     },
     "ShipToPhone": {
-      "SageFieldNames": ["AR_CUSTOMER.TELEPHONENO"],
+      "SageFieldNames": [
+        "AR_CUSTOMER.TELEPHONENO"
+      ],
       "DataType": "string"
     },
     "PaymentParty": {
@@ -78,15 +111,21 @@
       "DataType": "string"
     },
     "PaymentAccount": {
-      "SageFieldNames": ["AR_CUSTOMER.UDF_SHIPPING_ACCT_NO"],
+      "SageFieldNames": [
+        "AR_CUSTOMER.UDF_SHIPPING_ACCT_NO"
+      ],
       "DataType": "string"
     },
     "PaymentPostalCode": {
-      "SageFieldNames": ["BILLTOZIPCODE"],
+      "SageFieldNames": [
+        "BILLTOZIPCODE"
+      ],
       "DataType": "string"
     },
     "PaymentCountry": {
-      "SageFieldNames": ["BILLTOCOUNTRYCODE"],
+      "SageFieldNames": [
+        "BILLTOCOUNTRYCODE"
+      ],
       "DataType": "sagecountrycode"
     },
     "ExportReason": {
@@ -157,40 +196,57 @@
   },
   "Detail": {
     "LineKey": {
-      "SageFieldNames": ["LINEKEY"],
+      "SageFieldNames": [
+        "LINEKEY"
+      ],
       "DataType": "string"
     },
     "ItemCode": {
-      "SageFieldNames": ["ITEMCODE"],
+      "SageFieldNames": [
+        "ITEMCODE"
+      ],
       "DataType": "string"
     },
     "ItemType": {
-      "SageFieldNames": ["ITEMTYPE"],
+      "SageFieldNames": [
+        "ITEMTYPE"
+      ],
       "DataType": "string"
     },
     "ItemCodeDesc": {
-      "SageFieldNames": ["ITEMCODEDESC"],
+      "SageFieldNames": [
+        "ITEMCODEDESC"
+      ],
       "DataType": "string"
     },
     "GeneralDescription": {
-      "SageFieldNames": ["IM_PRODUCTLINE.PRODUCTLINEDESC"],
+      "SageFieldNames": [
+        "IM_PRODUCTLINE.PRODUCTLINEDESC"
+      ],
       "DataType": "string"
     },
     "QuantityShipped": {
-      "SageFieldNames": ["QUANTITYSHIPPED"],
+      "SageFieldNames": [
+        "QUANTITYSHIPPED"
+      ],
       "DataType": "decimal"
     },
     "QuantityBackordered": {
-      "SageFieldNames": ["QUANTITYBACKORDERED"],
-      "DataType": "decimal",
-      "VerificationStatus": "pending Sage 100 2025 validation"
+      "SageFieldNames": [
+        "QUANTITYBACKORDERED"
+      ],
+      "DataType": "decimal"
     },
     "UnitPrice": {
-      "SageFieldNames": ["UNITPRICE"],
+      "SageFieldNames": [
+        "UNITPRICE"
+      ],
       "DataType": "decimal"
     },
     "SalesUMConvFctr": {
-      "SageFieldNames": ["CI_ITEM.SALESUMCONVFCTR"],
+      "SageFieldNames": [
+        "CI_ITEM.SALESUMCONVFCTR"
+      ],
       "DataType": "decimal"
     },
     "UnitCost": {
@@ -201,27 +257,39 @@
       "DataType": "decimal"
     },
     "ShipWeight": {
-      "SageFieldNames": ["CI_ITEM.SHIPWEIGHT"],
+      "SageFieldNames": [
+        "CI_ITEM.SHIPWEIGHT"
+      ],
       "DataType": "string"
     },
     "CommodityCode": {
-      "SageFieldNames": ["CI_ITEM.COMMODITYCODE"],
+      "SageFieldNames": [
+        "CI_ITEM.COMMODITYCODE"
+      ],
       "DataType": "string"
     },
     "ManufactureCountryCode": {
-      "SageFieldNames": ["CI_ITEM.UDF_MANUFACTURE_COUNTRY_CODE"],
+      "SageFieldNames": [
+        "CI_ITEM.UDF_MANUFACTURE_COUNTRY_CODE"
+      ],
       "DataType": "string"
     },
     "SalesKitLineKey": {
-      "SageFieldNames": ["SALESKITLINEKEY"],
+      "SageFieldNames": [
+        "SALESKITLINEKEY"
+      ],
       "DataType": "string"
     },
     "ExplodedKitItem": {
-      "SageFieldNames": ["EXPLODEDKITITEM"],
+      "SageFieldNames": [
+        "EXPLODEDKITITEM"
+      ],
       "DataType": "string"
     },
     "QuantityPerBill": {
-      "SageFieldNames": ["QUANTITYPERBILL"],
+      "SageFieldNames": [
+        "QUANTITYPERBILL"
+      ],
       "DataType": "decimal"
     },
     "EEI_ExportInformationCode": {
@@ -245,7 +313,9 @@
       "DefaultValue": "NLR"
     },
     "EEI_CommodityDescription": {
-      "SageFieldNames": ["CI_COMMODITYCODE.COMMODITYCODEDESC"],
+      "SageFieldNames": [
+        "CI_COMMODITYCODE.COMMODITYCODEDESC"
+      ],
       "DataType": "string"
     },
     "EEI_ECCN": {

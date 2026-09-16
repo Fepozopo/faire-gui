@@ -1,11 +1,13 @@
 ' LaunchFaireFulfillment starts a Faire fulfillment session from Sage 100 Shipping Data Entry.
-' It sends a versioned local named-pipe request to an already-running Faire GUI,
-' waits for one typed terminal result, and applies validated shipment data to Sage.
+' It posts a versioned request to the temporary direct HTTP endpoint on RMT01,
+' waits for one typed terminal result with bounded network timeouts, and applies
+' validated shipment data to Sage.
 '
-' Protocol version 1 uses UTF-16 text named pipes:
-'   \\<workstation>\pipe\FaireGUIFulfillmentIn  receives JSON chunks followed by Done.
-'   \\<workstation>\pipe\FaireGUIFulfillmentOut-<request ID> returns typed result lines followed by Done.
-' The request-specific output pipe prevents concurrent Sage sessions from receiving another request's result.
+' Protocol version 1 uses one UTF-8 HTTP request and a text response:
+'   POST http://RMT01:18080/v1/sage/fulfillment receives the JSON request.
+'   HTTP 200 returns typed result lines followed by Done.
+' RMT01 must firewall this temporary test endpoint to BSDC01 only; it is not an
+' encrypted production transport.
 '
 ' Result lines are deliberately whitelisted instead of allowing arbitrary Sage field writes:
 '   RequestID:<id>
@@ -19,16 +21,28 @@
 '   KeepAlive
 '   Done
 '
-' The Faire GUI must persist a terminal result by RequestID before it writes the
-' result pipe. A retry of a known RequestID must replay that result, never repeat
-' a Faire availability update, shipment submission, or label purchase.
+' A terminal result is tied to its RequestID. A later production transport must
+' persist and replay the result rather than repeat an irreversible Faire operation.
 
 Const FAIRE_PROTOCOL_VERSION = 1
-Const FAIRE_PIPE_IN = "FaireGUIFulfillmentIn"
-Const FAIRE_PIPE_OUT = "FaireGUIFulfillmentOut"
-Const PIPE_CHUNK_SIZE = 32768
+' FAIRE_GUI_WORKSTATION is deliberately separate from the Sage server because the
+' desktop Faire GUI listens for temporary HTTP requests on RMT01.
+Const FAIRE_GUI_WORKSTATION = "RMT01"
+Const FAIRE_HTTP_PORT = 18080
+Const FAIRE_HTTP_PATH = "/v1/sage/fulfillment"
+Const HTTP_STATUS_OK = 200
+' ServerXMLHTTP uses these millisecond limits for DNS, TCP, upload, and fulfillment response waits.
+Const HTTP_RESOLVE_TIMEOUT_MS = 5000
+Const HTTP_CONNECT_TIMEOUT_MS = 5000
+Const HTTP_SEND_TIMEOUT_MS = 15000
+Const HTTP_RECEIVE_TIMEOUT_MS = 300000
+' ADODB stream constants produce a UTF-8 byte array for ServerXMLHTTP instead of
+' allowing it to serialize the VBScript string as UTF-16 BSTR text.
+Const ADO_TYPE_BINARY = 1
+Const ADO_TYPE_TEXT = 2
+Const UTF8_BOM_LENGTH = 3
 Const SAGE_BACKORDERED_QUANTITY_FIELD = "QUANTITYBACKORDERED"
-Const SAGE_SALES_SOURCE_FIELD = "UDF_SALES_SOURCE$"
+Const SAGE_SALES_SOURCE_FIELD = "UDF_SALE_SOURCE$"
 
 Main()
 
@@ -48,14 +62,16 @@ Sub Main
 		Exit Sub
 	End If
 
-	Set fs = CreateObject("Scripting.FileSystemObject")
-	If Not SendFulfillmentRequest(fs, sRequestJSON, sError) Then
+	Set fulfillmentHttp = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+	If Not SendFulfillmentRequest(fulfillmentHttp, sRequestJSON, sError) Then
 		retMsg = oUI.MessageBox("", sError, "Icon=Exclamation, Title=Faire GUI Not Running, Style=OK")
 		Exit Sub
 	End If
 
-	Set trackingRecords = New Collection
-	Set packageRecords = New Collection
+	' Sage Script Link does not expose VBA's Collection class; dictionaries retain the
+	' typed result records while remaining available through the Windows scripting runtime.
+	Set trackingRecords = CreateObject("Scripting.Dictionary")
+	Set packageRecords = CreateObject("Scripting.Dictionary")
 	sStatus = ""
 	sResponseRequestID = ""
 	sResponseSalesOrderNo = ""
@@ -63,7 +79,7 @@ Sub Main
 	sResponseError = ""
 	bHasFreightAmount = False
 	sFreightAmount = ""
-	If Not ReadFulfillmentResult(fs, sRequestID, trackingRecords, packageRecords, sStatus, sResponseRequestID, sResponseSalesOrderNo, sResponseInvoiceNo, bHasFreightAmount, sFreightAmount, sResponseError, sError) Then
+	If Not ReadFulfillmentResult(fulfillmentHttp.responseText, sRequestID, trackingRecords, packageRecords, sStatus, sResponseRequestID, sResponseSalesOrderNo, sResponseInvoiceNo, bHasFreightAmount, sFreightAmount, sResponseError, sError) Then
 		retMsg = oUI.MessageBox("", sError, "Icon=Exclamation, Title=Faire Fulfillment Result Unavailable, Style=OK")
 		Exit Sub
 	End If
@@ -115,8 +131,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 	If Not TryGetRequiredString(oSalesOrder, "SalesOrderNo$", "the sales order number", sSalesOrderNo, errorMessage) Then Exit Function
 	If Not TryGetRequiredString(oSalesOrder, "CustomerPoNo$", "the Faire order display ID in the customer PO number", sFaireDisplayID, errorMessage) Then Exit Function
 
-	' This UDF is the proposed source for choosing the Faire connection. It must be
-	' verified in the target Sage 100 2025 instance before production deployment.
+	' This confirmed Sage 100 2025 UDF selects the Faire connection from the active sales order.
 	If Not TryGetRequiredString(oSalesOrder, SAGE_SALES_SOURCE_FIELD, "the sales-source UDF on the sales order", sSalesSource, errorMessage) Then Exit Function
 
 	Call TryGetOptionalString(oShipping, "ShipToName$", sShipToName)
@@ -214,71 +229,64 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		BuildFulfillmentLine = True
 	End Function
 
-	' SendFulfillmentRequest writes the complete UTF-16 JSON request to the local Faire
-	' input pipe in bounded chunks, then writes Done as the end-of-request marker.
-	Function SendFulfillmentRequest(fs, requestJSON, ByRef errorMessage)
+	' SendFulfillmentRequest posts the UTF-8 JSON document through ServerXMLHTTP with
+	' explicit timeouts so a network outage cannot indefinitely freeze Sage's UI.
+	Function SendFulfillmentRequest(httpRequest, requestJSON, ByRef errorMessage)
 		SendFulfillmentRequest = False
 		errorMessage = ""
 		On Error Resume Next
 		Err.Clear
-		Set pipeWrite = fs.CreateTextFile(GetPipePath(FAIRE_PIPE_IN), True, True)
+		httpRequest.setTimeouts HTTP_RESOLVE_TIMEOUT_MS, HTTP_CONNECT_TIMEOUT_MS, HTTP_SEND_TIMEOUT_MS, HTTP_RECEIVE_TIMEOUT_MS
+		httpRequest.Open "POST", GetFulfillmentURL(), False
+		httpRequest.setRequestHeader "Content-Type", "application/json; charset=utf-8"
+		requestBody = UTF8Bytes(requestJSON)
+		httpRequest.Send requestBody
 		If Err.Number <> 0 Then
-			errorMessage = "Unable to connect to the Faire GUI on workstation '" & oSession.WorkstationName & "'. Start or restart Faire GUI and try again."
+			' Capture the COM error before clearing Err so timeout and firewall failures are actionable.
+			nHttpError = Err.Number
+			sHttpErrorDescription = Err.Description
+			errorMessage = "Unable to connect to the Faire GUI on workstation '" & FAIRE_GUI_WORKSTATION & "'. Error " & CStr(nHttpError)
+			If sHttpErrorDescription <> "" Then errorMessage = errorMessage & ": " & sHttpErrorDescription
 			Err.Clear
 			On Error GoTo 0
 			Exit Function
 		End If
+		If httpRequest.status <> HTTP_STATUS_OK Then
+			sHttpResponse = Trim(httpRequest.responseText)
+			errorMessage = "Faire GUI returned HTTP status " & CStr(httpRequest.status)
+			If sHttpResponse <> "" Then errorMessage = errorMessage & ": " & sHttpResponse
+			errorMessage = errorMessage & ". No Sage shipment data was changed."
+			On Error GoTo 0
+			Exit Function
+		End If
 		On Error GoTo 0
-
-		nOffset = 1
-		Do Until nOffset > Len(requestJSON)
-			pipeWrite.WriteLine Mid(requestJSON, nOffset, PIPE_CHUNK_SIZE)
-			pipeWrite.Flush
-			nOffset = nOffset + PIPE_CHUNK_SIZE
-		Loop
-		pipeWrite.WriteLine "Done"
-		pipeWrite.Flush
-		pipeWrite.Close
-		Set pipeWrite = Nothing
 		SendFulfillmentRequest = True
 	End Function
 
-	' ReadFulfillmentResult waits for a terminal response from the Faire GUI and parses
-	' only the documented result fields. trackingRecords and packageRecords receive
-	' Collections of typed values for later validated Sage writeback.
-	Function ReadFulfillmentResult(fs, expectedRequestID, trackingRecords, packageRecords, ByRef status, ByRef responseRequestID, ByRef responseSalesOrderNo, ByRef responseInvoiceNo, ByRef hasFreightAmount, ByRef freightAmount, ByRef responseError, ByRef errorMessage)
+	' ReadFulfillmentResult parses the completed HTTP response and permits only the
+	' documented fields for later validated Sage writeback. trackingRecords and
+	' packageRecords are Scripting.Dictionary instances containing typed array values.
+	Function ReadFulfillmentResult(responseText, expectedRequestID, trackingRecords, packageRecords, ByRef status, ByRef responseRequestID, ByRef responseSalesOrderNo, ByRef responseInvoiceNo, ByRef hasFreightAmount, ByRef freightAmount, ByRef responseError, ByRef errorMessage)
 		ReadFulfillmentResult = False
 		errorMessage = ""
-		Do
-			On Error Resume Next
-			Err.Clear
-			Set pipeRead = fs.OpenTextFile(GetPipePath(FAIRE_PIPE_OUT & "-" & expectedRequestID), 1)
-			If Err.Number = 0 Then Exit Do
-			Err.Clear
-			On Error GoTo 0
-			If oUI.MessageBox("", "Unable to wait for a response from Faire GUI. Ensure it is still running. Retry?", "Icon=Exclamation, Title=No Faire Fulfillment Result, Style=RetryCancel") = "CANCEL" Then
-				errorMessage = "No result was received from Faire GUI. No Sage shipment data was changed."
-				Exit Function
-			End If
-		Loop
-		On Error GoTo 0
-
-		Do
-			sLine = pipeRead.ReadLine
-			If sLine = "Done" Then Exit Do
-			If sLine = "KeepAlive" Then
-				' Keepalives intentionally have no Sage-side action; they show the GUI is still working.
-			Else
-				If Not ParseResultLine(sLine, trackingRecords, packageRecords, status, responseRequestID, responseSalesOrderNo, responseInvoiceNo, hasFreightAmount, freightAmount, responseError, errorMessage) Then
-					pipeRead.Close
-					Set pipeRead = Nothing
-					Exit Function
+		bHasDone = False
+		resultLines = Split(responseText, vbLf)
+		For Each resultLine In resultLines
+			sLine = Replace(resultLine, vbCr, "")
+			If sLine <> "" Then
+				If sLine = "Done" Then
+					bHasDone = True
+					Exit For
+				End If
+				If sLine <> "KeepAlive" Then
+					If Not ParseResultLine(sLine, trackingRecords, packageRecords, status, responseRequestID, responseSalesOrderNo, responseInvoiceNo, hasFreightAmount, freightAmount, responseError, errorMessage) Then Exit Function
 				End If
 			End If
-		Loop
-		pipeRead.Close
-		Set pipeRead = Nothing
-
+		Next
+		If Not bHasDone Then
+			errorMessage = "Faire GUI returned an incomplete HTTP fulfillment result."
+			Exit Function
+		End If
 		If responseRequestID = "" Then
 			errorMessage = "Faire GUI returned a result without a request ID."
 			Exit Function
@@ -320,14 +328,14 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 					errorMessage = "Faire GUI returned invalid tracking data."
 					Exit Function
 				End If
-				trackingRecords.Add Array(Trim(values(0)), Trim(values(1)))
+				trackingRecords.Add CStr(trackingRecords.Count), Array(Trim(values(0)), Trim(values(1)))
 			Case "PACKAGEITEM"
 				values = Split(sValue, "|")
 				If UBound(values) <> 2 Or Trim(values(0)) = "" Or Trim(values(1)) = "" Or Not IsNumeric(Trim(values(2))) Then
 					errorMessage = "Faire GUI returned invalid package item data."
 					Exit Function
 				End If
-				packageRecords.Add Array(Trim(values(0)), Trim(values(1)), CSng(Trim(values(2))))
+				packageRecords.Add CStr(packageRecords.Count), Array(Trim(values(0)), Trim(values(1)), CSng(Trim(values(2))))
 			Case "FREIGHTAMOUNT"
 				If Not IsNumeric(Trim(sValue)) Then
 					errorMessage = "Faire GUI returned an invalid freight amount."
@@ -370,10 +378,12 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		If Not RemoveExistingTrackingRecords(errorMessage) Then Exit Function
 		If Not RemoveExistingPackageRecords(errorMessage) Then Exit Function
 
-		For Each record In trackingRecords
+		For Each recordKey In trackingRecords.Keys
+			record = trackingRecords.Item(recordKey)
 			If Not WriteTrackingRecord(record(0), record(1), errorMessage) Then Exit Function
 		Next
-		For Each record In packageRecords
+		For Each recordKey In packageRecords.Keys
+			record = packageRecords.Item(recordKey)
 			If Not WritePackageItemRecord(record(0), record(1), record(2), errorMessage) Then Exit Function
 		Next
 		If hasFreightAmount Then
@@ -524,9 +534,26 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		On Error GoTo 0
 	End Function
 
-	' GetPipePath returns the workstation-local UNC path for a named-pipe endpoint.
-	Function GetPipePath(pipeName)
-		GetPipePath = "\\" & oSession.WorkstationName & "\pipe\" & pipeName
+	' UTF8Bytes uses ADODB.Stream's charset encoder so ServerXMLHTTP receives binary UTF-8,
+	' not an implicit UTF-16 BSTR. The UTF-8 BOM is omitted because the GUI expects JSON bytes.
+	Function UTF8Bytes(value)
+		Set utf8Stream = CreateObject("ADODB.Stream")
+		utf8Stream.Type = ADO_TYPE_TEXT
+		utf8Stream.Charset = "utf-8"
+		utf8Stream.Open
+		utf8Stream.WriteText CStr(value)
+		utf8Stream.Position = 0
+		utf8Stream.Type = ADO_TYPE_BINARY
+		utf8Stream.Position = UTF8_BOM_LENGTH
+		UTF8Bytes = utf8Stream.Read
+		utf8Stream.Close
+		Set utf8Stream = Nothing
+	End Function
+
+	' GetFulfillmentURL returns the temporary direct HTTP endpoint hosted by Faire GUI on RMT01.
+	' It does not use the Sage session workstation because Sage runs on the Sage server.
+	Function GetFulfillmentURL()
+		GetFulfillmentURL = "http://" & FAIRE_GUI_WORKSTATION & ":" & CStr(FAIRE_HTTP_PORT) & FAIRE_HTTP_PATH
 	End Function
 
 	' CreateRequestID returns a GUID-based identifier so the GUI can persist and replay one
@@ -550,6 +577,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 	' escaped so Sage descriptions and addresses cannot corrupt the request document.
 	Function EscapeJSON(value)
 		sValue = CStr(value)
+		' Sage fixed-width character fields can include NUL padding, which JSON forbids as a literal character.
+		sValue = Replace(sValue, Chr(0), "")
 		sValue = Replace(sValue, "\", "\\")
 		sValue = Replace(sValue, Chr(34), Chr(92) & Chr(34))
 		sValue = Replace(sValue, vbCrLf, "\n")

@@ -438,10 +438,32 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 }
 
 // drainOrderResults delegates Orders result validation and view updates to the feature controller.
-// The shell applies only its matching cross-feature Brand Profile status.
+// The shell applies only its matching cross-feature Brand Profile status and opens a Sage-requested order once its lookup is complete.
 func (ui *DesktopUI) drainOrderResults() {
 	if status, apply := ui.orders.drainLoadResults(ui.activeConnectionID); apply {
 		ui.status = status
+	}
+	ui.openSageFulfillmentOrderDetail()
+}
+
+// openSageFulfillmentOrderDetail opens the requested order's detail page only after the search worker has loaded and persisted its row.
+// Waiting for the row avoids a detail lookup racing the direct Faire fetch when an order is absent from the local store.
+func (ui *DesktopUI) openSageFulfillmentOrderDetail() {
+	session := ui.sageFulfillment
+	if session == nil || ui.orders.view.state.Loading || ui.orders.view.orderDetailOpen {
+		return
+	}
+	for _, row := range ui.orders.view.state.Rows {
+		if row.ID != session.orderID {
+			continue
+		}
+		session.status = "Opening Faire order details from Sage Shipping Data Entry…"
+		ui.openOrder(session.orderID)
+		ui.invalidate()
+		return
+	}
+	if ui.orders.view.searchActive && ui.orders.view.state.Status != "" {
+		ui.finishSageFulfillmentSession(sageFulfillmentFailure(session.request, "Faire could not open the requested order. "+ui.orders.view.state.Status))
 	}
 }
 

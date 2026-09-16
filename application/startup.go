@@ -8,33 +8,39 @@ import (
 // startupResult transfers fully prepared non-secret connection metadata and Orders storage to Gio's frame goroutine.
 // manager and connections become UI-owned after receipt, store is closed during UI shutdown, and status is safe to display to the user.
 type startupResult struct {
-	manager     *connections.Manager
-	connections []connections.Connection
-	store       ordersstore.Store
-	status      string
+	manager                *connections.Manager
+	connections            []connections.Connection
+	store                  ordersstore.Store
+	sageFulfillmentEnabled bool
+	status                 string
 }
 
-// startStartupPreparation begins the Sage fulfillment listener, connection-metadata loading, local Orders database preparation, and an automatic update check after Gio has requested its first frame.
-// It has no parameters or return value; it starts only once, and the listener plus startup work publish safe values so only Gio's frame goroutine mutates UI state.
+// startStartupPreparation loads the Sage opt-in setting, connection metadata, local Orders database, and automatic update check after Gio has requested its first frame.
+// It has no parameters or return value; it starts only once, and background work publishes safe values so only Gio's frame goroutine mutates UI state.
 func (ui *DesktopUI) startStartupPreparation() {
 	if ui.startupPreparationStarted {
 		return
 	}
 	ui.startupPreparationStarted = true
 	ui.preparingStartup = true
-	ui.startSageFulfillmentListener()
 	ui.startUpdateCheck(false)
 	ui.startWorker(func() {
+		sageFulfillmentEnabled, settingsErr := loadSageFulfillmentSettings()
 		manager, savedConnections, startupStatus := loadSavedConnections(ui.ctx)
+		if settingsErr != nil {
+			sageFulfillmentEnabled = false
+			startupStatus = startupStatus + " Sage fulfillment integration was left disabled because its setting could not be read."
+		}
 		store, storeErr := openOrdersStore(ui.ctx)
 		if storeErr != nil {
 			startupStatus = "Local order storage is unavailable. Close the app, resolve the local data issue, then reopen it."
 		}
 		ui.publishStartupResult(startupResult{
-			manager:     manager,
-			connections: savedConnections,
-			store:       store,
-			status:      startupStatus,
+			manager:                manager,
+			connections:            savedConnections,
+			store:                  store,
+			sageFulfillmentEnabled: sageFulfillmentEnabled,
+			status:                 startupStatus,
 		})
 	})
 }
@@ -68,8 +74,10 @@ func (ui *DesktopUI) drainStartupResults() {
 			ui.connections = result.connections
 			ui.orders.manager = result.manager
 			ui.orders.store = result.store
+			ui.sageFulfillmentEnabled = result.sageFulfillmentEnabled
 			ui.status = result.status
 			ui.preparingStartup = false
+			ui.startSageFulfillmentListener()
 		default:
 			return
 		}

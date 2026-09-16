@@ -79,6 +79,62 @@ func (ui *DesktopUI) loadProfile(connectionID string) {
 	ui.publishProfileResult(profileSummary(connection, profile))
 }
 
+// startBrandIDRefresh resolves one newly saved connection's authoritative Brand ID outside the Gio frame loop.
+func (ui *DesktopUI) startBrandIDRefresh(connection connections.Connection) {
+	ui.startWorker(func() {
+		ui.refreshBrandID(connection)
+	})
+}
+
+// refreshBrandID reads Faire's authenticated brand profile and persists its Brand ID instead of trusting user-entered metadata.
+func (ui *DesktopUI) refreshBrandID(connection connections.Connection) {
+	client, savedConnection, err := ui.manager.Client(ui.ctx, connection.ID, connections.ClientOptions{})
+	if err != nil {
+		ui.publishBrandIDRefreshResult(brandIDRefreshResult{label: connection.Label, status: "Could not verify the Faire Brand ID for " + connection.Label + ". " + profileLoadErrorMessage(err)})
+		return
+	}
+	profile, err := client.Brands.Profile(ui.ctx)
+	if err != nil {
+		ui.publishBrandIDRefreshResult(brandIDRefreshResult{label: savedConnection.Label, status: "Could not verify the Faire Brand ID for " + savedConnection.Label + ". " + profileLoadErrorMessage(err)})
+		return
+	}
+	if profile.BrandID == nil || strings.TrimSpace(string(*profile.BrandID)) == "" {
+		ui.publishBrandIDRefreshResult(brandIDRefreshResult{label: savedConnection.Label, status: "Faire returned no Brand ID for " + savedConnection.Label + ". The connection cannot be used for Sage fulfillment."})
+		return
+	}
+
+	savedConnection.BrandID = *profile.BrandID
+	if _, err := ui.manager.UpdateMetadata(ui.ctx, savedConnection); err != nil {
+		ui.publishBrandIDRefreshResult(brandIDRefreshResult{label: savedConnection.Label, status: "Could not save the Faire Brand ID for " + savedConnection.Label + ". Check the application configuration and retry."})
+		return
+	}
+	ui.publishBrandIDRefreshResult(brandIDRefreshResult{label: savedConnection.Label, status: "Verified Faire Brand ID for " + savedConnection.Label + "."})
+}
+
+// publishBrandIDRefreshResult transfers credential-safe background refresh status to the Gio frame loop.
+func (ui *DesktopUI) publishBrandIDRefreshResult(result brandIDRefreshResult) {
+	select {
+	case ui.brandIDRefreshResults <- result:
+	case <-ui.ctx.Done():
+		return
+	}
+	ui.invalidate()
+}
+
+// drainBrandIDRefreshResults refreshes in-memory metadata after profile workers persist system-managed Brand IDs.
+func (ui *DesktopUI) drainBrandIDRefreshResults() {
+	for {
+		select {
+		case result := <-ui.brandIDRefreshResults:
+			ui.managementStatus = result.status
+			ui.status = result.status
+			ui.refreshConnections()
+		default:
+			return
+		}
+	}
+}
+
 // publishProfileResult sends a safe profile status unless the window has already closed.
 // The buffered channel avoids holding the profile goroutine until another frame arrives.
 func (ui *DesktopUI) publishProfileResult(status string) {
@@ -111,7 +167,6 @@ func (ui *DesktopUI) rowControlsFor(connectionID string) *connectionRowControls 
 func (ui *DesktopUI) beginMetadataEdit(connection connections.Connection) {
 	ui.editing = connection
 	ui.labelEditor.SetText(connection.Label)
-	ui.brandIDEditor.SetText(string(connection.BrandID))
 	ui.accessTokenEditor.SetText("")
 	ui.editorMode = connectionEditorMetadata
 	ui.selectedTab = connectionsTab
@@ -145,7 +200,7 @@ func (ui *DesktopUI) beginEnvironmentImport() {
 }
 
 // saveDirectConnection reads the transient token, clears its editor before credential-store I/O, and saves a new connection.
-// It returns no value; successes and failures are represented by credential-safe UI status text.
+// The authoritative Brand ID is fetched asynchronously from Faire after credentials are stored; users cannot supply it manually.
 func (ui *DesktopUI) saveDirectConnection(successVerb string) {
 	accessToken := ui.accessTokenEditor.Text()
 	// Clear the visible buffer before validation or I/O so credentials cannot survive a redraw or an error path.
@@ -170,7 +225,6 @@ func (ui *DesktopUI) saveDirectConnection(successVerb string) {
 
 	connection, err := ui.manager.Save(ui.ctx, connections.Connection{
 		Label:              label,
-		BrandID:            faire.BrandID(strings.TrimSpace(ui.brandIDEditor.Text())),
 		AuthenticationMode: faire.AuthenticationModeAccessToken,
 	}, connections.Credentials{AccessToken: accessToken})
 	if err != nil {
@@ -179,10 +233,11 @@ func (ui *DesktopUI) saveDirectConnection(successVerb string) {
 		return
 	}
 
-	ui.managementStatus = successVerb + " connection " + connection.Label + "."
-	ui.status = successVerb + " " + connection.Label + ". Select it to load its Faire profile."
+	ui.managementStatus = successVerb + " connection " + connection.Label + ". Verifying its Faire Brand ID…"
+	ui.status = successVerb + " " + connection.Label + ". Faire Brand ID verification is in progress."
 	ui.resetEditor()
 	ui.refreshConnections()
+	ui.startBrandIDRefresh(connection)
 }
 
 // importEnvironmentConnection reads a token from the single name entered by the user and immediately clears that field.
@@ -199,8 +254,8 @@ func (ui *DesktopUI) importEnvironmentConnection() {
 	ui.saveDirectConnection("Imported")
 }
 
-// saveMetadata validates and saves non-secret metadata for the selected connection.
-// It uses Manager.UpdateMetadata, which preserves the existing credential bundle and authentication mode.
+// saveMetadata validates and saves the user-editable label for the selected connection.
+// The authoritative Brand ID remains system-managed and Manager.UpdateMetadata preserves credentials and authentication mode.
 func (ui *DesktopUI) saveMetadata() {
 	if ui.manager == nil {
 		ui.managementStatus = "Saved connections are unavailable. Restart the app after resolving the credential-store issue."
@@ -217,7 +272,7 @@ func (ui *DesktopUI) saveMetadata() {
 	connection, err := ui.manager.UpdateMetadata(ui.ctx, connections.Connection{
 		ID:                 ui.editing.ID,
 		Label:              label,
-		BrandID:            faire.BrandID(strings.TrimSpace(ui.brandIDEditor.Text())),
+		BrandID:            ui.editing.BrandID,
 		AuthenticationMode: ui.editing.AuthenticationMode,
 	})
 	if err != nil {
@@ -379,7 +434,6 @@ func (ui *DesktopUI) resetEditor() {
 	ui.editorMode = connectionEditorCreate
 	ui.editing = connections.Connection{}
 	ui.labelEditor.SetText("")
-	ui.brandIDEditor.SetText("")
 	ui.environmentEditor.SetText("")
 	ui.accessTokenEditor.SetText("")
 }

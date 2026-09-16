@@ -1,11 +1,11 @@
 package application
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -21,7 +21,7 @@ import (
 const (
 	// sageFulfillmentProtocolVersion is the version emitted by Sage/LaunchFaireFulfillment.vbs.
 	sageFulfillmentProtocolVersion = 1
-	// maxSageFulfillmentRequests bounds queued local requests so pipe workers never wait on the frame loop.
+	// maxSageFulfillmentRequests bounds queued transport requests so workers never wait on the frame loop.
 	maxSageFulfillmentRequests = 4
 	// maxSageFulfillmentRequestsPerFrame preserves Gio responsiveness during a local request burst.
 	maxSageFulfillmentRequestsPerFrame = 2
@@ -151,29 +151,6 @@ func parseSageFulfillmentRequest(payload []byte) (sageFulfillmentRequest, error)
 	return request, nil
 }
 
-// decodeSagePipePayload decodes the UTF-16LE payload written by Sage's FileSystemObject and concatenates its JSON chunks through Done.
-func decodeSagePipePayload(payload []byte) ([]byte, error) {
-	if len(payload) < 2 || payload[0] != 0xFF || payload[1] != 0xFE || len(payload)%2 != 0 {
-		return nil, fmt.Errorf("Sage fulfillment payload is not UTF-16LE text")
-	}
-	codeUnits := make([]uint16, 0, (len(payload)-2)/2)
-	for index := 2; index < len(payload); index += 2 {
-		codeUnits = append(codeUnits, uint16(payload[index])|uint16(payload[index+1])<<8)
-	}
-	var builder strings.Builder
-	for _, line := range strings.Split(string(utf16.Decode(codeUnits)), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if line == "Done" {
-			if builder.Len() == 0 {
-				return nil, fmt.Errorf("Sage fulfillment payload is empty")
-			}
-			return []byte(builder.String()), nil
-		}
-		builder.WriteString(line)
-	}
-	return nil, fmt.Errorf("Sage fulfillment payload is missing its Done marker")
-}
-
 // formatSageFulfillmentResult returns the line-oriented ASCII-safe terminal response expected by the Sage script.
 func formatSageFulfillmentResult(result sageFulfillmentResult) string {
 	return "RequestID:" + sageResultValue(result.RequestID) + "\r\n" +
@@ -197,7 +174,7 @@ func sageResultValue(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " ")
 }
 
-// safeSageRequestID allows the UUID-like request IDs emitted by Sage while keeping pipe names and local state bounded.
+// safeSageRequestID allows the UUID-like request IDs emitted by Sage while keeping local state bounded.
 func safeSageRequestID(value string) bool {
 	if len(value) == 0 || len(value) > 128 {
 		return false
@@ -210,18 +187,48 @@ func safeSageRequestID(value string) bool {
 	return true
 }
 
-// startSageFulfillmentListener starts the platform-specific local transport once for this UI lifetime.
+// startSageFulfillmentListener starts the temporary direct HTTP transport only after the user has opted in.
 func (ui *DesktopUI) startSageFulfillmentListener() {
-	if ui.sageFulfillmentListenerStarted {
+	if !ui.sageFulfillmentEnabled || ui.sageFulfillmentCancel != nil {
 		return
 	}
-	ui.sageFulfillmentListenerStarted = true
+	listenerContext, cancel := context.WithCancel(ui.ctx)
+	ui.sageFulfillmentCancel = cancel
 	ui.startWorker(func() {
-		serveSageFulfillmentPipes(ui.ctx, ui.publishSageFulfillmentRequest)
+		serveSageFulfillmentHTTP(listenerContext, ui.publishSageFulfillmentRequest)
 	})
 }
 
-// publishSageFulfillmentRequest queues a validated request without allowing a pipe worker to mutate Gio state.
+// setSageFulfillmentEnabled persists the user's opt-in choice and opens or closes the temporary HTTP listener.
+// Disabling is rejected during an active session so the outstanding Sage request always receives one terminal result.
+func (ui *DesktopUI) setSageFulfillmentEnabled(enabled bool) {
+	if ui.sageFulfillmentEnabled == enabled {
+		return
+	}
+	if !enabled && ui.sageFulfillment != nil {
+		ui.status = "Finish or cancel the active Sage fulfillment session before disabling the integration."
+		ui.invalidate()
+		return
+	}
+	if err := saveSageFulfillmentSettings(enabled); err != nil {
+		ui.status = "Could not save the Sage fulfillment setting. The integration state was not changed."
+		ui.invalidate()
+		return
+	}
+
+	ui.sageFulfillmentEnabled = enabled
+	if enabled {
+		ui.startSageFulfillmentListener()
+		ui.status = "Sage fulfillment integration is enabled. Windows may request firewall permission for the temporary HTTP endpoint."
+	} else {
+		ui.sageFulfillmentCancel()
+		ui.sageFulfillmentCancel = nil
+		ui.status = "Sage fulfillment integration is disabled and its HTTP endpoint is closed."
+	}
+	ui.invalidate()
+}
+
+// publishSageFulfillmentRequest queues a validated transport request without allowing a worker to mutate Gio state.
 func (ui *DesktopUI) publishSageFulfillmentRequest(inbound sageFulfillmentInbound) {
 	select {
 	case ui.sageFulfillmentRequests <- inbound:
@@ -394,6 +401,26 @@ func (ui *DesktopUI) handleSageFulfillmentEvents(gtx layout.Context) {
 		SalesOrderNo: ui.sageFulfillment.request.Document.SalesOrderNo,
 		InvoiceNo:    ui.sageFulfillment.request.Document.InvoiceNo,
 	})
+	ui.returnToOrdersTableAfterSageCancellation()
+}
+
+// returnToOrdersTableAfterSageCancellation closes the Sage-requested detail screen, clears its direct lookup, and reloads the main local Orders table.
+// Incrementing detailRequestID prevents an in-flight detail response from reopening or overwriting the returned table state.
+func (ui *DesktopUI) returnToOrdersTableAfterSageCancellation() {
+	ui.orders.detailRequestID++
+	ui.orders.view.orderDetailOpen = false
+	ui.orders.view.orderDetailLoading = false
+	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.orderDetailID = ""
+	ui.orders.view.orderDetailConnectionID = ""
+	ui.orders.view.orderDetailStatus = ""
+	ui.orders.view.resetPendingUnavailable()
+	ui.orders.view.resetShipmentForm()
+	ui.orders.view.search.SetText("")
+	ui.orders.view.searchActive = false
+	ui.orders.view.state.SelectedIDs = make(map[faire.OrderID]struct{})
+	ui.startOrdersLoad(ordersLoadLocalOnly)
+	ui.invalidate()
 }
 
 // finishSageFulfillmentSession sends one terminal response and clears the active session so another Sage request can be handled.

@@ -101,6 +101,7 @@ func (ui *DesktopUI) runWindow() error {
 			ui.drainStartupResults()
 			ui.drainSageFulfillmentRequests()
 			ui.drainResults()
+			ui.drainBrandIDRefreshResults()
 			ui.drainOrdersDataActionEvents()
 			ui.drainConnectionCleanupResults()
 			ui.drainOrderResults()

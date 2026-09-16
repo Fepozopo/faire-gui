@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -11,20 +13,48 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
-// TestParseSageFulfillmentRequestAcceptsUTF16PipePayload verifies the exact UTF-16LE chunk format emitted by the Sage FileSystemObject writer.
-func TestParseSageFulfillmentRequestAcceptsUTF16PipePayload(t *testing.T) {
-	payload := sageUTF16PipePayload(`{"protocolVersion":1,"requestId":"a1b2-c3d4","source":{"companyCode":"BSC","workstation":"PACK-1"},"document":{"salesOrderNo":"SO-1","invoiceNo":"INV-1","faireDisplayId":"ABC123","salesSource":"BSC","shipVia":"UPS","freightAmount":0},"shipTo":{},"lines":[{"sageLineKey":"1","itemCode":"SKU-1","quantityShipped":1,"quantityBackordered":0}]}`)
+// TestParseSageFulfillmentRequestAcceptsHTTPJSON verifies the UTF-8 JSON body posted by the Sage HTTP client.
+func TestParseSageFulfillmentRequestAcceptsHTTPJSON(t *testing.T) {
+	payload := []byte(`{"protocolVersion":1,"requestId":"a1b2-c3d4","source":{"companyCode":"BSC","workstation":"PACK-1"},"document":{"salesOrderNo":"SO-1","invoiceNo":"INV-1","faireDisplayId":"ABC123","salesSource":"BSC","shipVia":"UPS","freightAmount":0},"shipTo":{},"lines":[{"sageLineKey":"1","itemCode":"SKU-1","quantityShipped":1,"quantityBackordered":0}]}`)
 
-	decoded, err := decodeSagePipePayload(payload)
-	if err != nil {
-		t.Fatalf("decodeSagePipePayload() error = %v", err)
-	}
-	request, err := parseSageFulfillmentRequest(decoded)
+	request, err := parseSageFulfillmentRequest(payload)
 	if err != nil {
 		t.Fatalf("parseSageFulfillmentRequest() error = %v", err)
 	}
 	if request.Document.FaireDisplayID != "ABC123" || request.Lines[0].QuantityShipped != 1 {
 		t.Fatalf("parsed request = %#v, want display ID and shipped line", request)
+	}
+}
+
+// TestDecodeSageFulfillmentHTTPPayloadAcceptsServerXMLHTTPBSTR verifies the temporary endpoint accepts ServerXMLHTTP's UTF-16LE body without a byte-order mark.
+func TestDecodeSageFulfillmentHTTPPayloadAcceptsServerXMLHTTPBSTR(t *testing.T) {
+	text := `{"protocolVersion":1}`
+	codeUnits := utf16.Encode([]rune(text))
+	payload := make([]byte, 0, len(codeUnits)*2)
+	for _, codeUnit := range codeUnits {
+		payload = append(payload, byte(codeUnit), byte(codeUnit>>8))
+	}
+
+	decoded, err := decodeSageFulfillmentHTTPPayload(payload)
+	if err != nil {
+		t.Fatalf("decodeSageFulfillmentHTTPPayload() error = %v", err)
+	}
+	if string(decoded) != text {
+		t.Fatalf("decoded payload = %q, want %q", decoded, text)
+	}
+}
+
+// TestSageFulfillmentHTTPHandlerRejectsNonBSDC01 verifies the temporary direct endpoint does not trust an arbitrary network peer.
+func TestSageFulfillmentHTTPHandlerRejectsNonBSDC01(t *testing.T) {
+	handler := sageFulfillmentHTTPHandler(context.Background(), func(sageFulfillmentInbound) {})
+	request := httptest.NewRequest(http.MethodPost, sageFulfillmentHTTPPath, nil)
+	request.RemoteAddr = "192.168.128.99:54321"
+	response := httptest.NewRecorder()
+
+	handler(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("HTTP status = %d, want %d", response.Code, http.StatusForbidden)
 	}
 }
 
@@ -72,19 +102,7 @@ func TestConnectionForSageSalesSourceReversesConfiguredBrandMapping(t *testing.T
 	}
 }
 
-// sageUTF16PipePayload reproduces Sage's UTF-16LE JSON-chunk stream with a terminal Done line.
-func sageUTF16PipePayload(request string) []byte {
-	text := request + "\r\nDone\r\n"
-	encoded := utf16.Encode([]rune(text))
-	payload := make([]byte, 2, len(encoded)*2+2)
-	payload[0], payload[1] = 0xFF, 0xFE
-	for _, codeUnit := range encoded {
-		payload = append(payload, byte(codeUnit), byte(codeUnit>>8))
-	}
-	return payload
-}
-
-// TestSafeSageRequestIDRejectsPipeBreakingInput verifies local pipe names cannot be constructed from untrusted separators.
+// TestSafeSageRequestIDRejectsUnsafeInput verifies request IDs cannot contain separators or unbounded data.
 func TestSafeSageRequestIDRejectsPipeBreakingInput(t *testing.T) {
 	for _, value := range []string{"", "request/id", "request\nid", strings.Repeat("a", 129)} {
 		if safeSageRequestID(value) {

@@ -41,11 +41,13 @@ type DesktopUI struct {
 	preparingStartup          bool
 	startupPreparationStarted bool
 
-	activeConnectionID    string
-	activeConnectionLabel string
-	selectedTab           int
-	settingsMenuOpen      bool
-	connectionPickerOpen  bool
+	activeConnectionID     string
+	activeConnectionLabel  string
+	selectedTab            int
+	settingsMenuOpen       bool
+	connectionPickerOpen   bool
+	sageFulfillmentEnabled bool
+	sageFulfillmentCancel  context.CancelFunc
 
 	// orders is the feature-owned Orders component. The shell supplies only immutable connection scope and handles cross-feature status.
 	orders     *ordersController
@@ -56,7 +58,6 @@ type DesktopUI struct {
 	managementStatus string
 
 	labelEditor       widget.Editor
-	brandIDEditor     widget.Editor
 	environmentEditor widget.Editor
 	accessTokenEditor widget.Editor
 
@@ -75,25 +76,26 @@ type DesktopUI struct {
 	settingsButton         widget.Clickable
 	settingsBrandProfile   widget.Clickable
 	settingsConnections    widget.Clickable
+	sageFulfillmentToggle  widget.Clickable
 	checkForUpdates        widget.Clickable
 	updateLater            widget.Clickable
 	installUpdate          widget.Clickable
 	closeUpdateCheckStatus widget.Clickable
 	modalBlocker           widget.Clickable
 
-	rowControls                    map[string]*connectionRowControls
-	connectionPickerControls       map[string]*widget.Clickable
-	deleteDialog                   deleteDialogState
-	updateDialog                   updateDialogState
-	updateCheckDialog              updateCheckDialogState
-	results                        chan profileLoadResult
-	connectionCleanupResults       chan connectionCleanupResult
-	updateResults                  chan updateCheckResult
-	updateInstallResults           chan updateInstallResult
-	startupResults                 chan startupResult
-	sageFulfillmentRequests        chan sageFulfillmentInbound
-	sageFulfillment                *sageFulfillmentSession
-	sageFulfillmentListenerStarted bool
+	rowControls              map[string]*connectionRowControls
+	connectionPickerControls map[string]*widget.Clickable
+	deleteDialog             deleteDialogState
+	updateDialog             updateDialogState
+	updateCheckDialog        updateCheckDialogState
+	results                  chan profileLoadResult
+	brandIDRefreshResults    chan brandIDRefreshResult
+	connectionCleanupResults chan connectionCleanupResult
+	updateResults            chan updateCheckResult
+	updateInstallResults     chan updateInstallResult
+	startupResults           chan startupResult
+	sageFulfillmentRequests  chan sageFulfillmentInbound
+	sageFulfillment          *sageFulfillmentSession
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
@@ -134,6 +136,12 @@ type profileLoadResult struct {
 	status string
 }
 
+// brandIDRefreshResult transfers the outcome of resolving one saved connection's authoritative Faire Brand ID.
+type brandIDRefreshResult struct {
+	label  string
+	status string
+}
+
 // newDesktopUI constructs a DesktopUI without persistent Orders storage for focused UI tests.
 // Production startup uses newDesktopUIWithOrders after successfully opening the process-local store.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
@@ -164,6 +172,7 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		rowControls:              make(map[string]*connectionRowControls),
 		connectionPickerControls: make(map[string]*widget.Clickable),
 		results:                  make(chan profileLoadResult, 1),
+		brandIDRefreshResults:    make(chan brandIDRefreshResult, 16),
 		connectionCleanupResults: make(chan connectionCleanupResult, 1),
 		updateResults:            make(chan updateCheckResult, 1),
 		updateInstallResults:     make(chan updateInstallResult, 1),
@@ -182,7 +191,6 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 // The masked token editor is the only UI state that can contain a direct access token.
 func (ui *DesktopUI) configureEditors() {
 	ui.labelEditor.SingleLine = true
-	ui.brandIDEditor.SingleLine = true
 	ui.environmentEditor.SingleLine = true
 	ui.accessTokenEditor.SingleLine = true
 	ui.accessTokenEditor.Mask = '•'

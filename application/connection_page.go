@@ -90,8 +90,6 @@ func (ui *DesktopUI) createEditorFields() []layout.FlexChild {
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
 		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
-		fieldSpacer(),
 		layout.Rigid(ui.accessTokenField),
 		fieldSpacer(),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -109,8 +107,6 @@ func (ui *DesktopUI) metadataEditorFields() []layout.FlexChild {
 	return []layout.FlexChild{
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
-		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
 		fieldSpacer(),
 		layout.Rigid(ui.saveCancelButtons("Save metadata")),
 	}
@@ -134,8 +130,6 @@ func (ui *DesktopUI) environmentImportEditorFields() []layout.FlexChild {
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
 		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
-		fieldSpacer(),
 		layout.Rigid(ui.environmentField),
 		fieldSpacer(),
 		layout.Rigid(ui.saveCancelButtons("Import direct-token connection")),
@@ -156,11 +150,6 @@ func (ui *DesktopUI) saveCancelButtons(primaryLabel string) layout.Widget {
 // labelField renders the persistent label editor inside a visible input panel.
 func (ui *DesktopUI) labelField(gtx layout.Context) layout.Dimensions {
 	return inputField(gtx, ui.theme, &ui.labelEditor, "Connection label")
-}
-
-// brandIDField renders the optional non-secret Faire brand ID editor.
-func (ui *DesktopUI) brandIDField(gtx layout.Context) layout.Dimensions {
-	return inputField(gtx, ui.theme, &ui.brandIDEditor, "Faire brand ID (optional)")
 }
 
 // environmentField renders the explicit environment-variable name rather than inspecting the full environment.
