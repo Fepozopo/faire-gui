@@ -4,6 +4,39 @@
 
 This section is the authoritative handoff point for a new coding agent. Read this section first, then follow the remaining numbered plan sections for rationale and the complete task checklist.
 
+### Next-agent handoff: external shipment completion and Sage writeback
+
+**Do this next; do not begin direct label purchasing.** Extend the existing Sage HTTP fulfillment session so a successful external Faire shipment returns one durable typed `COMPLETED` result to Sage.
+
+#### Completed-result contract
+
+- Require at least one tracking number; pickup/no-tracking completion is unsupported.
+- Number tracking packages sequentially (`1`, `2`, ...), returning one `Tracking` result per tracking number.
+- Return every Sage line with positive `quantityShipped` as a `PackageItem` in package `1`. Do not allocate backordered quantities. Later packages may have tracking without item allocations; never invent an item-to-package split the operator did not provide.
+- Return the final `FreightAmount` only when the Ship Via policy is `Cost`. For `Omit`, omit the field entirely so Sage leaves its freight amount unchanged.
+
+#### Ship Via and freight policy
+
+- Load and validate `Sage/ShipCodes.json`; it is policy/configuration, not yet application behavior.
+- Rename the ambiguous `FreightWriteback: "Disabled"` policy to `"Omit"` during the configuration migration.
+- `Cost` uses the future Faire carrier-label cost. If no cost is returned, return freight `0.00` and apply no markup.
+- A rule may configure **either** `AdditionalMarkupFixed` **or** `AdditionalMarkupPercent`, never both; `null` means no markup. A percent value of `5` means 5%.
+- When `ApplyMarkupPerPackage` is `false` or `null`, apply markup once to total carrier cost. When true, apply it per package: fixed markup is multiplied by package count; percentage markup is summed from package costs when available, or applied once to the total when only an aggregate cost exists.
+- Round the final freight amount half-up to two decimals.
+- An unlisted Sage `ShipVia` allows completion, defaults to UPS Ground, uses no markup, and returns actual carrier cost (or `0.00` if unavailable). Current carrier/service strings are provider-neutral hints until Faire documents its API.
+
+#### Durability, acknowledgement, and recovery
+
+- Before responding to Sage, persist a terminal result keyed by request ID, sales order, and invoice. Retain it for 30 days.
+- Replaying a known request ID must return the persisted result without repeating Faire work. A new request for the same sales order/invoice with an unacknowledged terminal result should also replay that result rather than create a duplicate shipment.
+- Add a Sage-to-GUI acknowledgement after Sage writeback: `APPLIED` or `WRITEBACK_FAILED`.
+- On `WRITEBACK_FAILED`, the GUI must visibly retain/display tracking and freight details, provide copyable recovery data, and offer a retry/manual-recovery path. Sage remains the only writer of Sage records.
+
+#### Required validation
+
+- Test the existing Sage business-object calls against real Shipping Data Entry documents: tracking replacement, package tracking, `FREIGHTAMT`, invoice identity, and error/retry behavior.
+- The current direct HTTP endpoint is a controlled test transport. Preserve its opt-in behavior; authenticated TLS and per-user routing remain production work.
+
 ### Current state
 
 The repository now contains the first **Sage → Faire GUI open-and-review path**. It is implemented but not yet production-verified because this development machine cannot access the Sage 100 2025 workstation.
@@ -16,7 +49,7 @@ Implemented behavior:
 4. `application/sage_fulfillment.go` validates the request, uses the Sage sales source to choose one saved Faire connection, requests foreground focus, opens the order matching the PO/display ID, and creates an in-memory Sage fulfillment session.
 5. Safely matched positive Sage backorders are preselected in the existing Order Details **Mark out of stock** draft. The user still must press the existing **Update availability** confirmation.
 6. Duplicate/missing SKU matches and unresolved kit parents are not guessed; the session banner reports them.
-7. The user can cancel the Sage session. The GUI then sends a typed `CANCELLED` response, and the Sage script makes no writeback changes.
+7. The user can cancel the Sage session. The GUI returns a typed `CANCELLED` response, clears the search, returns to the main Orders table, and the Sage script makes no writeback changes.
 
 Not implemented yet:
 
@@ -56,7 +89,7 @@ The request ID remains the future idempotency key. The script currently accepts 
 ### Required implementation constraints
 
 - Keep all Gio widget/UI state mutation on the frame goroutine. HTTP workers must publish a bounded `sageFulfillmentInbound` value through `DesktopUI.sageFulfillmentRequests`; they must not mutate `DesktopUI` directly.
-- Do not put Faire tokens, Sage credentials, arbitrary Sage field names, or arbitrary method calls in the IPC protocol.
+- Do not put Faire tokens, Sage credentials, arbitrary Sage field names, or arbitrary method calls in the HTTP protocol.
 - Use `setActiveConnection` for connection switching. It invalidates stale connection-scoped results; do not assign `activeConnectionID` directly.
 - Never auto-select availability for an ambiguous SKU, missing eligible Faire variant, or unresolved kit parent.
 - Keep Sage as the writer of Sage records. The GUI must return a narrow typed result, not a generic command stream.
@@ -84,23 +117,22 @@ Do **not** implement direct label purchasing until Faire releases the required A
 
 Run these on the actual Windows Sage workstation before production use:
 
-- `UDF_SALE_SOURCE$` is confirmed as the Sage sales-source UDF on the related sales-order object.
+- [x] `UDF_SALE_SOURCE$` is confirmed as the Sage sales-source UDF on the related sales-order object.
 - Verify that the active Shipping Data Entry document has the expected invoice number when the custom button runs.
 - Verify `SO_InvoiceTracking_bus`, `SO_PackageTrackingByItem_bus`, replacement behavior, and `FREIGHTAMT` UI change return values.
-- Verify a Windows user can connect to both named pipes and that a minimized GUI is restored/raised sufficiently. `Gio ActionRaise` is best effort and subject to Windows foreground policy.
+- Verify a Windows user can connect from BSDC01 to the opt-in HTTP endpoint on RMT01 and that a minimized GUI is restored/raised sufficiently. `Gio ActionRaise` is best effort and subject to Windows foreground policy.
 - Verify normal item, all-backordered, kit/component, unmatched-SKU, cancellation, GUI-not-running, and duplicate-click cases using test orders.
 
 ### Validation already run
 
-The current code passed:
+The current code has passed the following available checks:
 
 ```text
-go test ./...
-GOOS=windows GOARCH=amd64 go build ./cmd/faire-gui
+GOOS=windows GOARCH=amd64 go test -c ./application
 git diff --check
 ```
 
-No manual Sage or live Windows named-pipe test has been performed.
+A full Linux `go test ./...` run is blocked in this environment by missing Gio system libraries (`wayland-client` and `xkbcommon`). No manual Sage or live Windows direct-HTTP runtime test has been performed.
 
 ---
 
@@ -123,7 +155,7 @@ The first path can be built before a Faire label API exists. The second must reu
 | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Keep Sage Shipping Data Entry open while the Faire workflow is completed.                              | The Sage shipped/backordered selections and the Faire action form one fulfillment transaction. Keeping Sage open prevents accidental edits to the source shipment before the result is written back.                                                            |
 | Use a purpose-built Sage script rather than modify `LaunchFaireGUI.vbs` in place.                      | The SSK script combines extraction, pipe communication, an SSK-specific protocol, and Sage writeback. Reusing its architecture is useful; preserving its implementation and protocol is not.                                                                    |
-| Use a local inter-process communication channel between Sage and the already-running Faire GUI.        | The integration is workstation-local, does not need a network service, and should not require the Faire GUI to create its own Sage session. A Windows named pipe is the preferred transport unless implementation constraints require a local HTTP alternative. |
+| Use a direct HTTP channel between Sage and the already-running Faire GUI.                          | The temporary integration runs from Sage on BSDC01 to the GUI on RMT01. The opt-in HTTP listener is bounded, restricted to BSDC01, and avoids the previous remote named-pipe failure mode. Production requires authenticated TLS and per-user routing. |
 | The Faire GUI restores/focuses/navigates itself.                                                       | The application is the reliable owner of its own window state. The Sage script should ask it to activate, not attempt external window manipulation.                                                                                                             |
 | The Sage sales-order PO number is the exact Faire order display ID.                                    | This provides a deterministic direct order lookup. The existing display-ID helper already supports the expected identifier form.                                                                                                                                |
 | A Sage backorder always means the corresponding SKU is globally unavailable.                           | The Faire GUI may safely preselect the item as out of stock when Sage reports it as backordered.                                                                                                                                                                |
@@ -150,7 +182,7 @@ Useful concepts to retain:
 - accessing the active Sage business object (`oBusObj`);
 - reading additional related Sage objects;
 - collecting header, customer, ship-to, item, and tracking data;
-- communicating with a local desktop process through a workstation named pipe;
+- communicating with the desktop process through the temporary, opt-in HTTP endpoint on RMT01;
 - performing final Sage tracking/package/freight writeback while Shipping Data Entry remains open.
 
 Do **not** retain unchanged:
@@ -164,11 +196,11 @@ Do **not** retain unchanged:
 
 ### 3.1.1 Initial purpose-built script: `Sage/LaunchFaireFulfillment.vbs`
 
-An initial protocol-v1 bridge has been created. It sends explicit shipped and backordered line quantities, the Faire display ID, the proposed sales-source UDF, kit relationship fields, ship-to data, and freight data through `FaireGUIFulfillmentIn`. It waits for a typed response through a request-specific `FaireGUIFulfillmentOut-<request ID>` pipe, validates its request/order/invoice identity, and replaces Sage tracking/package records only after validation.
+An initial protocol-v1 bridge has been created. It sends explicit shipped and backordered line quantities, the Faire display ID, the confirmed sales-source UDF value, kit relationship fields, ship-to data, and freight data as UTF-8 JSON over the opt-in HTTP endpoint `http://RMT01:18080/v1/sage/fulfillment`. It waits for a typed HTTP response, validates its request/order/invoice identity, and replaces Sage tracking/package records only after validation.
 
-The compatible GUI listener now exists in `application/sage_fulfillment_windows.go`; it parses the UTF-16 Sage payload, creates the request-specific result pipe before the GUI handles the request, and sends only typed terminal responses. The application also has a macOS/Linux stub so development builds remain portable.
+The GUI listener now exists in `application/sage_fulfillment_http.go`; it accepts only the BSDC01 peer address, bounds request and response time, and publishes typed requests to the Gio frame loop. The endpoint is disabled by default and enabled per Windows user in Settings. `application/sage_fulfillment_settings.go` persists that opt-in state.
 
-This flow is **not production-verified**. Manual Sage 100 2025 and Windows named-pipe validation is still required. The GUI currently supports opening/reviewing/cancelling the Sage session; it does not yet return a completed external-shipment result or persist/replay terminal results.
+This flow is **not production-verified**. Manual Sage 100 2025 and direct-HTTP runtime validation is still required. The GUI currently supports opening/reviewing/cancelling the Sage session; it does not yet return a completed external-shipment result or persist/replay terminal results.
 
 ### 3.2 Field mappings: `Sage/FieldMappings.json`
 
@@ -221,7 +253,7 @@ Each rule should express:
 - preferred carrier;
 - preferred service;
 - payment party, when supported;
-- freight writeback policy (`Cost` or disabled);
+- freight writeback policy (`Cost` or `Omit`);
 - optional markup policy;
 - whether the rule is available for external shipment recording, direct label purchase, or both.
 
@@ -280,7 +312,7 @@ Waiting is appropriate, but the design must account for the fact that no distrib
 
 - Faire can succeed while Sage writeback fails;
 - the desktop app can close while Sage waits;
-- a pipe connection can fail after a label purchase;
+- an HTTP connection can fail after an irreversible Faire shipment or label operation;
 - a user can cancel before an irreversible action;
 - a retry must not buy or record the same shipment twice.
 
@@ -298,17 +330,17 @@ Required properties:
 
 - protocol version;
 - unique request ID generated by the Sage script;
-- message type;
+- HTTP method and versioned path;
 - explicit success, cancellation, and failure states;
-- bounded timeout and periodic keepalive/status updates while Sage waits;
+- bounded DNS, connect, send, receive, request-body, and server-response timeouts;
 - final result persisted by the Faire GUI before it is returned;
 - idempotency: the same request ID must reopen or return the existing session/result, not create a duplicate transaction;
-- local-only access with user/workstation permissions appropriate for the pipe implementation;
+- opt-in listener access restricted to BSDC01 by application validation and the RMT01 firewall;
 - safe, user-readable errors without exposing credentials, internal paths, or raw API responses.
 
 ### 5.2 Request shape
 
-Protocol v1 is now implemented as a UTF-16LE JSON request split into lines and terminated by `Done` on `FaireGUIFulfillmentIn`. The response is an ASCII-safe, line-oriented typed result terminated by `Done` on a request-specific `FaireGUIFulfillmentOut-<request ID>` pipe. The payload contains the following logical data.
+Protocol v1 is now implemented as a UTF-8 JSON `POST` to `http://RMT01:18080/v1/sage/fulfillment`. The Sage script uses `ADODB.Stream` to send explicit UTF-8 bytes, and the GUI returns an ASCII-safe, line-oriented typed result terminated by `Done` in the HTTP response. The endpoint is opened only after the user enables Sage fulfillment integration in Settings. The payload contains the following logical data.
 
 ```text
 FulfillmentRequest
@@ -448,14 +480,14 @@ Before writing the script, verify these details in the target Sage 100 2025 envi
 - [ ] Confirm the approved Sage object/API methods for the replacement behavior in the target environment.
 - [ ] Confirm the approved method to update `FreightAmt` and refresh the Sage UI.
 - [ ] Confirm expected locking/concurrency behavior when the script remains open during a fulfillment session.
-- [ ] Test named-pipe access under the actual Windows user and Sage workstation setup.
+- [ ] Test HTTP access from BSDC01 under the actual Windows user, firewall profile, and RMT01 GUI session.
 
 ### 6.3 Snapshot extraction tasks
 
-- [ ] Define the versioned fulfillment request contract before coding extraction.
-- [ ] Read the current sales order, invoice/shipment, PO number, ship-via value, and freight amount.
-- [ ] Validate the PO number as a Faire display ID using the application’s existing normalization rules.
-- [ ] Read ship-to data required for shipment creation and future labels.
+- [x] Define the versioned fulfillment request contract before coding extraction.
+- [x] Read the current sales order, invoice/shipment, PO number, ship-via value, and freight amount.
+- [x] Validate the PO number as a Faire display ID using the application’s existing normalization rules.
+- [x] Read ship-to data required for shipment creation and future labels.
 - [x] Add explicit shipped and verified-backordered quantity extraction to the initial script.
 - [ ] Validate both quantity fields against actual Sage Shipping Data Entry data.
 - [ ] Include stable Sage line keys and item codes for matching/audit.
@@ -463,17 +495,17 @@ Before writing the script, verify these details in the target Sage 100 2025 envi
 - [ ] Verify actual sales-kit field semantics and implement GUI resolution to the parent kit SKU.
 - [ ] Exclude irrelevant/non-fulfillment lines using verified item-type rules.
 - [ ] Reject an empty shipment/backorder snapshot with a clear Sage message.
-- [ ] Use a controlled serializer for the defined protocol; do not serialize every Sage column generically.
+- [x] Use a controlled serializer for the defined protocol; do not serialize every Sage column generically.
 
-### 6.4 IPC tasks
+### 6.4 HTTP transport tasks
 
-- [ ] Select the final local transport: Windows named pipe unless implementation proves a local HTTP listener is materially simpler and equally secure.
-- [ ] Choose a versioned Faire-specific pipe/listener name.
-- [ ] Support a unique request ID instead of fixed, anonymous request/response channels.
-- [ ] Define acknowledgement, progress/keepalive, completion, cancellation, and failure messages.
-- [ ] Apply explicit connection and inactivity timeouts.
-- [ ] Ensure only authorized local users/processes can access the listener.
-- [ ] Present concise Sage UI messages for unavailable GUI, timeout, cancellation, and failed writeback.
+- [x] Select the temporary direct HTTP transport and versioned path `POST /v1/sage/fulfillment`.
+- [x] Support a unique request ID in every request and typed terminal response.
+- [ ] Define acknowledgement, completion, cancellation, and failure messages; keepalive is not required for the bounded HTTP request.
+- [x] Apply explicit DNS, connect, send, receive, body-size, and server-response timeouts.
+- [x] Restrict the opt-in listener to BSDC01 in application validation and document the RMT01 firewall rule.
+- [ ] Replace the temporary plaintext HTTP transport with authenticated TLS and per-user routing before production.
+- [x] Present concise Sage UI messages for unavailable GUI, timeout, cancellation, and failed writeback.
 
 ### 6.5 Sage writeback tasks
 
@@ -565,7 +597,7 @@ Tasks:
 - [x] Mark a variant automatically unavailable only when its source backordered quantity is positive and its match is unambiguous.
 - [x] Keep all automatic selections reversible using the existing availability draft behavior.
 - [x] Surface unresolved mapping text in the Sage-session status banner; add a dedicated detailed panel before production rollout.
-- [ ] Add unit tests for normal, duplicate-SKU, missing-SKU, kit, and quantity-mismatch cases. Initial tests cover UTF-16 request parsing, kit-parent matching, duplicate-SKU rejection, sales-source connection resolution, and unsafe request IDs.
+- [ ] Add unit tests for normal, duplicate-SKU, missing-SKU, kit, and quantity-mismatch cases. Initial tests cover UTF-8 HTTP JSON parsing, ServerXMLHTTP encoding compatibility, endpoint peer restriction, kit-parent matching, duplicate-SKU rejection, sales-source connection resolution, and unsafe request IDs.
 
 ### 7.5 Availability confirmation workflow
 
@@ -657,7 +689,7 @@ Tasks:
 Tasks:
 
 - [ ] Add `Buy Faire label` as a second fulfillment method in the existing shipment section.
-- [ ] Keep it disabled or visibly marked unavailable until the adapter is production-ready.
+- [ ] Keep direct label purchasing disabled or visibly marked unavailable until the adapter is production-ready.
 - [ ] Reuse imported Sage shipping selections, availability decisions, package templates, and ship-code defaults.
 - [ ] Show available rates/services and the chargeable cost before purchase.
 - [ ] Require a final explicit purchase confirmation.
@@ -674,7 +706,7 @@ The final storage locations and exact schemas are implementation choices. The fo
 
 | Configuration area   | Contents                                                                                                         |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Sage bridge          | Supported Sage company/profile, source document requirements, field mapping version, local IPC protocol/version. |
+| Sage bridge          | Supported Sage company/profile, source document requirements, field mapping version, HTTP protocol/path, and opt-in listener settings. |
 | Fulfillment policy   | Package templates, Sage ship-via mapping, freight policy, markup policy, workflow availability.                  |
 | Faire connection     | Active Faire connection/account and secure authentication configuration.                                         |
 | Future label adapter | Faire-specific carrier/service/package mappings and any secret configuration.                                    |
@@ -694,8 +726,8 @@ The final storage locations and exact schemas are implementation choices. The fo
 - [ ] Preserve the exact input strings used in Sage.
 - [ ] Classify carrier/service values as preference, hard constraint, or obsolete legacy mapping.
 - [ ] Confirm payment-party behavior for sender, third-party, and collect shipments.
-- [ ] Confirm whether the current fixed markup rules remain desired.
-- [ ] Define freight writeback behavior per rule.
+- [x] Confirm the markup rules: fixed XOR percent, `5` means 5%, and `ApplyMarkupPerPackage` controls package-level application.
+- [x] Define freight writeback behavior per rule: `Cost` returns freight; `Omit` omits `FreightAmount`.
 - [ ] Prevent unsupported future Faire label options from being silently selected.
 - [ ] Add configuration validation and tests for missing/duplicate Sage ship codes.
 
@@ -719,13 +751,14 @@ The final storage locations and exact schemas are implementation choices. The fo
 - [ ] Do not send secrets across the Sage-to-GUI request protocol.
 - [ ] Review and rotate sensitive legacy configuration if it has been shared or committed broadly.
 
-### 10.2 Local IPC safety
+### 10.2 HTTP endpoint safety
 
-- [ ] Restrict pipe/listener access to the expected local user/workstation context.
-- [ ] Validate protocol version, request size, request ID, and all required fields.
-- [ ] Reject malformed requests without crashing the GUI listener.
+- [x] Restrict listener access to the expected BSDC01 workstation and require explicit user opt-in.
+- [x] Validate protocol version, request size, request ID, and all required fields.
+- [x] Reject malformed requests without crashing the GUI listener.
 - [ ] Avoid logging full addresses or sensitive payloads unless required for secured operational diagnostics.
-- [ ] Never execute Sage object/method names supplied by the GUI result.
+- [ ] Replace plaintext HTTP with authenticated TLS and per-user authorization before production.
+- [x] Never execute Sage object/method names supplied by the GUI result.
 
 ### 10.3 Auditability
 
@@ -751,12 +784,12 @@ The final storage locations and exact schemas are implementation choices. The fo
 - [ ] Unit-test external-shipment result construction.
 - [ ] Add future label-adapter tests using documented test/sandbox behavior once available.
 
-### 11.2 Local IPC tests
+### 11.2 HTTP transport tests
 
-- [ ] Test GUI unavailable, GUI running, GUI minimized, and GUI restarted cases.
-- [ ] Test acknowledgement, keepalive, cancellation, terminal success, and terminal failure messages.
+- [ ] Test endpoint disabled, endpoint enabled, GUI unavailable, GUI minimized, and GUI restarted cases.
+- [ ] Test acknowledgement, cancellation, terminal success, and terminal failure messages. Keepalive is not required for the bounded HTTP request.
 - [ ] Test duplicate request IDs.
-- [ ] Test malformed/oversized requests.
+- [ ] Test malformed/oversized requests and a non-BSDC01 peer.
 - [ ] Test a completed Faire result when Sage disconnects before receiving it.
 
 ### 11.3 Sage integration tests
@@ -770,7 +803,7 @@ Use a non-production Sage company or controlled test orders.
 - [ ] Test no lines selected for shipment/backorder.
 - [ ] Test each relevant Sage `ShipVia` policy.
 - [ ] Test external shipment recording and Sage tracking/package writeback.
-- [ ] Test freight writeback enabled and disabled.
+- [ ] Test freight writeback `Cost` and `Omit` policies, including missing-cost fallback to `0.00`, fixed/percent markup selection, per-package markup behavior, and half-up rounding.
 - [ ] Test cancellation before Faire changes.
 - [ ] Test Faire/API failure.
 - [ ] Test Sage writeback failure and retry/recovery.
@@ -793,15 +826,15 @@ Use a non-production Sage company or controlled test orders.
 
 - [ ] Sage 100 2025 field/object details are verified.
 - [x] Backordered quantity source is confirmed as `QUANTITYBACKORDERED`.
-- [ ] Result/writeback policy is agreed.
-- [ ] Protocol and session-state contract are reviewed.
-- [ ] Package and ship-code configuration decisions are reviewed.
+- [x] Result/writeback policy is agreed.
+- [x] Protocol and session-state contract are reviewed.
+- [x] Package and ship-code configuration decisions are reviewed.
 
 **Acceptance criterion:** There is a written, testable request/result contract with no unverified Sage field names treated as facts.
 
 ### Milestone B — Sage-to-GUI session launch
 
-- [x] Implement the Windows GUI listener and request-specific output-pipe transport.
+- [x] Implement the opt-in HTTP GUI listener restricted to BSDC01.
 - [x] Implement GUI parsing/validation for the Sage snapshot.
 - [x] Implement sales-source connection selection, foreground-focus request, and direct Order Details opening by PO/display ID.
 - [ ] Manually verify the Sage custom button sends a valid snapshot on the target Windows/Sage workstation.
@@ -811,11 +844,11 @@ Use a non-production Sage company or controlled test orders.
 
 ### Milestone C — Availability import and confirmation
 
-- [ ] Sage backordered lines map safely to Faire variants.
-- [ ] Matched lines are preselected as unavailable.
-- [ ] The user can review/undo selections.
-- [ ] One explicit confirmation updates Faire.
-- [ ] Ambiguous lines are blocked and explained.
+- [x] Sage backordered lines map safely to Faire variants.
+- [x] Matched lines are preselected as unavailable.
+- [x] The user can review/undo selections.
+- [x] One explicit confirmation updates Faire.
+- [x] Ambiguous lines are blocked and explained.
 
 **Acceptance criterion:** A user does not manually reselect normal backordered items, and no Faire availability update occurs without explicit confirmation.
 
@@ -844,8 +877,8 @@ Use a non-production Sage company or controlled test orders.
 
 These are not blockers for this plan, but they must be answered before the corresponding implementation work begins.
 
-1. Confirm that the proposed Sage 100 2025 backorder field is `QUANTITYBACKORDERED` and verify its values in Shipping Data Entry.
-2. Identify any necessary sales-source value normalization beyond the confirmed `UDF_SALE_SOURCE$` field.
+1. Identify any necessary sales-source value normalization beyond the confirmed `UDF_SALE_SOURCE$` field.
+2. Confirm the exact Sage item-type and sales-kit semantics needed for the remaining writeback workflow.
 3. Which Sage item types should be included, excluded, or handled specially?
 4. Confirm the actual `SalesKitLineKey` and `ExplodedKitItem` semantics required to resolve components to the parent kit SKU.
 5. Confirm that the current freight markup rules should be applied by the GUI/policy layer for every supported shipping method.
@@ -859,8 +892,8 @@ These are not blockers for this plan, but they must be answered before the corre
 ## 14. Immediate next actions
 
 1. Validate the remaining Sage writeback behavior in `Sage/LaunchFaireFulfillment.vbs`, including invoice timing and tracking/package return values.
-2. Implement the compatible Faire GUI protocol-v1 named-pipe listener and persist/replay behavior for request IDs.
-3. Implement reverse sales-source-to-Faire-connection resolution, using the same source codes currently produced from brand IDs by the CSV export.
+2. Implement external-shipment completion, durable terminal-result persistence, Sage acknowledgement, and writeback recovery as specified in the handoff above.
+3. Validate the opt-in HTTP transport and Sage writeback against controlled Windows/Sage test orders.
 4. Review `Sage/Packages.json` and `Sage/ShipCodes.json` with shipping users to identify valid current business rules versus EasyPost-only legacy values.
-5. Build Milestones B through D in sequence, using external shipment recording as the first complete production workflow.
+5. Build Milestone D as the first complete production workflow; Milestones B and C are implemented but still require formal manual acceptance testing.
 6. Wait for Faire’s official label API documentation before implementing Milestone E.
