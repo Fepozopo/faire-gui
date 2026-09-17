@@ -17,7 +17,7 @@ This section is the authoritative handoff point for a new coding agent. Read thi
 
 #### Ship Via and freight policy
 
-- Load and validate `Sage/ShipCodes.json`; it is policy/configuration, not yet application behavior.
+- Load and validate `sage/ShipCodes.json`; it is policy/configuration, not yet application behavior.
 - Rename the ambiguous `FreightWriteback: "Disabled"` policy to `"Omit"` during the configuration migration.
 - `Cost` uses the future Faire carrier-label cost. If no cost is returned, return freight `0.00` and apply no markup.
 - A rule may configure **either** `AdditionalMarkupFixed` **or** `AdditionalMarkupPercent`, never both; `null` means no markup. A percent value of `5` means 5%.
@@ -27,9 +27,9 @@ This section is the authoritative handoff point for a new coding agent. Read thi
 
 #### Durability, acknowledgement, and recovery
 
-- Before responding to Sage, persist a terminal result keyed by request ID, sales order, and invoice. Retain it for 30 days.
-- Replaying a known request ID must return the persisted result without repeating Faire work. A new request for the same sales order/invoice with an unacknowledged terminal result should also replay that result rather than create a duplicate shipment.
-- Add a Sage-to-GUI acknowledgement after Sage writeback: `APPLIED` or `WRITEBACK_FAILED`.
+- Before responding to Sage, persist only one replaceable terminal/current result keyed by request ID, sales order, and invoice. A `PENDING` or `WRITEBACK_FAILED` result remains recoverable for up to 30 days; a new Sage document deliberately replaces it and makes the prior result a manual-recovery case.
+- Replaying a known request ID must return the one persisted result without repeating Faire work. A fresh request for that same sales order/invoice replays only an unacknowledged `COMPLETED` result; a prior `CANCELLED` or ordinary `FAILED` result starts a new workflow.
+- Add a Sage-to-GUI acknowledgement after Sage writeback: `APPLIED` clears the one persisted record, while `WRITEBACK_FAILED` retains it for retry.
 - On `WRITEBACK_FAILED`, the GUI must visibly retain/display tracking and freight details, provide copyable recovery data, and offer a retry/manual-recovery path. Sage remains the only writer of Sage records.
 
 #### Required validation
@@ -43,7 +43,7 @@ The repository now contains the first **Sage → Faire GUI open-and-review path*
 
 Implemented behavior:
 
-1. `Sage/LaunchFaireFulfillment.vbs` reads the active Sage Shipping Data Entry document and posts a protocol-v1 snapshot to the temporary direct HTTP endpoint on RMT01.
+1. `sage/LaunchFaireFulfillment.vbs` reads the active Sage Shipping Data Entry document and posts a protocol-v1 snapshot to the temporary direct HTTP endpoint on RMT01.
 2. `application/sage_fulfillment_http.go` accepts that snapshot only from BSDC01 (`192.168.128.10`) on TCP 18080 after the local user explicitly enables Sage fulfillment integration; the persisted default is disabled.
 3. The GUI obtains each newly saved connection's authoritative Brand ID from Faire's authenticated `/brands/profile` endpoint and persists it with the connection metadata.
 4. `application/sage_fulfillment.go` validates the request, uses the Sage sales source to choose one saved Faire connection, requests foreground focus, opens the order matching the PO/display ID, and creates an in-memory Sage fulfillment session.
@@ -51,13 +51,19 @@ Implemented behavior:
 6. Duplicate/missing SKU matches and unresolved kit parents are not guessed; the session banner reports them.
 7. The user can cancel the Sage session. The GUI returns a typed `CANCELLED` response, clears the search, returns to the main Orders table, and the Sage script makes no writeback changes.
 
-Not implemented yet:
+Implemented after the initial handoff:
 
-- a completed external-shipment response containing tracking, package allocations, and permitted freight;
-- completing the Sage session after the existing Faire shipment form succeeds;
-- persistence/idempotent replay of sessions and terminal results across a GUI restart;
-- package catalog and ship-code policy import/defaults;
-- an unresolved-mapping review gate or detailed mapping panel;
+- successful external Faire shipment submission now returns a durable typed `COMPLETED` result with sequential tracking, positive shipped Sage lines allocated to package `1`, and policy-controlled freight;
+- the GUI blocks shipment completion for unresolved Sage mappings and until imported Sage backorders have a successful explicit availability update;
+- one owner-only durable current/recovery record replays a matching request ID or unacknowledged completed sales-order/invoice result without a second Faire shipment; a new Sage document replaces it, and `APPLIED` clears it;
+- `sage/ShipCodes.json` is embedded and validated as policy, uses `Omit` instead of `Disabled`, and applies the configured cost/markup freight behavior;
+- Sage sends a narrow `APPLIED` or `WRITEBACK_FAILED` acknowledgement to `/v1/sage/fulfillment/ack`; the GUI retains visible, copyable recovery data on writeback failure.
+- The active Sage-session banner includes a clearly marked **Simulate label purchase (test)** action. It makes no Faire API call or purchase and returns one deterministic package (`TEST-FAIRE-0001`, freight `$10.00`) through the normal Sage result/writeback path.
+
+Still not implemented:
+
+- package catalog import/defaults;
+- a detailed unresolved-mapping panel;
 - Faire label purchasing, which remains blocked on Faire's future API;
 - manual Sage 100 2025/Windows direct-HTTP runtime validation.
 
@@ -68,16 +74,17 @@ The current VBScript and Go listener are coupled by this protocol. Do not change
 | Direction  | Endpoint/encoding | Contract |
 | ---------- | ----------------- | -------- |
 | Sage → GUI | `POST http://RMT01:18080/v1/sage/fulfillment`, UTF-8 JSON | The Sage script uses `ADODB.Stream` to encode a UTF-8 byte array before `ServerXMLHTTP` sends it. The temporary endpoint accepts only the BSDC01 peer address and enforces a bounded request size. The RMT01 firewall must restrict TCP 18080 to BSDC01. |
-| GUI → Sage | HTTP 200, ASCII-safe lines | The response writes `RequestID`, `Status`, `SalesOrderNo`, `InvoiceNo`, optional `Tracking`, `PackageItem`, `FreightAmount`, optional `Error`, then `Done`. |
+| GUI → Sage | HTTP 200, ASCII-safe lines | The response writes `RequestID`, `Status`, `SalesOrderNo`, `InvoiceNo`, optional `Tracking`, `PackageItem` (`packageNo|itemCode|itemType|quantity`), `FreightAmount`, optional `Error`, then `Done`. |
+| Sage → GUI acknowledgement | `POST http://RMT01:18080/v1/sage/fulfillment/ack`, UTF-8 JSON | After writeback Sage posts only protocol version, request ID, and `APPLIED` or `WRITEBACK_FAILED`; `APPLIED` clears the one recovery record and `WRITEBACK_FAILED` retains it. |
 
-The request ID remains the future idempotency key. The script currently accepts terminal `COMPLETED`, `CANCELLED`, or `FAILED`; the GUI currently emits `CANCELLED` and early `FAILED` only. This direct HTTP transport is a temporary, unencrypted test path and must be replaced with authenticated TLS before production.
+The request ID is the idempotency key. The script accepts terminal `COMPLETED`, `CANCELLED`, or `FAILED`; the GUI persists and emits each before responding, and the script sends a narrow post-writeback acknowledgement. This direct HTTP transport is a temporary, unencrypted test path and must be replaced with authenticated TLS before production.
 
 ### Key files
 
 | File                                      | Role                                                                                                                                                      |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Sage/LaunchFaireFulfillment.vbs`         | Sage custom-button bridge. Extracts data, posts it with explicit HTTP timeouts, parses a typed terminal response, and owns Sage writeback.                 |
-| `Sage/FieldMappings.json`                 | Data dictionary. `QUANTITYBACKORDERED` and `SO_SALESORDER.UDF_SALE_SOURCE` are confirmed; Script Link accesses the latter as `UDF_SALE_SOURCE$`.         |
+| `sage/LaunchFaireFulfillment.vbs`         | Sage custom-button bridge. Extracts data, posts it with explicit HTTP timeouts, parses a typed terminal response, and owns Sage writeback.                 |
+| `sage/FieldMappings.json`                 | Data dictionary. `QUANTITYBACKORDERED` and `SO_SALESORDER.UDF_SALE_SOURCE` are confirmed; Script Link accesses the latter as `UDF_SALE_SOURCE$`.         |
 | `application/sage_fulfillment.go`         | Protocol parsing, session lifecycle, sales-source connection resolution, SKU/kit matching, UI banner, and cancellation.                                   |
 | `application/sage_fulfillment_http.go`    | Temporary HTTP transport restricted to BSDC01, with bounded body and server timeouts.                                                                     |
 | `application/sage_fulfillment_settings.go`| Per-user persisted opt-in state; default-disabled prevents the HTTP listener from opening until Settings enables it.                                       |
@@ -98,18 +105,12 @@ The request ID remains the future idempotency key. The script currently accepts 
 
 ### Recommended next implementation task
 
-Implement the **external-shipment completion path** before any label-purchase work:
+Complete the remaining **external-shipment rollout work** before any label-purchase work:
 
-1. Extend `sageFulfillmentSession` with the approved terminal-result data and an explicit state transition after availability confirmation and shipment submission.
-2. Integrate with the existing shipment flow in `application/order_detail_page.go`, `application/orders_actions.go`, and `application/orders_controller.go`:
-   - prevent completion when the active Sage session has unresolved mappings;
-   - retain the existing explicit availability confirmation requirement;
-   - after a successful external Faire shipment submission, build the typed `COMPLETED` result from the persisted Faire shipment/detail;
-   - include the tracking, package-item allocation, and freight fields the VBScript already validates and writes;
-   - return that result through `session.respond` exactly once.
-3. Persist request ID, document identity, terminal result, and Sage-writeback-pending state before signaling `COMPLETED`. A repeat of the same request ID must replay the result, not create another Faire shipment.
-4. Add a visible post-completion/writeback-pending state and clear it only when the GUI knows the response has been sent. A later enhancement may add an explicit Sage acknowledgement if needed.
-5. Add focused tests for successful completion, retry/idempotency, unresolved-mapping blocking, and failed shipment submission retaining the session.
+1. Validate the new `COMPLETED` response and acknowledgement flow against real Sage Shipping Data Entry documents, including tracking replacement, package tracking, `FREIGHTAMT`, invoice identity, retry, and `WRITEBACK_FAILED` recovery behavior.
+2. Import the reviewed package catalog and apply non-binding Ship Via carrier/service defaults to the existing external-shipment form without treating provider-neutral values as Faire API identifiers.
+3. Add the detailed unresolved-mapping panel and quantity-inconsistency review gate required before production rollout.
+4. Add an automated HTTP acknowledgement test and Windows build/runtime coverage when the Sage workstation is available.
 
 Do **not** implement direct label purchasing until Faire releases the required API and the API-discovery checklist in section 8 is complete.
 
@@ -173,7 +174,7 @@ The first path can be built before a Faire label API exists. The second must reu
 
 ## 3. Existing assets and how they will be used
 
-### 3.1 Existing Sage script: `Sage/LaunchFaireGUI.vbs`
+### 3.1 Existing Sage script: `sage/LaunchFaireGUI.vbs`
 
 Use this file as a behavioral and Sage Business Object Interface reference only.
 
@@ -194,15 +195,15 @@ Do **not** retain unchanged:
 - the assumption that every payload line has `QuantityShipped > 0`;
 - SSK-specific record-removal and writeback behavior without an explicit business rule.
 
-### 3.1.1 Initial purpose-built script: `Sage/LaunchFaireFulfillment.vbs`
+### 3.1.1 Initial purpose-built script: `sage/LaunchFaireFulfillment.vbs`
 
 An initial protocol-v1 bridge has been created. It sends explicit shipped and backordered line quantities, the Faire display ID, the confirmed sales-source UDF value, kit relationship fields, ship-to data, and freight data as UTF-8 JSON over the opt-in HTTP endpoint `http://RMT01:18080/v1/sage/fulfillment`. It waits for a typed HTTP response, validates its request/order/invoice identity, and replaces Sage tracking/package records only after validation.
 
 The GUI listener now exists in `application/sage_fulfillment_http.go`; it accepts only the BSDC01 peer address, bounds request and response time, and publishes typed requests to the Gio frame loop. The endpoint is disabled by default and enabled per Windows user in Settings. `application/sage_fulfillment_settings.go` persists that opt-in state.
 
-This flow is **not production-verified**. Manual Sage 100 2025 and direct-HTTP runtime validation is still required. The GUI currently supports opening/reviewing/cancelling the Sage session; it does not yet return a completed external-shipment result or persist/replay terminal results.
+This flow is **not production-verified**. Manual Sage 100 2025 and direct-HTTP runtime validation is still required. The GUI supports opening/reviewing/cancelling a Sage session and returning/replaying a durable completed external-shipment result; package-catalog defaults and a detailed mapping panel remain future work.
 
-### 3.2 Field mappings: `Sage/FieldMappings.json`
+### 3.2 Field mappings: `sage/FieldMappings.json`
 
 Use this as the initial Sage data dictionary. Build a narrower, explicitly versioned **Sage fulfillment snapshot** rather than forwarding every mapped field.
 
@@ -232,7 +233,7 @@ Defer until there is a proven need:
 - unit cost and other export-value fields;
 - insurance and delivery-special-instruction fields.
 
-### 3.3 Package catalog: `Sage/Packages.json`
+### 3.3 Package catalog: `sage/Packages.json`
 
 Reuse the human-facing package choices, display order, and manual dimensions as the initial package catalog for the Faire GUI.
 
@@ -243,7 +244,7 @@ Separate the provider-neutral package information from provider-specific package
 - do not assume existing EasyPost values such as `SmallFlatRateBox` match Faire’s future shipping-label API;
 - add future Faire provider mappings only when Faire documents valid package identifiers.
 
-### 3.4 Ship-code rules: `Sage/ShipCodes.json`
+### 3.4 Ship-code rules: `sage/ShipCodes.json`
 
 Reuse the operational policy encoded by the Sage `ShipVia` values, but convert it to a provider-neutral configuration model.
 
@@ -259,11 +260,11 @@ Each rule should express:
 
 Do not treat EasyPost service strings as permanent Faire API values. Values such as `FEDEX_GROUND`, `GroundAdvantage`, and `3DaySelect` must be mapped to Faire-supported values only after Faire documents its API.
 
-### 3.5 SSK settings: `Sage/AppSettings.json`
+### 3.5 SSK settings: `sage/AppSettings.json`
 
 Do not copy this file into the new integration.
 
-It contains legacy provider settings and sensitive Sage/license configuration. Extract only intentional, non-secret business settings into a new application configuration model. Keep credentials and API secrets out of tracked JSON files and in the application’s secure local configuration/storage.
+It contains legacy provider settings and sensitive sage/license configuration. Extract only intentional, non-secret business settings into a new application configuration model. Keep credentials and API secrets out of tracked JSON files and in the application’s secure local configuration/storage.
 
 If this configuration has been shared beyond the intended trusted team, treat existing credentials and license material as candidates for rotation.
 
@@ -461,7 +462,7 @@ The script must be small and narrowly scoped:
 
 It should not become a second implementation of Faire order or label logic.
 
-- [x] Create the initial protocol-v1 script at `Sage/LaunchFaireFulfillment.vbs`.
+- [x] Create the initial protocol-v1 script at `sage/LaunchFaireFulfillment.vbs`.
 - [ ] Manually validate the initial script in the target Sage 100 2025 environment before installing it for operators.
 
 ### 6.2 Sage discovery and verification tasks
@@ -531,7 +532,7 @@ Relevant current areas include:
 - `application/order_detail_page.go` — order item cards, item availability controls, shipment section, and shipment form;
 - `application/orders_actions.go` — order lookup/opening, availability submission, and shipment submission;
 - `features/orders/lookup.go` — conversion of a Faire display ID to its Faire order ID;
-- `Sage/Packages.json` and `Sage/ShipCodes.json` — starting points for operational configuration.
+- `sage/Packages.json` and `sage/ShipCodes.json` — starting points for operational configuration.
 
 The current UI already has the desired foundations:
 
@@ -635,7 +636,7 @@ Tasks:
 - [x] Implement the Windows local listener when the GUI starts, with a non-Windows development stub.
 - [x] Request foreground focus with Gio `ActionRaise` and navigate to the correct order session after accepting a request. Verify minimized-window restoration on the target Windows workstation.
 - [x] Display request status while Sage is waiting.
-- [ ] Prevent the user from accidentally closing an active session without cancellation confirmation.
+- [x] Prevent the user from accidentally closing an active session without cancellation confirmation.
 - [x] Offer an explicit Cancel action that returns a `cancelled` result and makes no Sage changes.
 - [ ] Display a clear terminal success state after Sage confirms writeback, or a writeback-pending state when it does not.
 
@@ -713,7 +714,7 @@ The final storage locations and exact schemas are implementation choices. The fo
 
 ### 9.2 Package migration checklist
 
-- [ ] Review every package in `Sage/Packages.json` with shipping users.
+- [ ] Review every package in `sage/Packages.json` with shipping users.
 - [ ] Preserve display names and dimensions that are still operationally valid.
 - [ ] Determine tare weight policy and populate it only when verified.
 - [ ] Separate carrier-neutral dimensions from provider-specific package codes.
@@ -891,9 +892,9 @@ These are not blockers for this plan, but they must be answered before the corre
 
 ## 14. Immediate next actions
 
-1. Validate the remaining Sage writeback behavior in `Sage/LaunchFaireFulfillment.vbs`, including invoice timing and tracking/package return values.
+1. Validate the remaining Sage writeback behavior in `sage/LaunchFaireFulfillment.vbs`, including invoice timing and tracking/package return values.
 2. Implement external-shipment completion, durable terminal-result persistence, Sage acknowledgement, and writeback recovery as specified in the handoff above.
 3. Validate the opt-in HTTP transport and Sage writeback against controlled Windows/Sage test orders.
-4. Review `Sage/Packages.json` and `Sage/ShipCodes.json` with shipping users to identify valid current business rules versus EasyPost-only legacy values.
+4. Review `sage/Packages.json` and `sage/ShipCodes.json` with shipping users to identify valid current business rules versus EasyPost-only legacy values.
 5. Build Milestone D as the first complete production workflow; Milestones B and C are implemented but still require formal manual acceptance testing.
 6. Wait for Faire’s official label API documentation before implementing Milestone E.

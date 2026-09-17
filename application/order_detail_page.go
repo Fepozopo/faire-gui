@@ -272,7 +272,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 		ui.invalidate()
 		return
 	}
-	if confirmShipmentsClicked && shipmentConfirmationAllowed(view) && shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
+	if confirmShipmentsClicked && shipmentConfirmationAllowed(view) && ui.sageFulfillmentShipmentAllowed() && shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
 		ui.submitShipmentForm()
 		ui.invalidate()
 	}
@@ -287,12 +287,17 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, bodyText(ui.theme, "Add shipment information to confirm fulfillment.", mutedTextColor)),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentConfirmationAllowed(view) {
-						return layout.Dimensions{}
+					if !shipmentConfirmationAllowed(view) {
+						warning := material.Body1(ui.theme, "Resolve pending item availability changes before confirming shipment.")
+						warning.Color = dangerColor
+						return warning.Layout(gtx)
 					}
-					warning := material.Body1(ui.theme, "Resolve pending item availability changes before confirming shipment.")
-					warning.Color = dangerColor
-					return warning.Layout(gtx)
+					if ui.sageFulfillment != nil && !ui.sageFulfillmentShipmentAllowed() {
+						warning := material.Body1(ui.theme, "Resolve the Sage fulfillment review before confirming shipment.")
+						warning.Color = dangerColor
+						return warning.Layout(gtx)
+					}
+					return layout.Dimensions{}
 				}),
 			)
 		}),
@@ -360,7 +365,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 				layout.Rigid(underlinedTextAction(ui.theme, &view.addPackageButton, "Add package")),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting && shipmentConfirmationAllowed(view) {
+					if shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting && shipmentConfirmationAllowed(view) && ui.sageFulfillmentShipmentAllowed() {
 						return primaryButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
 					}
 					return disabledShipmentButton(ui.theme, "Confirm")(gtx)

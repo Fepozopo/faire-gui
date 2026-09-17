@@ -16,7 +16,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "THIRD_PARTY",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null
@@ -27,7 +27,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "COLLECT",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null
@@ -38,7 +38,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "SENDER",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null
@@ -49,7 +49,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "SENDER",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null
@@ -71,7 +71,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "THIRD_PARTY",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null
@@ -82,7 +82,7 @@
     "PredefinedPackage": null,
     "SaturdayDelivery": null,
     "PaymentParty": "COLLECT",
-    "FreightWriteback": "Disabled",
+    "FreightWriteback": "Omit",
     "AdditionalMarkupPercent": null,
     "AdditionalMarkupFixed": null,
     "ApplyMarkupPerPackage": null

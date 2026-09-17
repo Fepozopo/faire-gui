@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -15,8 +16,10 @@ import (
 const (
 	// sageFulfillmentHTTPAddress is the temporary direct HTTP listener for the Faire GUI workstation.
 	sageFulfillmentHTTPAddress = ":18080"
-	// sageFulfillmentHTTPPath is the only request path accepted from Sage Shipping Data Entry.
+	// sageFulfillmentHTTPPath accepts a Sage fulfillment snapshot and returns one terminal result.
 	sageFulfillmentHTTPPath = "/v1/sage/fulfillment"
+	// sageFulfillmentHTTPAckPath accepts Sage's post-writeback APPLIED or WRITEBACK_FAILED acknowledgement.
+	sageFulfillmentHTTPAckPath = "/v1/sage/fulfillment/ack"
 	// sageFulfillmentHTTPAllowedHost is the BSDC01 address allowed by the temporary direct integration.
 	sageFulfillmentHTTPAllowedHost = "192.168.128.10"
 	// maxSageFulfillmentHTTPBytes prevents an untrusted or malformed request from consuming excessive memory.
@@ -25,16 +28,16 @@ const (
 	sageFulfillmentHTTPWriteTimeout = 6 * time.Minute
 )
 
-// serveSageFulfillmentHTTP accepts a temporary, firewall-restricted HTTP request from BSDC01 and publishes validated work to the UI dispatcher.
-// ctx ends the listener and any outstanding request when the desktop application shuts down.
-func serveSageFulfillmentHTTP(ctx context.Context, publish func(sageFulfillmentInbound)) {
+// serveSageFulfillmentHTTP accepts temporary, firewall-restricted HTTP requests from BSDC01 and publishes validated work to the UI dispatcher.
+// ctx ends the listener and any outstanding request when the desktop application shuts down; a non-nil return identifies a listener failure that the UI must display.
+func serveSageFulfillmentHTTP(ctx context.Context, publish func(sageFulfillmentInbound), replay func(sageFulfillmentRequest) (sageFulfillmentResult, bool, error), acknowledge func(string, sageWritebackState) error) error {
 	listener, err := net.Listen("tcp", sageFulfillmentHTTPAddress)
 	if err != nil {
-		return
+		return err
 	}
 
 	server := &http.Server{
-		Handler:           http.HandlerFunc(sageFulfillmentHTTPHandler(ctx, publish)),
+		Handler:           http.HandlerFunc(sageFulfillmentHTTPHandler(ctx, publish, sageFulfillmentHTTPCallbacks{replay: replay, acknowledge: acknowledge})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      sageFulfillmentHTTPWriteTimeout,
@@ -48,15 +51,33 @@ func serveSageFulfillmentHTTP(ctx context.Context, publish func(sageFulfillmentI
 	}()
 
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return
+		return err
 	}
+	return nil
+}
+
+// sageFulfillmentHTTPCallbacks supplies thread-safe durable replay and acknowledgement operations to the temporary HTTP transport.
+type sageFulfillmentHTTPCallbacks struct {
+	replay      func(sageFulfillmentRequest) (sageFulfillmentResult, bool, error)
+	acknowledge func(string, sageWritebackState) error
+}
+
+// sageFulfillmentHTTPAcknowledgement is the narrow post-writeback signal Sage sends after applying or rejecting a completed result.
+type sageFulfillmentHTTPAcknowledgement struct {
+	ProtocolVersion int                `json:"protocolVersion"`
+	RequestID       string             `json:"requestId"`
+	Status          sageWritebackState `json:"status"`
 }
 
 // sageFulfillmentHTTPHandler validates requests from BSDC01, delegates fulfillment work to the UI goroutine, and returns one typed terminal result.
 // The handler deliberately trusts no forwarded-address header because only the TCP peer address is meaningful for the firewall-restricted test endpoint.
-func sageFulfillmentHTTPHandler(ctx context.Context, publish func(sageFulfillmentInbound)) http.HandlerFunc {
+func sageFulfillmentHTTPHandler(ctx context.Context, publish func(sageFulfillmentInbound), callbacks ...sageFulfillmentHTTPCallbacks) http.HandlerFunc {
+	var callback sageFulfillmentHTTPCallbacks
+	if len(callbacks) > 0 {
+		callback = callbacks[0]
+	}
 	return func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.Path != sageFulfillmentHTTPPath {
+		if request.Method != http.MethodPost || (request.URL.Path != sageFulfillmentHTTPPath && request.URL.Path != sageFulfillmentHTTPAckPath) {
 			http.NotFound(response, request)
 			return
 		}
@@ -79,11 +100,27 @@ func sageFulfillmentHTTPHandler(ctx context.Context, publish func(sageFulfillmen
 			http.Error(response, "Sage fulfillment request has an unsupported text encoding.", http.StatusBadRequest)
 			return
 		}
+		if request.URL.Path == sageFulfillmentHTTPAckPath {
+			handleSageFulfillmentHTTPAcknowledgement(response, payload, callback)
+			return
+		}
 		fulfillmentRequest, err := parseSageFulfillmentRequest(payload)
 		if err != nil {
 			// The short hex previews diagnose text encoding without exposing customer or credential data.
 			http.Error(response, "Sage fulfillment request is invalid: "+err.Error()+"; raw="+sageFulfillmentHTTPPayloadPreview(rawPayload)+"; normalized="+sageFulfillmentHTTPPayloadPreview(payload), http.StatusBadRequest)
 			return
+		}
+
+		if callback.replay != nil {
+			result, found, replayErr := callback.replay(fulfillmentRequest)
+			if replayErr != nil {
+				writeSageFulfillmentHTTPResult(response, sageFulfillmentFailure(fulfillmentRequest, "Sage fulfillment request identity could not be verified."))
+				return
+			}
+			if found {
+				writeSageFulfillmentHTTPResult(response, result)
+				return
+			}
 		}
 
 		results := make(chan sageFulfillmentResult, 1)
@@ -105,6 +142,26 @@ func sageFulfillmentHTTPHandler(ctx context.Context, publish func(sageFulfillmen
 			return
 		}
 	}
+}
+
+// handleSageFulfillmentHTTPAcknowledgement validates and records a narrow post-writeback acknowledgement without involving the Gio frame goroutine.
+func handleSageFulfillmentHTTPAcknowledgement(response http.ResponseWriter, payload []byte, callbacks sageFulfillmentHTTPCallbacks) {
+	if callbacks.acknowledge == nil {
+		http.Error(response, "Sage fulfillment acknowledgement is unavailable.", http.StatusServiceUnavailable)
+		return
+	}
+	var acknowledgement sageFulfillmentHTTPAcknowledgement
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&acknowledgement); err != nil || acknowledgement.ProtocolVersion != sageFulfillmentProtocolVersion || !safeSageRequestID(acknowledgement.RequestID) || (acknowledgement.Status != sageWritebackApplied && acknowledgement.Status != sageWritebackFailed) {
+		http.Error(response, "Sage fulfillment acknowledgement is invalid.", http.StatusBadRequest)
+		return
+	}
+	if err := callbacks.acknowledge(acknowledgement.RequestID, acknowledgement.Status); err != nil {
+		http.Error(response, "Sage fulfillment acknowledgement could not be recorded.", http.StatusBadRequest)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 // sageFulfillmentHTTPPayloadPreview returns at most the first 16 payload bytes as hexadecimal for temporary encoding diagnostics.

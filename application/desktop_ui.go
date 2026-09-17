@@ -15,6 +15,7 @@ import (
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
+	sagepolicy "github.com/Fepozopo/faire-gui/sage"
 )
 
 const (
@@ -41,13 +42,21 @@ type DesktopUI struct {
 	preparingStartup          bool
 	startupPreparationStarted bool
 
-	activeConnectionID     string
-	activeConnectionLabel  string
-	selectedTab            int
-	settingsMenuOpen       bool
-	connectionPickerOpen   bool
-	sageFulfillmentEnabled bool
-	sageFulfillmentCancel  context.CancelFunc
+	activeConnectionID              string
+	activeConnectionLabel           string
+	selectedTab                     int
+	settingsMenuOpen                bool
+	connectionPickerOpen            bool
+	sageFulfillmentEnabled          bool
+	sageFulfillmentCancel           context.CancelFunc
+	sageFulfillmentStore            *sageFulfillmentStore
+	sageFulfillmentStoreError       string
+	sageFulfillmentSettingsMessage  string
+	sageShipCodeRules               sagepolicy.ShipCodeRules
+	sageShipCodeRulesError          string
+	sageFulfillmentAcknowledgements chan sageFulfillmentAcknowledgement
+	sageFulfillmentListenerResults  chan sageFulfillmentListenerResult
+	sageFulfillmentRecovery         *sageFulfillmentRecovery
 
 	// orders is the feature-owned Orders component. The shell supplies only immutable connection scope and handles cross-feature status.
 	orders     *ordersController
@@ -166,18 +175,28 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 				window.Invalidate()
 			}
 		}),
-		status:                   startupStatus,
-		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
-		selectedTab:              ordersTab,
-		rowControls:              make(map[string]*connectionRowControls),
-		connectionPickerControls: make(map[string]*widget.Clickable),
-		results:                  make(chan profileLoadResult, 1),
-		brandIDRefreshResults:    make(chan brandIDRefreshResult, 16),
-		connectionCleanupResults: make(chan connectionCleanupResult, 1),
-		updateResults:            make(chan updateCheckResult, 1),
-		updateInstallResults:     make(chan updateInstallResult, 1),
-		startupResults:           make(chan startupResult, 1),
-		sageFulfillmentRequests:  make(chan sageFulfillmentInbound, maxSageFulfillmentRequests),
+		status:                          startupStatus,
+		managementStatus:                "Create a direct-token connection, or select an existing connection to manage it.",
+		selectedTab:                     ordersTab,
+		rowControls:                     make(map[string]*connectionRowControls),
+		connectionPickerControls:        make(map[string]*widget.Clickable),
+		results:                         make(chan profileLoadResult, 1),
+		brandIDRefreshResults:           make(chan brandIDRefreshResult, 16),
+		connectionCleanupResults:        make(chan connectionCleanupResult, 1),
+		updateResults:                   make(chan updateCheckResult, 1),
+		updateInstallResults:            make(chan updateInstallResult, 1),
+		startupResults:                  make(chan startupResult, 1),
+		sageFulfillmentRequests:         make(chan sageFulfillmentInbound, maxSageFulfillmentRequests),
+		sageFulfillmentAcknowledgements: make(chan sageFulfillmentAcknowledgement, maxSageFulfillmentRequests),
+		sageFulfillmentListenerResults:  make(chan sageFulfillmentListenerResult, 1),
+	}
+	ui.sageFulfillmentStore, _ = loadSageFulfillmentStore()
+	if ui.sageFulfillmentStore == nil {
+		ui.sageFulfillmentStoreError = "Sage fulfillment recovery data is unavailable. The integration remains disabled until this local storage problem is resolved."
+	}
+	ui.sageShipCodeRules, _ = sagepolicy.LoadShipCodeRules()
+	if ui.sageShipCodeRules == nil {
+		ui.sageShipCodeRulesError = "Sage Ship Via policy is invalid. The integration remains disabled until its configuration is corrected."
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()

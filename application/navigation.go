@@ -129,7 +129,7 @@ func (ui *DesktopUI) layoutSettingsNavigation(gtx layout.Context) layout.Dimensi
 }
 
 // layoutSettingsSubmenu renders the Settings destinations directly beneath the expanded Settings header.
-// Brand profile and Connections select their existing pages; the Sage item persists the temporary listener opt-in, and updates remain asynchronous.
+// Brand profile and Connections select their existing pages; the Sage item persists the temporary listener opt-in and renders its latest enable/disable diagnostic inline, while updates remain asynchronous.
 func (ui *DesktopUI) layoutSettingsSubmenu(gtx layout.Context) layout.Dimensions {
 	if !ui.settingsMenuOpen {
 		return layout.Dimensions{}
@@ -161,6 +161,12 @@ func (ui *DesktopUI) layoutSettingsSubmenu(gtx layout.Context) layout.Dimensions
 				label = "Disable Sage fulfillment integration"
 			}
 			return ui.layoutSettingsSubmenuItem(gtx, &ui.sageFulfillmentToggle, label)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if ui.sageFulfillmentSettingsMessage == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(2), Right: unit.Dp(12), Bottom: unit.Dp(8), Left: unit.Dp(32)}.Layout(gtx, bodyText(ui.theme, ui.sageFulfillmentSettingsMessage, mutedTextColor))
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return ui.layoutSettingsSubmenuItem(gtx, &ui.checkForUpdates, "Check for updates")

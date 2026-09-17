@@ -388,7 +388,7 @@ func (controller *ordersController) drainDetailResults(activeConnectionID string
 
 // drainShipmentResults applies a current submission result and preserves form data when Faire rejected it.
 // It runs on the frame goroutine so package controls are cleared only after the returned order was persisted successfully.
-func (controller *ordersController) drainShipmentResults(activeConnectionID string) {
+func (controller *ordersController) drainShipmentResults(activeConnectionID string) (shipmentSubmissionResult, bool) {
 	for {
 		select {
 		case result := <-controller.shipmentResults:
@@ -406,15 +406,17 @@ func (controller *ordersController) drainShipmentResults(activeConnectionID stri
 			controller.view.orderDetail = result.Detail
 			controller.view.orderDetailStatus = "Shipment information was added."
 			controller.view.resetShipmentForm()
+			return result, true
 		default:
-			return
+			return shipmentSubmissionResult{}, false
 		}
 	}
 }
 
 // drainItemAvailabilityResults applies only the latest availability result for the active order and connection.
 // Failed updates retain the local draft for retry, while a persisted success replaces the detail and clears that draft.
-func (controller *ordersController) drainItemAvailabilityResults(activeConnectionID string) {
+func (controller *ordersController) drainItemAvailabilityResults(activeConnectionID string) bool {
+	succeeded := false
 	for {
 		select {
 		case result := <-controller.availabilityResults:
@@ -432,8 +434,9 @@ func (controller *ordersController) drainItemAvailabilityResults(activeConnectio
 			controller.view.orderDetail = result.Detail
 			controller.view.orderDetailStatus = "Item availability was updated."
 			controller.view.resetPendingUnavailable()
+			succeeded = true
 		default:
-			return
+			return succeeded
 		}
 	}
 }

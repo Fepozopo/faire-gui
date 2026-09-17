@@ -15,11 +15,15 @@
 '   SalesOrderNo:<value>
 '   InvoiceNo:<value>
 '   Tracking:<package no>|<tracking id>
-'   PackageItem:<package no>|<item code>|<quantity>
+'   PackageItem:<package no>|<item code>|<item type>|<quantity>
 '   FreightAmount:<decimal>
 '   Error:<safe user-facing message>
 '   KeepAlive
 '   Done
+'
+' After Sage attempts writeback it sends a second narrow POST to
+' /v1/sage/fulfillment/ack with APPLIED or WRITEBACK_FAILED. The acknowledgement
+' lets the GUI retain recovery data without ever writing Sage records itself.
 '
 ' A terminal result is tied to its RequestID. A later production transport must
 ' persist and replay the result rather than repeat an irreversible Faire operation.
@@ -30,6 +34,7 @@ Const FAIRE_PROTOCOL_VERSION = 1
 Const FAIRE_GUI_WORKSTATION = "RMT01"
 Const FAIRE_HTTP_PORT = 18080
 Const FAIRE_HTTP_PATH = "/v1/sage/fulfillment"
+Const FAIRE_HTTP_ACK_PATH = "/v1/sage/fulfillment/ack"
 Const HTTP_STATUS_OK = 200
 ' ServerXMLHTTP uses these millisecond limits for DNS, TCP, upload, and fulfillment response waits.
 Const HTTP_RESOLVE_TIMEOUT_MS = 5000
@@ -54,10 +59,12 @@ Sub Main
 	End If
 
 	Set oUI = oSession.AsObject(oSession.UI)
-	sRequestID = CreateRequestID()
+	sRequestID = CanonicalProtocolRequestID(CreateRequestID())
 	sRequestJSON = ""
+	sSalesOrderNo = ""
+	sInvoiceNo = ""
 	sError = ""
-	If Not BuildFulfillmentRequest(sRequestID, sRequestJSON, sError) Then
+	If Not BuildFulfillmentRequest(sRequestID, sRequestJSON, sSalesOrderNo, sInvoiceNo, sError) Then
 		retMsg = oUI.MessageBox("", sError, "Icon=Exclamation, Title=Unable To Start Faire Fulfillment, Style=OK")
 		Exit Sub
 	End If
@@ -96,28 +103,33 @@ Sub Main
 		Exit Sub
 	End If
 
-	If Not ValidateFulfillmentResult(sRequestID, sResponseRequestID, sResponseSalesOrderNo, sResponseInvoiceNo, sError) Then
+	If Not ValidateFulfillmentResult(sRequestID, sSalesOrderNo, sInvoiceNo, sResponseRequestID, sResponseSalesOrderNo, sResponseInvoiceNo, sError) Then
 		retMsg = oUI.MessageBox("", sError, "Icon=Exclamation, Title=Faire Fulfillment Result Rejected, Style=OK")
 		Exit Sub
 	End If
-	If Not ApplyFulfillmentResult(trackingRecords, packageRecords, bHasFreightAmount, sFreightAmount, sError) Then
+	If Not ApplyFulfillmentResult(sInvoiceNo, trackingRecords, packageRecords, bHasFreightAmount, sFreightAmount, sError) Then
+		Call SendFulfillmentAcknowledgement(sRequestID, "WRITEBACK_FAILED")
 		retMsg = oUI.MessageBox("", sError & vbCrLf & vbCrLf & "The Faire result should remain available for retry using request " & sRequestID & ".", "Icon=Exclamation, Title=Sage Writeback Failed, Style=OK")
 		Exit Sub
 	End If
 
 	retVal = oScript.InvokeButton("BT_TRACK")
 	retVal = oUIObj.HandleScriptUI()
+	If Not SendFulfillmentAcknowledgement(sRequestID, "APPLIED") Then
+		retMsg = oUI.MessageBox("", "Faire fulfillment was completed and Sage tracking data was updated, but the GUI did not receive its writeback acknowledgement. Keep request " & sRequestID & " for recovery.", "Icon=Exclamation, Title=Faire Fulfillment Acknowledgement Pending, Style=OK")
+		Exit Sub
+	End If
 	retMsg = oUI.MessageBox("", "Faire fulfillment was completed and Sage tracking data was updated.", "Icon=Info, Title=Faire Fulfillment Complete, Style=OK")
 End Sub
 
 ' BuildFulfillmentRequest reads the current Sage shipment and returns its explicit,
-' versioned JSON snapshot. errorMessage receives a safe error for missing required data.
-Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessage)
+' versioned JSON snapshot plus the salesOrderNo/invoiceNo identity Main must later validate and write. errorMessage receives a safe error for missing required data.
+Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef salesOrderNo, ByRef invoiceNo, ByRef errorMessage)
 	BuildFulfillmentRequest = False
 	errorMessage = ""
 	Set oShipping = oBusObj
 
-	If Not TryGetRequiredString(oShipping, "InvoiceNo$", "the active invoice number", sInvoiceNo, errorMessage) Then Exit Function
+	If Not TryGetRequiredString(oShipping, "InvoiceNo$", "the active invoice number", invoiceNo, errorMessage) Then Exit Function
 	If Not TryGetOptionalString(oShipping, "ShipVia$", sShipVia) Then sShipVia = ""
 	If Not TryGetOptionalNumber(oShipping, "FreightAmt", nFreightAmount) Then nFreightAmount = 0
 
@@ -128,7 +140,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		Exit Function
 	End If
 	Set oSalesOrder = oShipping.AsObject(hSalesOrder)
-	If Not TryGetRequiredString(oSalesOrder, "SalesOrderNo$", "the sales order number", sSalesOrderNo, errorMessage) Then Exit Function
+	If Not TryGetRequiredString(oSalesOrder, "SalesOrderNo$", "the sales order number", salesOrderNo, errorMessage) Then Exit Function
 	If Not TryGetRequiredString(oSalesOrder, "CustomerPoNo$", "the Faire order display ID in the customer PO number", sFaireDisplayID, errorMessage) Then Exit Function
 
 	' This confirmed Sage 100 2025 UDF selects the Faire connection from the active sales order.
@@ -175,8 +187,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 	requestJSON = requestJSON & """requestId"":""" & EscapeJSON(requestID) & ""","
 	requestJSON = requestJSON & """source"":{""companyCode"":""" & EscapeJSON(oSession.CompanyCode) & """,""workstation"":""" & EscapeJSON(oSession.WorkstationName) & """},"
 	requestJSON = requestJSON & Chr(34) & "document" & Chr(34) & ":{"
-	requestJSON = requestJSON & """salesOrderNo"":""" & EscapeJSON(sSalesOrderNo) & ""","
-	requestJSON = requestJSON & """invoiceNo"":""" & EscapeJSON(sInvoiceNo) & ""","
+	requestJSON = requestJSON & """salesOrderNo"":""" & EscapeJSON(salesOrderNo) & ""","
+	requestJSON = requestJSON & """invoiceNo"":""" & EscapeJSON(invoiceNo) & ""","
 	requestJSON = requestJSON & """faireDisplayId"":""" & EscapeJSON(sFaireDisplayID) & ""","
 	requestJSON = requestJSON & """salesSource"":""" & EscapeJSON(sSalesSource) & ""","
 	requestJSON = requestJSON & """shipVia"":""" & EscapeJSON(sShipVia) & ""","
@@ -212,6 +224,10 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		If Not TryGetRequiredString(oLine, "LineKey$", "the Sage line key", sLineKey, errorMessage) Then Exit Function
 		If Not TryGetRequiredString(oLine, "ItemCode$", "the Sage item code", sItemCode, errorMessage) Then Exit Function
 		Call TryGetOptionalString(oLine, "ItemType$", sItemType)
+		If nQuantityShipped > 0 And Trim(sItemType) = "" Then
+			errorMessage = "Unable to read the item type for shipped Sage item '" & sItemCode & "'. Package tracking requires ItemType$."
+			Exit Function
+		End If
 		Call TryGetOptionalString(oLine, "ItemCodeDesc$", sItemDescription)
 		Call TryGetOptionalString(oLine, "SalesKitLineKey$", sSalesKitLineKey)
 		Call TryGetOptionalString(oLine, "ExplodedKitItem$", sExplodedKitItem)
@@ -263,6 +279,24 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		SendFulfillmentRequest = True
 	End Function
 
+	' SendFulfillmentAcknowledgement posts Sage's final writeback state through the
+	' same temporary listener. It never includes arbitrary Sage data or credentials.
+	Function SendFulfillmentAcknowledgement(requestID, acknowledgementStatus)
+		SendFulfillmentAcknowledgement = False
+		On Error Resume Next
+		Err.Clear
+		Set acknowledgementHttp = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+		acknowledgementHttp.setTimeouts HTTP_RESOLVE_TIMEOUT_MS, HTTP_CONNECT_TIMEOUT_MS, HTTP_SEND_TIMEOUT_MS, HTTP_SEND_TIMEOUT_MS
+		acknowledgementHttp.Open "POST", GetFulfillmentAckURL(), False
+		acknowledgementHttp.setRequestHeader "Content-Type", "application/json; charset=utf-8"
+		acknowledgementJSON = "{""protocolVersion"":" & FAIRE_PROTOCOL_VERSION & ",""requestId"":""" & EscapeJSON(requestID) & """,""status"":""" & EscapeJSON(acknowledgementStatus) & """}"
+		acknowledgementHttp.Send UTF8Bytes(acknowledgementJSON)
+		SendFulfillmentAcknowledgement = (Err.Number = 0 And acknowledgementHttp.status = 204)
+		Err.Clear
+		Set acknowledgementHttp = Nothing
+		On Error GoTo 0
+	End Function
+
 	' ReadFulfillmentResult parses the completed HTTP response and permits only the
 	' documented fields for later validated Sage writeback. trackingRecords and
 	' packageRecords are Scripting.Dictionary instances containing typed array values.
@@ -311,7 +345,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		sValue = fields(1)
 		Select Case sFieldName
 			Case "REQUESTID"
-				responseRequestID = sValue
+				responseRequestID = CanonicalProtocolRequestID(sValue)
 			Case "STATUS"
 				status = UCase(Trim(sValue))
 				If status <> "COMPLETED" And status <> "CANCELLED" And status <> "FAILED" Then
@@ -331,11 +365,11 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 				trackingRecords.Add CStr(trackingRecords.Count), Array(Trim(values(0)), Trim(values(1)))
 			Case "PACKAGEITEM"
 				values = Split(sValue, "|")
-				If UBound(values) <> 2 Or Trim(values(0)) = "" Or Trim(values(1)) = "" Or Not IsNumeric(Trim(values(2))) Then
+				If UBound(values) <> 3 Or Trim(values(0)) = "" Or Trim(values(1)) = "" Or Trim(values(2)) = "" Or Not IsNumeric(Trim(values(3))) Then
 					errorMessage = "Faire GUI returned invalid package item data."
 					Exit Function
 				End If
-				packageRecords.Add CStr(packageRecords.Count), Array(Trim(values(0)), Trim(values(1)), CSng(Trim(values(2))))
+				packageRecords.Add CStr(packageRecords.Count), Array(Trim(values(0)), Trim(values(1)), Trim(values(2)), CSng(Trim(values(3))))
 			Case "FREIGHTAMOUNT"
 				If Not IsNumeric(Trim(sValue)) Then
 					errorMessage = "Faire GUI returned an invalid freight amount."
@@ -354,37 +388,39 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 
 	' ValidateFulfillmentResult confirms that the completed result belongs to this active
 	' Sage transaction before any tracking, package, or freight data is applied.
-	Function ValidateFulfillmentResult(expectedRequestID, responseRequestID, responseSalesOrderNo, responseInvoiceNo, ByRef errorMessage)
+	' ValidateFulfillmentResult compares the final response against explicit Main-scope document values. Script Link procedure-local variables are not reliably visible inside helper functions, so no writeback identity depends on ambient variables.
+	Function ValidateFulfillmentResult(expectedRequestID, expectedSalesOrderNo, expectedInvoiceNo, responseRequestID, responseSalesOrderNo, responseInvoiceNo, ByRef errorMessage)
 		ValidateFulfillmentResult = False
+		expectedRequestID = CanonicalProtocolRequestID(expectedRequestID)
+		responseRequestID = CanonicalProtocolRequestID(responseRequestID)
 		If responseRequestID <> expectedRequestID Then
-			errorMessage = "The Faire result belongs to a different fulfillment request and was not applied."
+			errorMessage = "The Faire result belongs to a different fulfillment request and was not applied. Expected request " & expectedRequestID & "; received request " & responseRequestID & "."
 			Exit Function
 		End If
-		If responseSalesOrderNo <> sSalesOrderNo Or responseInvoiceNo <> sInvoiceNo Then
-			errorMessage = "The Faire result does not match the active Sage sales order and invoice."
+		If responseSalesOrderNo <> expectedSalesOrderNo Or responseInvoiceNo <> expectedInvoiceNo Then
+			errorMessage = "The Faire result does not match the active Sage sales order and invoice. Expected sales order '" & expectedSalesOrderNo & "' and invoice '" & expectedInvoiceNo & "'; received sales order '" & responseSalesOrderNo & "' and invoice '" & responseInvoiceNo & "'."
 			Exit Function
 		End If
 		ValidateFulfillmentResult = True
 	End Function
 
-	' ApplyFulfillmentResult replaces existing Sage tracking/package records and optionally
-	' updates freight after the typed Faire result has passed identity validation.
-	Function ApplyFulfillmentResult(trackingRecords, packageRecords, hasFreightAmount, freightAmount, ByRef errorMessage)
+	' ApplyFulfillmentResult replaces invoiceNo's existing Sage tracking/package records and optionally updates freight after the typed Faire result has passed identity validation.
+	Function ApplyFulfillmentResult(invoiceNo, trackingRecords, packageRecords, hasFreightAmount, freightAmount, ByRef errorMessage)
 		ApplyFulfillmentResult = False
 		If trackingRecords.Count = 0 Then
 			errorMessage = "Faire completed without a tracking record, so Sage writeback was not applied."
 			Exit Function
 		End If
-		If Not RemoveExistingTrackingRecords(errorMessage) Then Exit Function
-		If Not RemoveExistingPackageRecords(errorMessage) Then Exit Function
+		If Not RemoveExistingTrackingRecords(invoiceNo, errorMessage) Then Exit Function
+		If Not RemoveExistingPackageRecords(invoiceNo, errorMessage) Then Exit Function
 
 		For Each recordKey In trackingRecords.Keys
 			record = trackingRecords.Item(recordKey)
-			If Not WriteTrackingRecord(record(0), record(1), errorMessage) Then Exit Function
+			If Not WriteTrackingRecord(invoiceNo, record(0), record(1), errorMessage) Then Exit Function
 		Next
 		For Each recordKey In packageRecords.Keys
 			record = packageRecords.Item(recordKey)
-			If Not WritePackageItemRecord(record(0), record(1), record(2), errorMessage) Then Exit Function
+			If Not WritePackageItemRecord(invoiceNo, record(0), record(1), record(2), record(3), errorMessage) Then Exit Function
 		Next
 		If hasFreightAmount Then
 			retVal = oUIObj.InvokeChange("FREIGHTAMT", CSng(freightAmount))
@@ -396,9 +432,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		ApplyFulfillmentResult = True
 	End Function
 
-	' RemoveExistingTrackingRecords clears the active invoice's tracking records because
-	' the approved business rule is to replace, rather than merge, existing records.
-	Function RemoveExistingTrackingRecords(ByRef errorMessage)
+	' RemoveExistingTrackingRecords clears invoiceNo's tracking records because the approved business rule is to replace, rather than merge, existing records.
+	Function RemoveExistingTrackingRecords(invoiceNo, ByRef errorMessage)
 		RemoveExistingTrackingRecords = False
 		hTracking = oSession.GetObject("SO_InvoiceTracking_bus")
 		If hTracking = 0 Then
@@ -406,7 +441,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 			Exit Function
 		End If
 		Set oTracking = oSession.AsObject(hTracking)
-		retVal = oTracking.RemoveTrackingRecords(sInvoiceNo)
+		retVal = oTracking.RemoveTrackingRecords(invoiceNo)
 		Set oTracking = Nothing
 		If retVal = 0 Then
 			errorMessage = "Sage could not remove existing invoice tracking records: " & oBusObj.LastErrorMsg
@@ -415,9 +450,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		RemoveExistingTrackingRecords = True
 	End Function
 
-	' RemoveExistingPackageRecords clears the active invoice's package allocations before
-	' the final result writes their replacement values.
-	Function RemoveExistingPackageRecords(ByRef errorMessage)
+	' RemoveExistingPackageRecords clears invoiceNo's package allocations before the final result writes their replacement values.
+	Function RemoveExistingPackageRecords(invoiceNo, ByRef errorMessage)
 		RemoveExistingPackageRecords = False
 		hPackageTracking = oSession.GetObject("SO_PackageTrackingByItem_bus")
 		If hPackageTracking = 0 Then
@@ -425,7 +459,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 			Exit Function
 		End If
 		Set oPackageTracking = oSession.AsObject(hPackageTracking)
-		retVal = oPackageTracking.RemoveRecords(sInvoiceNo)
+		retVal = oPackageTracking.RemoveRecords(invoiceNo)
 		Set oPackageTracking = Nothing
 		If retVal = 0 Then
 			errorMessage = "Sage could not remove existing package tracking records: " & oBusObj.LastErrorMsg
@@ -434,9 +468,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		RemoveExistingPackageRecords = True
 	End Function
 
-	' WriteTrackingRecord creates one invoice/package tracking row using the validated
-	' package number and tracking identifier returned by the Faire GUI.
-	Function WriteTrackingRecord(packageNo, trackingID, ByRef errorMessage)
+	' WriteTrackingRecord creates one invoiceNo/package tracking row using the validated package number and tracking identifier returned by the Faire GUI.
+	Function WriteTrackingRecord(invoiceNo, packageNo, trackingID, ByRef errorMessage)
 		WriteTrackingRecord = False
 		hTracking = oSession.GetObject("SO_InvoiceTracking_bus")
 		If hTracking = 0 Then
@@ -444,7 +477,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 			Exit Function
 		End If
 		Set oTracking = oSession.AsObject(hTracking)
-		retVal = oTracking.SetKeyValue("InvoiceNo$", sInvoiceNo)
+		retVal = oTracking.SetKeyValue("InvoiceNo$", invoiceNo)
 		retVal = oTracking.SetKeyValue("PackageNo$", packageNo)
 		retVal = oTracking.SetKey()
 		retVal = oTracking.SetValue("TrackingID$", trackingID)
@@ -457,9 +490,8 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		WriteTrackingRecord = True
 	End Function
 
-	' WritePackageItemRecord creates or merges one item allocation for a package. Existing
-	' quantities are added because multiple Faire package lines can reference one Sage item.
-	Function WritePackageItemRecord(packageNo, itemCode, quantity, ByRef errorMessage)
+	' WritePackageItemRecord creates or merges one invoiceNo itemType allocation for a package. Existing quantities are added because multiple Faire package lines can reference one Sage item.
+	Function WritePackageItemRecord(invoiceNo, packageNo, itemCode, itemType, quantity, ByRef errorMessage)
 		WritePackageItemRecord = False
 		hPackageTracking = oSession.GetObject("SO_PackageTrackingByItem_bus")
 		If hPackageTracking = 0 Then
@@ -467,22 +499,50 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 			Exit Function
 		End If
 		Set oPackageTracking = oSession.AsObject(hPackageTracking)
-		retVal = oPackageTracking.SetKeyValue("InvoiceNo$", sInvoiceNo)
+		retVal = oPackageTracking.SetKeyValue("InvoiceNo$", invoiceNo)
+		If retVal = 0 Then
+			errorMessage = "Sage rejected package tracking invoice '" & invoiceNo & "' for item '" & itemCode & "': " & oPackageTracking.LastErrorMsg
+			Set oPackageTracking = Nothing
+			Exit Function
+		End If
 		retVal = oPackageTracking.SetKeyValue("PackageNo$", packageNo)
+		If retVal = 0 Then
+			errorMessage = "Sage rejected package number '" & packageNo & "' for invoice '" & invoiceNo & "': " & oPackageTracking.LastErrorMsg
+			Set oPackageTracking = Nothing
+			Exit Function
+		End If
 		retVal = oPackageTracking.SetKeyValue("ItemCode$", itemCode)
+		If retVal = 0 Then
+			errorMessage = "Sage rejected package item code '" & itemCode & "' for invoice '" & invoiceNo & "': " & oPackageTracking.LastErrorMsg
+			Set oPackageTracking = Nothing
+			Exit Function
+		End If
 		retVal = oPackageTracking.SetKey()
 		If retVal = 1 Then
 			retVal = oPackageTracking.GetValue("Quantity", nExistingQuantity)
+			If retVal = 0 Then
+				errorMessage = "Sage could not read existing package quantity for item '" & itemCode & "' in package '" & packageNo & "': " & oPackageTracking.LastErrorMsg
+				Set oPackageTracking = Nothing
+				Exit Function
+			End If
 		Else
 			nExistingQuantity = 0
 		End If
-		retVal = oPackageTracking.SetValue("Quantity", CSng(nExistingQuantity) + CSng(quantity))
-		If retVal <> 0 Then retVal = oPackageTracking.Write()
-		Set oPackageTracking = Nothing
+		' Sage reports ItemType$ is not part of this business object's key, so set it only after locating or creating the keyed record.
+		retVal = oPackageTracking.SetValue("ItemType$", itemType)
 		If retVal = 0 Then
-			errorMessage = "Sage could not write package item '" & itemCode & "': " & oBusObj.LastErrorMsg
+			errorMessage = "Sage rejected package item type '" & itemType & "' for item '" & itemCode & "': " & oPackageTracking.LastErrorMsg
+			Set oPackageTracking = Nothing
 			Exit Function
 		End If
+		retVal = oPackageTracking.SetValue("Quantity", CSng(nExistingQuantity) + CSng(quantity))
+		If retVal <> 0 Then retVal = oPackageTracking.Write()
+		If retVal = 0 Then
+			errorMessage = "Sage could not write package item '" & itemCode & "' in invoice '" & invoiceNo & "', package '" & packageNo & "', quantity '" & CStr(quantity) & "': " & oPackageTracking.LastErrorMsg
+			Set oPackageTracking = Nothing
+			Exit Function
+		End If
+		Set oPackageTracking = Nothing
 		WritePackageItemRecord = True
 	End Function
 
@@ -556,6 +616,11 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 		GetFulfillmentURL = "http://" & FAIRE_GUI_WORKSTATION & ":" & CStr(FAIRE_HTTP_PORT) & FAIRE_HTTP_PATH
 	End Function
 
+	' GetFulfillmentAckURL returns the narrow post-writeback acknowledgement endpoint.
+	Function GetFulfillmentAckURL()
+		GetFulfillmentAckURL = "http://" & FAIRE_GUI_WORKSTATION & ":" & CStr(FAIRE_HTTP_PORT) & FAIRE_HTTP_ACK_PATH
+	End Function
+
 	' CreateRequestID returns a GUID-based identifier so the GUI can persist and replay one
 	' fulfillment result without accidentally repeating an irreversible Faire operation.
 	Function CreateRequestID()
@@ -571,6 +636,20 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef errorMessag
 			CreateRequestID = oSession.WorkstationName & "-" & Replace(CStr(Now), "/", "-") & "-" & Replace(CStr(Timer), ".", "-") & "-" & CStr(Int(Rnd() * 1000000))
 		End If
 		On Error GoTo 0
+	End Function
+
+	' CanonicalProtocolRequestID retains only the ASCII letters, digits, and hyphens allowed by the protocol. Sage fixed-width values can carry non-breaking spaces or control padding that Trim does not remove, but no such character is valid in a locally generated request ID.
+	Function CanonicalProtocolRequestID(value)
+		sInput = CStr(value)
+		sCanonical = ""
+		For nIndex = 1 To Len(sInput)
+			sCharacter = Mid(sInput, nIndex, 1)
+			nCharacter = AscW(sCharacter)
+			If (nCharacter >= 48 And nCharacter <= 57) Or (nCharacter >= 65 And nCharacter <= 90) Or (nCharacter >= 97 And nCharacter <= 122) Or nCharacter = 45 Then
+				sCanonical = sCanonical & sCharacter
+			End If
+		Next
+		CanonicalProtocolRequestID = sCanonical
 	End Function
 
 	' EscapeJSON returns a JSON string value with quote, slash, and control characters
