@@ -40,7 +40,7 @@ Const HTTP_STATUS_OK = 200
 Const HTTP_RESOLVE_TIMEOUT_MS = 5000
 Const HTTP_CONNECT_TIMEOUT_MS = 5000
 Const HTTP_SEND_TIMEOUT_MS = 15000
-Const HTTP_RECEIVE_TIMEOUT_MS = 300000
+Const HTTP_RECEIVE_TIMEOUT_MS = 600000
 ' ADODB stream constants produce a UTF-8 byte array for ServerXMLHTTP instead of
 ' allowing it to serialize the VBScript string as UTF-16 BSTR text.
 Const ADO_TYPE_BINARY = 1
@@ -70,7 +70,7 @@ Sub Main
 	End If
 
 	Set fulfillmentHttp = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-	If Not SendFulfillmentRequest(fulfillmentHttp, sRequestJSON, sError) Then
+	If Not SendFulfillmentRequest(fulfillmentHttp, oUI, sRequestJSON, sError) Then
 		retMsg = oUI.MessageBox("", sError, "Icon=Exclamation, Title=Faire GUI Not Running, Style=OK")
 		Exit Sub
 	End If
@@ -245,36 +245,65 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef salesOrderN
 		BuildFulfillmentLine = True
 	End Function
 
-	' SendFulfillmentRequest posts the UTF-8 JSON document through ServerXMLHTTP with
-	' explicit timeouts so a network outage cannot indefinitely freeze Sage's UI.
-	Function SendFulfillmentRequest(httpRequest, requestJSON, ByRef errorMessage)
+	' SendFulfillmentRequest posts UTF-8 JSON asynchronously through ServerXMLHTTP while periodically refreshing Sage's native progress dialog. waitForResponse(1) bounds each COM wait to one second, allowing the script host watchdog to observe UI activity during operator review.
+	Function SendFulfillmentRequest(httpRequest, uiObject, requestJSON, ByRef errorMessage)
 		SendFulfillmentRequest = False
 		errorMessage = ""
 		On Error Resume Next
 		Err.Clear
 		httpRequest.setTimeouts HTTP_RESOLVE_TIMEOUT_MS, HTTP_CONNECT_TIMEOUT_MS, HTTP_SEND_TIMEOUT_MS, HTTP_RECEIVE_TIMEOUT_MS
-		httpRequest.Open "POST", GetFulfillmentURL(), False
+		httpRequest.Open "POST", GetFulfillmentURL(), True
 		httpRequest.setRequestHeader "Content-Type", "application/json; charset=utf-8"
 		requestBody = UTF8Bytes(requestJSON)
+		retVal = uiObject.ProgressBar("init", "Faire fulfillment", "Waiting for Faire GUI review. Do not change this shipment in Sage.", 0, "")
+		progressOpen = (Err.Number = 0)
+		Err.Clear
 		httpRequest.Send requestBody
 		If Err.Number <> 0 Then
-			' Capture the COM error before clearing Err so timeout and firewall failures are actionable.
 			nHttpError = Err.Number
 			sHttpErrorDescription = Err.Description
+			If progressOpen Then retVal = uiObject.ProgressBar("close", "Faire fulfillment", "", 0, "")
 			errorMessage = "Unable to connect to the Faire GUI on workstation '" & FAIRE_GUI_WORKSTATION & "'. Error " & CStr(nHttpError)
 			If sHttpErrorDescription <> "" Then errorMessage = errorMessage & ": " & sHttpErrorDescription
 			Err.Clear
 			On Error GoTo 0
 			Exit Function
 		End If
+
+		progressPercent = 0
+		waitSeconds = 0
+		Do While httpRequest.readyState <> 4
+			' MSXML ServerXMLHTTP waits at most one second here; the following ProgressBar update is deliberately repeated so Sage does not treat an operator review as a stalled script.
+			Err.Clear
+			retVal = httpRequest.waitForResponse(1)
+			If Err.Number <> 0 Then
+				nHttpError = Err.Number
+				sHttpErrorDescription = Err.Description
+				If progressOpen Then retVal = uiObject.ProgressBar("close", "Faire fulfillment", "", 0, "")
+				errorMessage = "Faire GUI did not complete the fulfillment request. Error " & CStr(nHttpError)
+				If sHttpErrorDescription <> "" Then errorMessage = errorMessage & ": " & sHttpErrorDescription
+				Err.Clear
+				On Error GoTo 0
+				Exit Function
+			End If
+			waitSeconds = waitSeconds + 1
+			progressPercent = (progressPercent + 5) Mod 100
+			If progressOpen Then retVal = uiObject.ProgressBar("update", "Faire fulfillment", "Waiting for Faire GUI review (" & CStr(waitSeconds) & " seconds). Do not change this shipment in Sage.", progressPercent, "")
+			' A ProgressBar rendering problem must not be mistaken for an HTTP failure on the next polling cycle.
+			Err.Clear
+		Loop
+
+		If progressOpen Then retVal = uiObject.ProgressBar("update", "Faire fulfillment", "Writing tracking and freight to Sage...", 100, "")
 		If httpRequest.status <> HTTP_STATUS_OK Then
 			sHttpResponse = Trim(httpRequest.responseText)
+			If progressOpen Then retVal = uiObject.ProgressBar("close", "Faire fulfillment", "", 0, "")
 			errorMessage = "Faire GUI returned HTTP status " & CStr(httpRequest.status)
 			If sHttpResponse <> "" Then errorMessage = errorMessage & ": " & sHttpResponse
 			errorMessage = errorMessage & ". No Sage shipment data was changed."
 			On Error GoTo 0
 			Exit Function
 		End If
+		If progressOpen Then retVal = uiObject.ProgressBar("close", "Faire fulfillment", "", 0, "")
 		On Error GoTo 0
 		SendFulfillmentRequest = True
 	End Function

@@ -24,8 +24,8 @@ const (
 	sageFulfillmentHTTPAllowedHost = "192.168.128.10"
 	// maxSageFulfillmentHTTPBytes prevents an untrusted or malformed request from consuming excessive memory.
 	maxSageFulfillmentHTTPBytes = 1024 * 1024
-	// sageFulfillmentHTTPWriteTimeout exceeds Sage's five-minute receive timeout to allow its cancellation to reach the handler first.
-	sageFulfillmentHTTPWriteTimeout = 6 * time.Minute
+	// sageFulfillmentHTTPWriteTimeout exceeds Sage's ten-minute receive timeout so Sage reaches its defined operator-review limit before the listener closes the pending response.
+	sageFulfillmentHTTPWriteTimeout = 11 * time.Minute
 )
 
 // serveSageFulfillmentHTTP accepts temporary, firewall-restricted HTTP requests from BSDC01 and publishes validated work to the UI dispatcher.
