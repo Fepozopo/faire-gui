@@ -447,25 +447,35 @@ func (ui *DesktopUI) drainOrderResults() {
 	ui.openSageFulfillmentOrderDetail()
 }
 
-// openSageFulfillmentOrderDetail opens the requested order's detail page only after the search worker has loaded and persisted its row.
-// Waiting for the row avoids a detail lookup racing the direct Faire fetch when an order is absent from the local store.
+// openSageFulfillmentOrderDetail fetches the requested Faire order directly before showing Sage fulfillment controls. It deliberately bypasses the local search snapshot so an existing shipment cannot be missed when the Sage workflow decides whether fulfillment may proceed.
 func (ui *DesktopUI) openSageFulfillmentOrderDetail() {
 	session := ui.sageFulfillment
-	if session == nil || ui.orders.view.state.Loading || (ui.orders.view.orderDetailOpen && ui.orders.view.orderDetailID == session.orderID) {
+	if session == nil || session.detailRefreshRequested || ui.orders.view.orderDetailLoading {
 		return
 	}
-	for _, row := range ui.orders.view.state.Rows {
-		if row.ID != session.orderID {
-			continue
-		}
-		session.status = "Opening Faire order details from Sage Shipping Data Entry…"
-		ui.openOrder(session.orderID)
-		ui.invalidate()
+	if ui.activeConnectionID == "" || ui.orders.store == nil || ui.manager == nil {
+		ui.finishSageFulfillmentSession(sageFulfillmentFailure(session.request, "Faire could not refresh the requested order because its active saved connection is unavailable."))
 		return
 	}
-	if ui.orders.view.searchActive && ui.orders.view.state.Status != "" {
-		ui.finishSageFulfillmentSession(sageFulfillmentFailure(session.request, "Faire could not open the requested order. "+ui.orders.view.state.Status))
-	}
+	ui.orders.detailRequestID++
+	requestID := ui.orders.detailRequestID
+	connectionID, orderID := ui.activeConnectionID, session.orderID
+	ui.orders.view.orderDetailOpen, ui.orders.view.orderDetailLoading = true, true
+	ui.orders.view.orderDetailID, ui.orders.view.orderDetailConnectionID = orderID, connectionID
+	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.shipmentSubmitting = false
+	ui.orders.view.availabilitySubmitting = false
+	ui.orders.view.resetPendingUnavailable()
+	ui.orders.view.resetShipmentForm()
+	ui.orders.view.detailList.Position.First = 0
+	ui.orders.view.detailList.Position.Offset = 0
+	ui.orders.view.orderDetailStatus = "Refreshing Sage-requested order details from Faire…"
+	session.detailRefreshRequested = true
+	session.status = "Refreshing Faire order details from Sage Shipping Data Entry…"
+	ui.orders.startWorker(func() {
+		ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
+	})
+	ui.invalidate()
 }
 
 // historyBoundaryInput converts a stored RFC 3339 historical boundary into the Orders date editor's local calendar input.

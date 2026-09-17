@@ -153,6 +153,7 @@ type sageFulfillmentSession struct {
 	preselectionApplied     bool
 	availabilityRequired    bool
 	availabilityConfirmed   bool
+	detailRefreshRequested  bool
 	submittedShipments      []sageExternalShipment
 	cancelButton            widget.Clickable
 	simulateLabelButton     widget.Clickable
@@ -495,7 +496,7 @@ func (ui *DesktopUI) openSageFulfillmentSession(inbound sageFulfillmentInbound) 
 		state:                 record.State,
 		availabilityConfirmed: record.State == sageFulfillmentStateShipmentReady || record.State == sageFulfillmentStateShipmentPending,
 		submittedShipments:    record.ExternalShipments,
-		status:                "Opening Faire order " + displayID + " from Sage Shipping Data Entry…",
+		status:                "Refreshing Faire order " + displayID + " from Sage Shipping Data Entry…",
 	}
 	if ui.window != nil {
 		// Gio delegates foreground policy to Windows; ActionRaise is best effort when another app owns focus.
@@ -504,9 +505,7 @@ func (ui *DesktopUI) openSageFulfillmentSession(inbound sageFulfillmentInbound) 
 	if ui.activeConnectionID != connection.ID {
 		ui.setActiveConnection(connection)
 	}
-	ui.orders.view.search.SetText(displayID)
-	ui.loadOrderByDisplayID()
-	ui.invalidate()
+	ui.openSageFulfillmentOrderDetail()
 }
 
 // connectionForSageSalesSource reverses the existing brand-to-sales-source policy for saved, credential-free connections.
