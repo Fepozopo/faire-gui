@@ -276,14 +276,6 @@ Each rule should express:
 
 Do not treat EasyPost service strings as permanent Faire API values. Values such as `FEDEX_GROUND`, `GroundAdvantage`, and `3DaySelect` must be mapped to Faire-supported values only after Faire documents its API.
 
-### 3.5 SSK settings: `sage/AppSettings.json`
-
-Do not copy this file into the new integration.
-
-It contains legacy provider settings and sensitive sage/license configuration. Extract only intentional, non-secret business settings into a new application configuration model. Keep credentials and API secrets out of tracked JSON files and in the application’s secure local configuration/storage.
-
-If this configuration has been shared beyond the intended trusted team, treat existing credentials and license material as candidates for rotation.
-
 ---
 
 ## 4. Target architecture
