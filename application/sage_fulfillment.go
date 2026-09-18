@@ -2,7 +2,7 @@ package application
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"strings"
@@ -177,9 +177,7 @@ type sageFulfillmentRecovery struct {
 // parseSageFulfillmentRequest decodes and validates the narrow protocol-v1 request before it reaches UI state.
 func parseSageFulfillmentRequest(payload []byte) (sageFulfillmentRequest, error) {
 	var request sageFulfillmentRequest
-	decoder := json.NewDecoder(strings.NewReader(string(payload)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	if err := json.Unmarshal(payload, &request, json.RejectUnknownMembers(true)); err != nil {
 		return sageFulfillmentRequest{}, fmt.Errorf("invalid Sage fulfillment request: %w", err)
 	}
 	if request.ProtocolVersion != sageFulfillmentProtocolVersion {

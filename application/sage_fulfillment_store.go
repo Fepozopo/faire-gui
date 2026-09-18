@@ -1,7 +1,7 @@
 package application
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -88,7 +88,7 @@ func loadSageFulfillmentStoreFile(path string, now time.Time) (*sageFulfillmentS
 	defer file.Close()
 
 	var document sageFulfillmentStoreDocument
-	if err := json.NewDecoder(file).Decode(&document); err != nil {
+	if err := json.UnmarshalRead(file, &document); err != nil {
 		return nil, fmt.Errorf("decode Sage fulfillment recovery data: %w", err)
 	}
 
@@ -301,7 +301,7 @@ func (store *sageFulfillmentStore) saveLocked() error {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("secure temporary Sage fulfillment recovery data: %w", err)
 	}
-	if err := json.NewEncoder(temporaryFile).Encode(sageFulfillmentStoreDocument{Version: sageFulfillmentStoreVersion, Current: store.current}); err != nil {
+	if err := json.MarshalWrite(temporaryFile, sageFulfillmentStoreDocument{Version: sageFulfillmentStoreVersion, Current: store.current}); err != nil {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("encode Sage fulfillment recovery data: %w", err)
 	}

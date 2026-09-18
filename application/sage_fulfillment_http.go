@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net"
@@ -151,9 +151,7 @@ func handleSageFulfillmentHTTPAcknowledgement(response http.ResponseWriter, payl
 		return
 	}
 	var acknowledgement sageFulfillmentHTTPAcknowledgement
-	decoder := json.NewDecoder(strings.NewReader(string(payload)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&acknowledgement); err != nil || acknowledgement.ProtocolVersion != sageFulfillmentProtocolVersion || !safeSageRequestID(acknowledgement.RequestID) || (acknowledgement.Status != sageWritebackApplied && acknowledgement.Status != sageWritebackFailed) {
+	if err := json.Unmarshal(payload, &acknowledgement, json.RejectUnknownMembers(true)); err != nil || acknowledgement.ProtocolVersion != sageFulfillmentProtocolVersion || !safeSageRequestID(acknowledgement.RequestID) || (acknowledgement.Status != sageWritebackApplied && acknowledgement.Status != sageWritebackFailed) {
 		http.Error(response, "Sage fulfillment acknowledgement is invalid.", http.StatusBadRequest)
 		return
 	}

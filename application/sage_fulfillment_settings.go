@@ -1,7 +1,7 @@
 package application
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -51,7 +51,7 @@ func loadSageFulfillmentSettingsFile(path string) (bool, error) {
 	defer file.Close()
 
 	var settings sageFulfillmentSettings
-	if err := json.NewDecoder(file).Decode(&settings); err != nil {
+	if err := json.UnmarshalRead(file, &settings); err != nil {
 		return false, fmt.Errorf("decode settings: %w", err)
 	}
 	if settings.Version != sageFulfillmentSettingsVersion {
@@ -86,7 +86,7 @@ func saveSageFulfillmentSettingsFile(path string, enabled bool) error {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("secure temporary settings: %w", err)
 	}
-	if err := json.NewEncoder(temporaryFile).Encode(sageFulfillmentSettings{Version: sageFulfillmentSettingsVersion, Enabled: enabled}); err != nil {
+	if err := json.MarshalWrite(temporaryFile, sageFulfillmentSettings{Version: sageFulfillmentSettingsVersion, Enabled: enabled}); err != nil {
 		_ = temporaryFile.Close()
 		return fmt.Errorf("encode settings: %w", err)
 	}
