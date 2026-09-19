@@ -22,14 +22,21 @@ func TestOrderIDFromDisplayID(t *testing.T) {
 func TestDisplayIDFromOrderID(t *testing.T) {
 	t.Parallel()
 
-	for orderID, want := range map[faire.OrderID]string{
-		"bo_83bavnwg8v": "83BAVNWG8V",
-		"BO_83bavnwg8v": "83BAVNWG8V",
-		"83bavnwg8v":    "83BAVNWG8V",
-	} {
-		if got := DisplayIDFromOrderID(orderID); got != want {
-			t.Errorf("DisplayIDFromOrderID(%q) = %q, want %q", orderID, got, want)
-		}
+	tests := []struct {
+		name    string
+		orderID faire.OrderID
+		want    string
+	}{
+		{name: "lowercase API prefix", orderID: "bo_83bavnwg8v", want: "83BAVNWG8V"},
+		{name: "uppercase API prefix", orderID: "BO_83bavnwg8v", want: "83BAVNWG8V"},
+		{name: "display ID without prefix", orderID: "83bavnwg8v", want: "83BAVNWG8V"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := DisplayIDFromOrderID(test.orderID); got != test.want {
+				t.Fatalf("DisplayIDFromOrderID(%q) = %q, want %q", test.orderID, got, test.want)
+			}
+		})
 	}
 }
 

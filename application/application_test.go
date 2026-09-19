@@ -127,7 +127,6 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 }
 
-// TestNavigationHighlightUsesSettingsSurface verifies selected and hovered sidebar entries share Settings' light-gray surface.
 // TestOpenTrackingURLUsesInjectedBrowserOpener verifies tracking clicks invoke the browser only for a resolved URL and report a safe failure message.
 func TestOpenTrackingURLUsesInjectedBrowserOpener(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
@@ -440,6 +439,13 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(contents), "id,display_id,created_at") {
 		t.Fatalf("CSV = %q, want CSV header", contents)
+	}
+	info, err := os.Stat(filepath.Join(directory, filename))
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("CSV mode = %o, want 600 to keep exports private", got)
 	}
 }
 

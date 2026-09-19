@@ -21,18 +21,24 @@ func TestNormalizeDateFilterUsesRequestedLocalDay(t *testing.T) {
 	t.Parallel()
 
 	location := time.FixedZone("UTC-05", -5*60*60)
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation() error = %v", err)
+	}
 	for _, test := range []struct {
 		name     string
 		value    string
 		endOfDay bool
+		location *time.Location
 		want     string
 	}{
-		{name: "start of day", value: "03/21/2026", want: "2026-03-21T00:00:00-05:00"},
-		{name: "end of day", value: "3/21/2026", endOfDay: true, want: "2026-03-21T23:59:59-05:00"},
-		{name: "blank", value: "  ", want: ""},
+		{name: "start of day", value: "03/21/2026", location: location, want: "2026-03-21T00:00:00-05:00"},
+		{name: "end of day", value: "3/21/2026", endOfDay: true, location: location, want: "2026-03-21T23:59:59-05:00"},
+		{name: "spring daylight-saving end of day", value: "03/08/2026", endOfDay: true, location: newYork, want: "2026-03-08T23:59:59-04:00"},
+		{name: "blank", value: "  ", location: location, want: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := NormalizeDateFilter(test.value, test.endOfDay, location)
+			got, err := NormalizeDateFilter(test.value, test.endOfDay, test.location)
 			if err != nil {
 				t.Fatalf("NormalizeDateFilter() error = %v", err)
 			}

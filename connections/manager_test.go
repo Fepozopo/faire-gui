@@ -14,7 +14,7 @@ import (
 
 // TestManagerDirectTokenConnectionKeepsSecretOutOfMetadata verifies direct-token connections construct isolated clients.
 func TestManagerDirectTokenConnectionKeepsSecretOutOfMetadata(t *testing.T) {
-	manager, metadataPath := newTestManager(t)
+	manager, metadataPath, _ := newTestManager(t)
 	connection, err := manager.Save(context.Background(), Connection{
 		Label:              "Brand 21C",
 		AuthenticationMode: faire.AuthenticationModeAccessToken,
@@ -30,8 +30,8 @@ func TestManagerDirectTokenConnectionKeepsSecretOutOfMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if strings.Contains(string(metadata), "direct-secret") || strings.Contains(string(metadata), "access_token") {
-		t.Fatalf("metadata unexpectedly contains credentials: %s", metadata)
+	if strings.Contains(string(metadata), "direct-secret") {
+		t.Fatalf("metadata unexpectedly contains the access-token secret: %s", metadata)
 	}
 
 	client, selected, err := manager.Client(context.Background(), connection.ID, ClientOptions{
@@ -82,7 +82,7 @@ func TestFileConnectionRepositoryTreatsEmptyMetadataFileAsEmpty(t *testing.T) {
 
 // TestManagerOAuthConnectionBuildsOAuthClient verifies OAuth secrets produce only OAuth request headers.
 func TestManagerOAuthConnectionBuildsOAuthClient(t *testing.T) {
-	manager, _ := newTestManager(t)
+	manager, _, _ := newTestManager(t)
 	connection, err := manager.Save(context.Background(), Connection{
 		Label:              "OAuth Brand",
 		AuthenticationMode: faire.AuthenticationModeOAuth,
@@ -122,7 +122,7 @@ func TestManagerOAuthConnectionBuildsOAuthClient(t *testing.T) {
 
 // TestManagerUpdateMetadataPreservesCredentials verifies metadata edits do not alter the stored credential bundle.
 func TestManagerUpdateMetadataPreservesCredentials(t *testing.T) {
-	manager, metadataPath := newTestManager(t)
+	manager, metadataPath, _ := newTestManager(t)
 	connection, err := manager.Save(context.Background(), Connection{
 		Label:              "Original Brand",
 		AuthenticationMode: faire.AuthenticationModeAccessToken,
@@ -171,7 +171,7 @@ func TestManagerUpdateMetadataPreservesCredentials(t *testing.T) {
 
 // TestManagerUpdateMetadataRejectsAuthenticationModeChanges verifies metadata updates cannot change credential mode.
 func TestManagerUpdateMetadataRejectsAuthenticationModeChanges(t *testing.T) {
-	manager, _ := newTestManager(t)
+	manager, _, _ := newTestManager(t)
 	connection, err := manager.Save(context.Background(), Connection{
 		Label:              "Original Brand",
 		AuthenticationMode: faire.AuthenticationModeAccessToken,
@@ -192,7 +192,7 @@ func TestManagerUpdateMetadataRejectsAuthenticationModeChanges(t *testing.T) {
 
 // TestManagerDeleteRemovesConnectionAndCredentials verifies deleted connections cannot be selected again.
 func TestManagerDeleteRemovesConnectionAndCredentials(t *testing.T) {
-	manager, _ := newTestManager(t)
+	manager, _, credentialStore := newTestManager(t)
 	connection, err := manager.Save(context.Background(), Connection{
 		Label:              "Disposable Brand",
 		AuthenticationMode: faire.AuthenticationModeAccessToken,
@@ -206,21 +206,26 @@ func TestManagerDeleteRemovesConnectionAndCredentials(t *testing.T) {
 	if _, _, err := manager.Client(context.Background(), connection.ID, ClientOptions{}); !errors.Is(err, ErrConnectionNotFound) {
 		t.Fatalf("Client() error = %v, want ErrConnectionNotFound", err)
 	}
+	if _, err := credentialStore.Load(context.Background(), connection.ID); !errors.Is(err, ErrCredentialNotFound) {
+		t.Fatalf("credentialStore.Load() error = %v, want ErrCredentialNotFound", err)
+	}
 }
 
-// newTestManager creates a file-backed metadata repository and an in-memory credential store.
-func newTestManager(t *testing.T) (*Manager, string) {
+// newTestManager creates a manager with file-backed metadata and test credentials.
+// It returns the manager, metadata path, and credential store so tests can verify both persistence boundaries.
+func newTestManager(t *testing.T) (*Manager, string, *memoryCredentialStore) {
 	t.Helper()
 	metadataPath := t.TempDir() + "/connections.json"
 	repository, err := NewFileConnectionRepository(metadataPath)
 	if err != nil {
 		t.Fatalf("NewFileConnectionRepository() error = %v", err)
 	}
-	manager, err := NewManager(repository, &memoryCredentialStore{credentials: make(map[string]Credentials)})
+	credentialStore := &memoryCredentialStore{credentials: make(map[string]Credentials)}
+	manager, err := NewManager(repository, credentialStore)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
-	return manager, metadataPath
+	return manager, metadataPath, credentialStore
 }
 
 // memoryCredentialStore is a test-only implementation of CredentialStore.

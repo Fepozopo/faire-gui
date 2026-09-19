@@ -16,18 +16,28 @@ func TestLoadSageFulfillmentSettingsFileDefaultsDisabled(t *testing.T) {
 	}
 }
 
-// TestSaveSageFulfillmentSettingsFileRoundTripsOptIn verifies the explicit opt-in survives application restart.
-func TestSaveSageFulfillmentSettingsFileRoundTripsOptIn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "sage-fulfillment-settings.json")
-	if err := saveSageFulfillmentSettingsFile(path, true); err != nil {
-		t.Fatalf("saveSageFulfillmentSettingsFile() error = %v", err)
-	}
+// TestSaveSageFulfillmentSettingsFileRoundTripsEnabledState verifies explicit opt-in and opt-out values both survive application restart.
+func TestSaveSageFulfillmentSettingsFileRoundTripsEnabledState(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "opt in", enabled: true},
+		{name: "opt out", enabled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "nested", "sage-fulfillment-settings.json")
+			if err := saveSageFulfillmentSettingsFile(path, test.enabled); err != nil {
+				t.Fatalf("saveSageFulfillmentSettingsFile() error = %v", err)
+			}
 
-	enabled, err := loadSageFulfillmentSettingsFile(path)
-	if err != nil {
-		t.Fatalf("loadSageFulfillmentSettingsFile() error = %v", err)
-	}
-	if !enabled {
-		t.Fatal("enabled = false, want persisted true opt-in")
+			enabled, err := loadSageFulfillmentSettingsFile(path)
+			if err != nil {
+				t.Fatalf("loadSageFulfillmentSettingsFile() error = %v", err)
+			}
+			if enabled != test.enabled {
+				t.Fatalf("enabled = %t, want persisted %t", enabled, test.enabled)
+			}
+		})
 	}
 }

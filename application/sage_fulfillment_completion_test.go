@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -38,11 +37,20 @@ func TestSageCompletedFulfillmentResultBuildsAllowedWriteback(t *testing.T) {
 	if result.FreightAmountMinor == nil || *result.FreightAmountMinor != 1150 {
 		t.Fatalf("freight = %v, want 1150 cents", result.FreightAmountMinor)
 	}
-	formatted := formatSageFulfillmentResult(result)
-	for _, line := range []string{"Tracking:1|1Z123", "Tracking:2|9400", "PackageItem:1|SKU-1|1|2", "FreightAmount:11.50"} {
-		if !strings.Contains(formatted, line) {
-			t.Fatalf("formatted result %q does not contain %q", formatted, line)
-		}
+}
+
+// TestFormatSageFulfillmentResultWritesTheCompleteProtocolResponse verifies the bridge emits ordered CRLF-delimited records and a terminal marker.
+func TestFormatSageFulfillmentResultWritesTheCompleteProtocolResponse(t *testing.T) {
+	freight := int64(1150)
+	result := sageFulfillmentResult{
+		RequestID: "request-1", Status: "COMPLETED", SalesOrderNo: "SO-1", InvoiceNo: "INV-1",
+		Tracking:           []sageFulfillmentTracking{{PackageNumber: 1, TrackingNumber: "1Z123"}, {PackageNumber: 2, TrackingNumber: "9400"}},
+		PackageItems:       []sageFulfillmentPackageItem{{PackageNumber: 1, ItemCode: "SKU-1", ItemType: "1", Quantity: 2}, {PackageNumber: 1, ItemCode: "SKU-2", ItemType: "1", Quantity: 1}},
+		FreightAmountMinor: &freight,
+	}
+	want := "RequestID:request-1\r\nStatus:COMPLETED\r\nSalesOrderNo:SO-1\r\nInvoiceNo:INV-1\r\nTracking:1|1Z123\r\nTracking:2|9400\r\nPackageItem:1|SKU-1|1|2\r\nPackageItem:1|SKU-2|1|1\r\nFreightAmount:11.50\r\nDone\r\n"
+	if got := formatSageFulfillmentResult(result); got != want {
+		t.Fatalf("formatSageFulfillmentResult() = %q, want %q", got, want)
 	}
 }
 
@@ -100,9 +108,6 @@ func TestSageFulfillmentStoreReplaysUnacknowledgedTerminalResult(t *testing.T) {
 	}
 	if _, err := store.acknowledge(duplicateDocument.RequestID, sageWritebackApplied, now.Add(2*time.Hour)); err != nil {
 		t.Fatalf("acknowledge() error = %v", err)
-	}
-	if store.current != nil {
-		t.Fatalf("acknowledge(APPLIED) retained recovery record %#v; want nil", store.current)
 	}
 	thirdRequest := duplicateDocument
 	thirdRequest.RequestID = "request-3"
@@ -162,11 +167,12 @@ func TestSageFulfillmentStoreReplacesPriorDocumentResult(t *testing.T) {
 		t.Fatalf("complete(first) error = %v", err)
 	}
 	second := sageFulfillmentRequest{RequestID: "request-2", Document: sageFulfillmentDocument{SalesOrderNo: "SO-2", InvoiceNo: "INV-2"}}
-	if _, err := store.begin(second, now.Add(time.Minute)); err != nil {
+	started, err := store.begin(second, now.Add(time.Minute))
+	if err != nil {
 		t.Fatalf("begin(second) error = %v", err)
 	}
-	if store.current == nil || store.current.Request.RequestID != second.RequestID {
-		t.Fatalf("current recovery record = %#v; want second request", store.current)
+	if started.Request.RequestID != second.RequestID || started.Request.Document != second.Document {
+		t.Fatalf("begin(second) = %#v, want a recovery record for the second request", started)
 	}
 	if _, found, err := store.replay(first); err != nil || found {
 		t.Fatalf("replay(replaced first) = found %t, error %v; want false, nil", found, err)

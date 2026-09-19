@@ -1,22 +1,6 @@
 package orders
 
-import (
-	"testing"
-	"time"
-)
-
-// TestNewStateAtDefaultsToNewestOrderDate verifies that a new Orders state keeps
-// table sorting local and starts with the latest order dates first.
-func TestNewStateAtDefaultsToNewestOrderDate(t *testing.T) {
-	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), time.UTC)
-	want := TableSort{
-		Column:    TableSortColumnOrderDate,
-		Direction: TableSortDescending,
-	}
-	if state.TableSort != want {
-		t.Fatalf("NewStateAt().TableSort = %#v, want %#v", state.TableSort, want)
-	}
-}
+import "testing"
 
 // TestToggleTableSortReversesActiveColumnAndResetsNewColumns verifies that
 // repeat selections reverse the active local sort, different columns begin

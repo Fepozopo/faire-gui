@@ -102,11 +102,24 @@ func TestConnectionForSageSalesSourceReversesConfiguredBrandMapping(t *testing.T
 	}
 }
 
-// TestSafeSageRequestIDRejectsUnsafeInput verifies request IDs cannot contain separators or unbounded data.
-func TestSafeSageRequestIDRejectsPipeBreakingInput(t *testing.T) {
-	for _, value := range []string{"", "request/id", "request\nid", strings.Repeat("a", 129)} {
-		if safeSageRequestID(value) {
-			t.Fatalf("safeSageRequestID(%q) = true, want false", value)
-		}
+// TestSafeSageRequestIDAcceptsOnlyBoundedSeparatorFreeValues verifies request IDs permit protocol-safe values and reject separators or unbounded data.
+func TestSafeSageRequestIDAcceptsOnlyBoundedSeparatorFreeValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "valid", value: "a1b2-c3d4", want: true},
+		{name: "empty", value: "", want: false},
+		{name: "slash", value: "request/id", want: false},
+		{name: "newline", value: "request\nid", want: false},
+		{name: "too long", value: strings.Repeat("a", 129), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := safeSageRequestID(test.value); got != test.want {
+				t.Fatalf("safeSageRequestID(%q) = %t, want %t", test.value, got, test.want)
+			}
+		})
 	}
 }

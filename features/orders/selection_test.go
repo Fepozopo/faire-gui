@@ -6,23 +6,38 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestSelectionOperations verifies map-backed single, visible, and cleared selection behavior.
-func TestSelectionOperations(t *testing.T) {
-	state := NewState()
-	first := faire.OrderID("bo_first")
-	second := faire.OrderID("bo_second")
-	state.ToggleSelection(first)
-	if !state.IsSelected(first) {
-		t.Fatal("first order was not selected")
+// TestToggleSelectionAddsAndRemovesAnOrder verifies map-backed selection toggles a valid order ID.
+func TestToggleSelectionAddsAndRemovesAnOrder(t *testing.T) {
+	state := State{}
+	orderID := faire.OrderID("bo_first")
+	state.ToggleSelection(orderID)
+	if !state.IsSelected(orderID) {
+		t.Fatal("selected order is missing")
 	}
-	state.ToggleSelection(first)
-	if state.IsSelected(first) {
-		t.Fatal("first order remained selected after toggle")
+	state.ToggleSelection(orderID)
+	if state.IsSelected(orderID) {
+		t.Fatal("selected order remains after a second toggle")
 	}
-	state.SelectVisible([]Row{{ID: first}, {ID: second}, {}})
-	if !state.IsSelected(first) || !state.IsSelected(second) || len(state.SelectedIDs) != 2 {
-		t.Fatalf("SelectedIDs = %#v", state.SelectedIDs)
+}
+
+// TestSelectVisiblePreservesSelectionOutsideTheCurrentRows verifies pagination does not discard selections from another page.
+func TestSelectVisiblePreservesSelectionOutsideTheCurrentRows(t *testing.T) {
+	state := State{SelectedIDs: map[faire.OrderID]struct{}{"bo_previous": {}}}
+	state.SelectVisible([]Row{{ID: "bo_first"}, {ID: "bo_second"}, {}})
+	want := map[faire.OrderID]struct{}{"bo_previous": {}, "bo_first": {}, "bo_second": {}}
+	if len(state.SelectedIDs) != len(want) {
+		t.Fatalf("SelectedIDs = %#v, want %#v", state.SelectedIDs, want)
 	}
+	for orderID := range want {
+		if !state.IsSelected(orderID) {
+			t.Errorf("SelectedIDs is missing %q", orderID)
+		}
+	}
+}
+
+// TestClearSelectionRemovesEverySelectedOrder verifies bulk-action cleanup resets a populated selection.
+func TestClearSelectionRemovesEverySelectedOrder(t *testing.T) {
+	state := State{SelectedIDs: map[faire.OrderID]struct{}{"bo_first": {}, "bo_second": {}}}
 	state.ClearSelection()
 	if len(state.SelectedIDs) != 0 {
 		t.Fatalf("SelectedIDs = %#v, want empty", state.SelectedIDs)
