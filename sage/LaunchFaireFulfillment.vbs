@@ -1,13 +1,13 @@
 ' LaunchFaireFulfillment starts a Faire fulfillment session from Sage 100 Shipping Data Entry.
-' It posts a versioned request to the temporary direct HTTP endpoint on RMT01,
+' It posts a versioned request to the direct HTTP endpoint on RMT01,
 ' waits for one typed terminal result with bounded network timeouts, and applies
 ' validated shipment data to Sage.
 '
 ' Protocol version 1 uses one UTF-8 HTTP request and a text response:
 '   POST http://RMT01:18080/v1/sage/fulfillment receives the JSON request.
 '   HTTP 200 returns typed result lines followed by Done.
-' RMT01 must firewall this temporary test endpoint to BSDC01 only; it is not an
-' encrypted production transport.
+' RMT01 must firewall this test endpoint to BSDC01 only; it is not an
+' encrypted transport.
 '
 ' Result lines are deliberately whitelisted instead of allowing arbitrary Sage field writes:
 '   RequestID:<id>
@@ -30,7 +30,7 @@
 
 Const FAIRE_PROTOCOL_VERSION = 1
 ' FAIRE_GUI_WORKSTATION is deliberately separate from the Sage server because the
-' desktop Faire GUI listens for temporary HTTP requests on RMT01.
+' desktop Faire GUI listens for HTTP requests on RMT01.
 Const FAIRE_GUI_WORKSTATION = "RMT01"
 Const FAIRE_HTTP_PORT = 18080
 Const FAIRE_HTTP_PATH = "/v1/sage/fulfillment"
@@ -309,7 +309,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef salesOrderN
 	End Function
 
 	' SendFulfillmentAcknowledgement posts Sage's final writeback state through the
-	' same temporary listener. It never includes arbitrary Sage data or credentials.
+	' same listener. It never includes arbitrary Sage data or credentials.
 	Function SendFulfillmentAcknowledgement(requestID, acknowledgementStatus)
 		SendFulfillmentAcknowledgement = False
 		On Error Resume Next
@@ -639,7 +639,7 @@ Function BuildFulfillmentRequest(requestID, ByRef requestJSON, ByRef salesOrderN
 		Set utf8Stream = Nothing
 	End Function
 
-	' GetFulfillmentURL returns the temporary direct HTTP endpoint hosted by Faire GUI on RMT01.
+	' GetFulfillmentURL returns the direct HTTP endpoint hosted by Faire GUI on RMT01.
 	' It does not use the Sage session workstation because Sage runs on the Sage server.
 	Function GetFulfillmentURL()
 		GetFulfillmentURL = "http://" & FAIRE_GUI_WORKSTATION & ":" & CStr(FAIRE_HTTP_PORT) & FAIRE_HTTP_PATH
