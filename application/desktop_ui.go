@@ -108,14 +108,15 @@ type DesktopUI struct {
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
-// Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity.
+// Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity across profile, metadata, credential, Brand ID, and deletion actions.
 type connectionRowControls struct {
-	selectProfile    widget.Clickable
-	rebuildLocalData widget.Clickable
-	deleteLocalData  widget.Clickable
-	editMetadata     widget.Clickable
-	replaceToken     widget.Clickable
-	delete           widget.Clickable
+	selectProfile      widget.Clickable
+	rebuildLocalData   widget.Clickable
+	deleteLocalData    widget.Clickable
+	verifyAndRefreshID widget.Clickable
+	editMetadata       widget.Clickable
+	replaceToken       widget.Clickable
+	delete             widget.Clickable
 }
 
 // deleteDialogState describes the metadata-only saved connection whose deletion awaits confirmation.

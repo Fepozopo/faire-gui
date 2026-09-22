@@ -79,7 +79,26 @@ func (ui *DesktopUI) loadProfile(connectionID string) {
 	ui.publishProfileResult(profileSummary(connection, profile))
 }
 
-// startBrandIDRefresh resolves one newly saved connection's authoritative Brand ID outside the Gio frame loop.
+// requestBrandIDRefresh starts an explicit authoritative Brand ID verification for connection.
+// It returns the Connections list to its feedback area and refuses to start work when saved connections are unavailable.
+func (ui *DesktopUI) requestBrandIDRefresh(connection connections.Connection) {
+	// Verification feedback is displayed at the top of the list, so reset a deep row position before changing the status.
+	ui.connectionsList.Position = layout.Position{}
+	if ui.manager == nil {
+		ui.managementStatus = "Saved connections are unavailable. Restart the app after resolving the credential-store issue."
+		ui.status = ui.managementStatus
+		ui.invalidate()
+		return
+	}
+
+	status := "Verifying Faire Brand ID for " + connection.Label + "…"
+	ui.managementStatus = status
+	ui.status = status
+	ui.invalidate()
+	ui.startBrandIDRefresh(connection)
+}
+
+// startBrandIDRefresh resolves a saved connection's authoritative Brand ID outside the Gio frame loop.
 func (ui *DesktopUI) startBrandIDRefresh(connection connections.Connection) {
 	ui.startWorker(func() {
 		ui.refreshBrandID(connection)

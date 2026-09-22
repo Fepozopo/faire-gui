@@ -167,9 +167,12 @@ func (ui *DesktopUI) accessTokenField(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutConnectionRow renders non-secret metadata and stable actions for one connection.
-// OAuth rows omit the direct-token replacement control because their credentials must be reauthorized through a future flow.
+// It exposes Brand ID verification here because the value belongs to saved connection metadata; OAuth rows omit only the direct-token replacement control because their credentials must be reauthorized through a future flow.
 func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connections.Connection) layout.Dimensions {
 	controls := ui.rowControlsFor(connection.ID)
+	if controls.verifyAndRefreshID.Clicked(gtx) {
+		ui.requestBrandIDRefresh(connection)
+	}
 	if controls.editMetadata.Clicked(gtx) {
 		ui.beginMetadataEdit(connection)
 	}
@@ -186,6 +189,9 @@ func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connecti
 				layout.Rigid(material.H5(ui.theme, connection.Label).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 				layout.Rigid(bodyText(ui.theme, connectionDetails(connection), mutedTextColor)),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+				// Keep Brand ID verification on its own row so the repair action remains usable on narrow windows.
+				layout.Rigid(primaryButton(ui.theme, &controls.verifyAndRefreshID, "Verify & refresh Brand ID")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
