@@ -11,6 +11,7 @@ A native desktop application for working with a Faire brand, built with Go and [
 - Provides a local-first Orders screen with status filters, local date sorting, search, selection, pagination, and detail views.
 - Synchronizes orders from Faire in the background while keeping locally cached rows available.
 - Moves selected orders to Processing with an expected ship date and supports fulfillment actions from order details.
+- Supports an opt-in Sage 100 Shipping Data Entry integration for reviewing Faire orders and returning shipment results to Sage.
 - Exports New, Backordered, or selected orders as CSV files, and can download packing slips for selected orders without creating a CSV.
 - Lets users delete or rebuild the connection-scoped local order cache.
 - Checks for compatible application updates on startup or on demand.
@@ -82,6 +83,19 @@ Refreshing an individual order detail or looking up an order by display ID updat
 - Before an order has a shipment, its detail view can add one or more packages with a supported carrier, tracking number, and label cost. Tracking links are opened only for supported official carrier sites.
 - Order details can link to an original order when one exists, and every successful remote change is written back to that order’s local snapshot.
 
+### Sage 100 fulfillment
+
+The optional Sage integration connects Sage 100 Shipping Data Entry to the running Faire GUI. A Sage Script Link script sends the active shipment and order details to the GUI, which finds the saved Faire connection from the Sage sales source and opens the matching order for review.
+
+- The integration is disabled by default and must be enabled in **Settings** on the Windows user account running the GUI.
+- Sage sends requests to the GUI over HTTP at `RMT01:18080`. The listener accepts requests only from the approved Sage workstation (`BSDC01`); the network firewall should also restrict this port to that workstation.
+- The GUI can preselect safely matched Sage backordered items as unavailable. The user must explicitly confirm any Faire availability update.
+- After a shipment is completed in Faire, the GUI returns typed tracking, package-item, and freight results. The Sage script validates the request and document identifiers, writes the result through Sage's business objects, then acknowledges whether writeback succeeded.
+- If Sage writeback fails, the GUI retains recovery details so the result can be reviewed and retried. Sage remains responsible for writing Sage records.
+- **Simulate label purchase (test)** exercises the result and Sage writeback flow with deterministic sample data; it does not call Faire or buy a label. Direct Faire label purchasing is not implemented.
+
+The integration requires the Sage script and the GUI to use the same protocol. See [`sage/LaunchFaireFulfillment.vbs`](sage/LaunchFaireFulfillment.vbs), [`sage/FieldMappings.json`](sage/FieldMappings.json), [`sage/ShipCodes.json`](sage/ShipCodes.json), and [`sage/Packages.json`](sage/Packages.json) for the Sage bridge and its mapping/configuration data. The Windows firewall helper is [`scripts/Allow-FaireGuiSageFirewall.ps1`](scripts/Allow-FaireGuiSageFirewall.ps1).
+
 ### CSV and packing-slip exports
 
 CSV exports are written to the current user’s Downloads directory. You can export New orders, Backordered orders, or rows selected in the table. CSV headers are optional.
@@ -133,6 +147,7 @@ flowchart TD
 | [`internal/orderssync`](internal/orderssync)   | Faire order pagination, synchronization windows, and checkpoints.                      |
 | [`connections`](connections)                   | Saved connection metadata and operating-system credential access.                      |
 | [`faire`](faire)                               | Typed Faire API client and endpoint services.                                          |
+| [`sage`](sage)                                 | Sage Script Link bridge, field mappings, package catalog, and Ship Via policy data.      |
 | [`updater`](updater)                           | Release checks and platform-specific update installation.                              |
 
 ### A note about Gio
