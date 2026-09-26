@@ -75,6 +75,7 @@ type shipmentSubmissionResult struct {
 	ConnectionID        string
 	OrderID             faire.OrderID
 	Detail              orders.Detail
+	SageShipments       []sageExternalShipment
 	Status              string
 	NewOrdersCount      int
 	ApplyNewOrdersCount bool
@@ -438,11 +439,43 @@ func (ui *DesktopUI) loadOrderByDisplayID() {
 }
 
 // drainOrderResults delegates Orders result validation and view updates to the feature controller.
-// The shell applies only its matching cross-feature Brand Profile status.
+// The shell applies only its matching cross-feature Brand Profile status and opens a Sage-requested order once its lookup is complete.
 func (ui *DesktopUI) drainOrderResults() {
 	if status, apply := ui.orders.drainLoadResults(ui.activeConnectionID); apply {
 		ui.status = status
 	}
+	ui.openSageFulfillmentOrderDetail()
+}
+
+// openSageFulfillmentOrderDetail fetches the requested Faire order directly before showing Sage fulfillment controls. It deliberately bypasses the local search snapshot so an existing shipment cannot be missed when the Sage workflow decides whether fulfillment may proceed.
+func (ui *DesktopUI) openSageFulfillmentOrderDetail() {
+	session := ui.sageFulfillment
+	if session == nil || session.detailRefreshRequested || ui.orders.view.orderDetailLoading {
+		return
+	}
+	if ui.activeConnectionID == "" || ui.orders.store == nil || ui.manager == nil {
+		ui.finishSageFulfillmentSession(sageFulfillmentFailure(session.request, "Faire could not refresh the requested order because its active saved connection is unavailable."))
+		return
+	}
+	ui.orders.detailRequestID++
+	requestID := ui.orders.detailRequestID
+	connectionID, orderID := ui.activeConnectionID, session.orderID
+	ui.orders.view.orderDetailOpen, ui.orders.view.orderDetailLoading = true, true
+	ui.orders.view.orderDetailID, ui.orders.view.orderDetailConnectionID = orderID, connectionID
+	ui.orders.view.orderDetail = orders.Detail{}
+	ui.orders.view.shipmentSubmitting = false
+	ui.orders.view.availabilitySubmitting = false
+	ui.orders.view.resetPendingUnavailable()
+	ui.orders.view.resetShipmentForm()
+	ui.orders.view.detailList.Position.First = 0
+	ui.orders.view.detailList.Position.Offset = 0
+	ui.orders.view.orderDetailStatus = "Refreshing Sage-requested order details from Faire…"
+	session.detailRefreshRequested = true
+	session.status = "Refreshing Faire order details from Sage Shipping Data Entry…"
+	ui.orders.startWorker(func() {
+		ui.orders.refreshAndPersistDetail(requestID, connectionID, orderID)
+	})
+	ui.invalidate()
 }
 
 // historyBoundaryInput converts a stored RFC 3339 historical boundary into the Orders date editor's local calendar input.
@@ -519,6 +552,9 @@ func (ui *DesktopUI) refreshOrderDetailNow() {
 // submitShipmentForm validates every visible package and starts one asynchronous Faire shipment submission.
 // It rejects unaccepted orders before any request is built, retains entered controls on validation or service failure, and captures the active connection scope before work begins.
 func (ui *DesktopUI) submitShipmentForm() {
+	if !ui.sageFulfillmentShipmentAllowed() {
+		return
+	}
 	if !shipmentCreationAllowed(ui.orders.view.orderDetail) {
 		ui.orders.view.orderDetailStatus = "Accept this order before adding shipment information."
 		return
@@ -530,13 +566,28 @@ func (ui *DesktopUI) submitShipmentForm() {
 	if !valid {
 		return
 	}
+	sageShipments, sageValid := sageExternalShipmentsFromRequest(request)
+	if ui.sageFulfillment != nil && !sageValid {
+		ui.orders.view.orderDetailStatus = "Sage fulfillment requires at least one tracked external shipment."
+		return
+	}
 	ui.orders.shipmentRequestID++
 	requestID := ui.orders.shipmentRequestID
 	connectionID, orderID := ui.activeConnectionID, ui.orders.view.orderDetailID
 	ui.orders.view.shipmentSubmitting = true
 	ui.orders.view.orderDetailStatus = "Adding shipment information to Faire…"
+	if ui.sageFulfillment != nil {
+		if ui.sageFulfillmentStore == nil || ui.sageFulfillmentStore.updateShipmentPending(ui.sageFulfillment.request, sageShipments, time.Now().UTC()) != nil {
+			ui.orders.view.shipmentSubmitting = false
+			ui.orders.view.orderDetailStatus = "Faire GUI could not persist the Sage shipment state. No Faire shipment was submitted."
+			return
+		}
+		ui.sageFulfillment.state = sageFulfillmentStateShipmentPending
+		ui.sageFulfillment.submittedShipments = append([]sageExternalShipment(nil), sageShipments...)
+		ui.sageFulfillment.status = "Submitting the external Faire shipment before Sage writeback…"
+	}
 	ui.orders.startWorker(func() {
-		ui.orders.addShipmentsAndPersistDetail(requestID, connectionID, orderID, request)
+		ui.orders.addShipmentsAndPersistDetail(requestID, connectionID, orderID, request, sageShipments)
 	})
 }
 
@@ -569,7 +620,7 @@ func (ui *DesktopUI) submitItemAvailability() {
 
 // addShipmentsAndPersistDetail submits a validated shipment batch, persists Faire's returned order, and publishes display-safe detail.
 // request was built on the frame goroutine, and all errors are converted to safe status text before the result is queued.
-func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint64, connectionID string, orderID faire.OrderID, request faire.AddShipmentsRequest) {
+func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint64, connectionID string, orderID faire.OrderID, request faire.AddShipmentsRequest, sageShipments []sageExternalShipment) {
 	if controller.manager == nil {
 		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: "Shipment information cannot be added until an active saved connection is available."})
 		return
@@ -589,7 +640,7 @@ func (controller *ordersController) addShipmentsAndPersistDetail(requestID uint6
 		controller.publishShipmentResult(shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Status: ordersStorageErrorMessage(err)})
 		return
 	}
-	result := shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC)}
+	result := shipmentSubmissionResult{RequestID: requestID, ConnectionID: connectionID, OrderID: orderID, Detail: orders.PresentDetail(*order, record.SyncedAtUTC), SageShipments: sageShipments}
 	if count, found := newOrdersCount(controller.ctx, controller.store, connectionID); found {
 		result.NewOrdersCount = count
 		result.ApplyNewOrdersCount = true
@@ -790,19 +841,47 @@ func storedOrderFromSnapshot(snapshot ordersstore.Snapshot, orderID faire.OrderI
 	return order, order.ID != nil && *order.ID == orderID
 }
 
-// drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller.
+// drainOrderDetailResults delegates stale-result validation and detail presentation updates to the feature controller, then imports a completed Sage session's safely mapped backorders.
 func (ui *DesktopUI) drainOrderDetailResults() {
 	ui.orders.drainDetailResults(ui.activeConnectionID)
+	ui.applySageFulfillmentDetail()
 }
 
-// drainShipmentSubmissionResults delegates current shipment-submission result validation to the feature controller.
+// drainShipmentSubmissionResults finishes an active Sage session only after Faire returned and the shipment detail was persisted locally.
 func (ui *DesktopUI) drainShipmentSubmissionResults() {
-	ui.orders.drainShipmentResults(ui.activeConnectionID)
+	result, succeeded := ui.orders.drainShipmentResults(ui.activeConnectionID)
+	if !succeeded || ui.sageFulfillment == nil {
+		return
+	}
+	session := ui.sageFulfillment
+	if result.OrderID != session.orderID || session.state != sageFulfillmentStateShipmentPending {
+		return
+	}
+	completed, valid := sageCompletedFulfillmentResult(session.request, result.Detail, result.SageShipments, sagePolicyForShipVia(ui.sageShipCodeRules, session.request.Document.ShipVia))
+	if !valid {
+		session.state = sageFulfillmentStateShipmentReady
+		session.status = "Faire saved the shipment, but its tracking detail could not be verified for Sage. Review the persisted shipment and use manual recovery."
+		ui.orders.view.orderDetailStatus = session.status
+		return
+	}
+	ui.finishSageFulfillmentSession(completed)
+	ui.orders.view.orderDetailStatus = "Faire shipment was saved. Sage writeback is pending acknowledgement."
 }
 
-// drainItemAvailabilityResults delegates current availability-submission result validation to the feature controller.
+// drainItemAvailabilityResults records the Sage availability transition only after Faire returned and persisted a successful update.
 func (ui *DesktopUI) drainItemAvailabilityResults() {
-	ui.orders.drainItemAvailabilityResults(ui.activeConnectionID)
+	if !ui.orders.drainItemAvailabilityResults(ui.activeConnectionID) {
+		return
+	}
+	if session := ui.sageFulfillment; session != nil && session.availabilityRequired {
+		if ui.sageFulfillmentStore == nil || ui.sageFulfillmentStore.updateState(session.request, sageFulfillmentStateShipmentReady, time.Now().UTC()) != nil {
+			ui.finishSageFulfillmentSession(sageFulfillmentFailure(session.request, "Faire updated availability, but Faire GUI could not persist the Sage shipment-ready state. No shipment was created."))
+			return
+		}
+		session.availabilityConfirmed = true
+		session.state = sageFulfillmentStateShipmentReady
+		session.status = "Sage availability update was confirmed. Record the external shipment when ready."
+	}
 }
 
 // drainOrderProcessingResults applies current selected-order processing outcomes on Gio's frame goroutine.

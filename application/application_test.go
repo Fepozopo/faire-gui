@@ -127,7 +127,6 @@ func TestNewDesktopUIConfiguresScrollableListsAndMaskedToken(t *testing.T) {
 	}
 }
 
-// TestNavigationHighlightUsesSettingsSurface verifies selected and hovered sidebar entries share Settings' light-gray surface.
 // TestOpenTrackingURLUsesInjectedBrowserOpener verifies tracking clicks invoke the browser only for a resolved URL and report a safe failure message.
 func TestOpenTrackingURLUsesInjectedBrowserOpener(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
@@ -440,6 +439,13 @@ func TestWriteOrdersCSVCreatesPrivateCSV(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(contents), "id,display_id,created_at") {
 		t.Fatalf("CSV = %q, want CSV header", contents)
+	}
+	info, err := os.Stat(filepath.Join(directory, filename))
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("CSV mode = %o, want 600 to keep exports private", got)
 	}
 }
 
@@ -846,7 +852,6 @@ func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
 	ui.editorMode = connectionEditorEnvironmentImport
 	ui.editing = connections.Connection{ID: "connection-id"}
 	ui.labelEditor.SetText("Imported Brand")
-	ui.brandIDEditor.SetText("brand-id")
 	ui.environmentEditor.SetText("API_TOKEN_21C")
 	ui.accessTokenEditor.SetText("transient-token")
 
@@ -858,8 +863,8 @@ func TestCancelEditorReturnsToDirectTokenCreation(t *testing.T) {
 	if ui.editing != (connections.Connection{}) {
 		t.Fatalf("editing = %#v, want zero value", ui.editing)
 	}
-	if ui.labelEditor.Text() != "" || ui.brandIDEditor.Text() != "" || ui.environmentEditor.Text() != "" || ui.accessTokenEditor.Text() != "" {
-		t.Fatalf("editor fields were not cleared: label=%q brandID=%q environment=%q token=%q", ui.labelEditor.Text(), ui.brandIDEditor.Text(), ui.environmentEditor.Text(), ui.accessTokenEditor.Text())
+	if ui.labelEditor.Text() != "" || ui.environmentEditor.Text() != "" || ui.accessTokenEditor.Text() != "" {
+		t.Fatalf("editor fields were not cleared: label=%q environment=%q token=%q", ui.labelEditor.Text(), ui.environmentEditor.Text(), ui.accessTokenEditor.Text())
 	}
 }
 
@@ -880,6 +885,24 @@ func TestSelectConnectionScrollsToStatus(t *testing.T) {
 	}
 }
 
+// TestRequestBrandIDRefreshWithoutManagerKeepsFailureSafe verifies the repair action does not start work without saved-connection support and makes its feedback visible.
+func TestRequestBrandIDRefreshWithoutManagerKeepsFailureSafe(t *testing.T) {
+	ui := newDesktopUI(context.Background(), func() {}, nil, nil, nil, "")
+	ui.connectionsList.Position.First = 12
+	ui.connectionsList.Position.Offset = -24
+	ui.connectionsList.Position.BeforeEnd = true
+
+	ui.requestBrandIDRefresh(connections.Connection{ID: "connection-id", Label: "Brand"})
+
+	want := "Saved connections are unavailable. Restart the app after resolving the credential-store issue."
+	if ui.connectionsList.Position != (layout.Position{}) {
+		t.Fatalf("connections list position = %#v, want zero position", ui.connectionsList.Position)
+	}
+	if ui.managementStatus != want || ui.status != want {
+		t.Fatalf("Brand ID refresh status = management=%q status=%q, want %q", ui.managementStatus, ui.status, want)
+	}
+}
+
 // TestBeginMetadataEditScrollsToForm verifies an edit request resets a deeply scrolled connection list so the editor is visible.
 func TestBeginMetadataEditScrollsToForm(t *testing.T) {
 	ui := newDesktopUI(context.Background(), func() {}, new(app.Window), nil, nil, "")
@@ -893,8 +916,8 @@ func TestBeginMetadataEditScrollsToForm(t *testing.T) {
 	if ui.connectionsList.Position != (layout.Position{}) {
 		t.Fatalf("connections list position = %#v, want zero position", ui.connectionsList.Position)
 	}
-	if ui.editorMode != connectionEditorMetadata || ui.labelEditor.Text() != "Brand" || ui.brandIDEditor.Text() != "brand-id" {
-		t.Fatalf("metadata editor was not prepared: mode=%d label=%q brandID=%q", ui.editorMode, ui.labelEditor.Text(), ui.brandIDEditor.Text())
+	if ui.editorMode != connectionEditorMetadata || ui.labelEditor.Text() != "Brand" {
+		t.Fatalf("metadata editor was not prepared: mode=%d label=%q", ui.editorMode, ui.labelEditor.Text())
 	}
 }
 

@@ -51,8 +51,8 @@ func TestShipmentFormRequiresEveryVisiblePackage(t *testing.T) {
 		t.Fatal("shipmentFormIsValid() = true with an incomplete added package, want false")
 	}
 
-	second.carrier = "CANADA_POST"
-	second.trackingNumber.SetText("9400")
+	second.carrier = "FEDEX"
+	second.trackingNumber.SetText("123456789012")
 	second.labelCost.SetText("4.25")
 	if !shipmentFormIsValid(packages, &payoutMinor) {
 		t.Fatal("shipmentFormIsValid() = false with every package complete, want true")
@@ -66,7 +66,7 @@ func TestShipmentRequestFromFormBuildsBatch(t *testing.T) {
 	payoutMinor := int64(10000)
 	packages := []*shipmentFormPackage{
 		completeShipmentFormPackage("UPS", "1z999-aa10 123456784", "13.50"),
-		completeShipmentFormPackage("CANADA_POST", "940011", "4"),
+		completeShipmentFormPackage("FEDEX", "123456789012", "4"),
 	}
 	request, valid := shipmentRequestFromForm(packages, &payoutMinor)
 	if !valid {

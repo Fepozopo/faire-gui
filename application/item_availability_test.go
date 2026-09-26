@@ -43,10 +43,11 @@ func TestAvailabilityRequestFromDraftRejectsStaleOrIneligibleSelections(t *testi
 func TestItemAvailabilityDraftIsVariantScoped(t *testing.T) {
 	view := newOrdersViewState()
 	first := orders.DetailItem{VariantID: "variant-a", OrderedQuantity: 2, AvailabilityEligible: true}
+	duplicate := orders.DetailItem{VariantID: "variant-a", OrderedQuantity: 1, AvailabilityEligible: true}
 	second := orders.DetailItem{VariantID: "variant-b", OrderedQuantity: 2, AvailabilityEligible: true}
 
 	view.togglePendingUnavailable(first)
-	view.togglePendingUnavailable(first)
+	view.togglePendingUnavailable(duplicate)
 	view.togglePendingUnavailable(second)
 
 	if len(view.pendingUnavailable) != 1 {

@@ -15,6 +15,7 @@ import (
 	"github.com/Fepozopo/faire-gui/connections"
 	"github.com/Fepozopo/faire-gui/features/orders"
 	"github.com/Fepozopo/faire-gui/internal/ordersstore"
+	sagepolicy "github.com/Fepozopo/faire-gui/sage"
 )
 
 const (
@@ -27,7 +28,7 @@ const (
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, while startup, profile, order, and update work publish only safe results through channels.
+// Its methods run on Gio's frame goroutine, while startup, profile, order, update, and Sage fulfillment workers publish only safe results through channels.
 type DesktopUI struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -41,11 +42,21 @@ type DesktopUI struct {
 	preparingStartup          bool
 	startupPreparationStarted bool
 
-	activeConnectionID    string
-	activeConnectionLabel string
-	selectedTab           int
-	settingsMenuOpen      bool
-	connectionPickerOpen  bool
+	activeConnectionID              string
+	activeConnectionLabel           string
+	selectedTab                     int
+	settingsMenuOpen                bool
+	connectionPickerOpen            bool
+	sageFulfillmentEnabled          bool
+	sageFulfillmentCancel           context.CancelFunc
+	sageFulfillmentStore            *sageFulfillmentStore
+	sageFulfillmentStoreError       string
+	sageFulfillmentSettingsMessage  string
+	sageShipCodeRules               sagepolicy.ShipCodeRules
+	sageShipCodeRulesError          string
+	sageFulfillmentAcknowledgements chan sageFulfillmentAcknowledgement
+	sageFulfillmentListenerResults  chan sageFulfillmentListenerResult
+	sageFulfillmentRecovery         *sageFulfillmentRecovery
 
 	// orders is the feature-owned Orders component. The shell supplies only immutable connection scope and handles cross-feature status.
 	orders     *ordersController
@@ -56,7 +67,6 @@ type DesktopUI struct {
 	managementStatus string
 
 	labelEditor       widget.Editor
-	brandIDEditor     widget.Editor
 	environmentEditor widget.Editor
 	accessTokenEditor widget.Editor
 
@@ -75,6 +85,7 @@ type DesktopUI struct {
 	settingsButton         widget.Clickable
 	settingsBrandProfile   widget.Clickable
 	settingsConnections    widget.Clickable
+	sageFulfillmentToggle  widget.Clickable
 	checkForUpdates        widget.Clickable
 	updateLater            widget.Clickable
 	installUpdate          widget.Clickable
@@ -87,21 +98,25 @@ type DesktopUI struct {
 	updateDialog             updateDialogState
 	updateCheckDialog        updateCheckDialogState
 	results                  chan profileLoadResult
+	brandIDRefreshResults    chan brandIDRefreshResult
 	connectionCleanupResults chan connectionCleanupResult
 	updateResults            chan updateCheckResult
 	updateInstallResults     chan updateInstallResult
 	startupResults           chan startupResult
+	sageFulfillmentRequests  chan sageFulfillmentInbound
+	sageFulfillment          *sageFulfillmentSession
 }
 
 // connectionRowControls owns persistent click state for one saved-connection row.
-// Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity.
+// Gio requires this state to survive each immediate-mode frame so a pointer gesture keeps its identity across profile, metadata, credential, Brand ID, and deletion actions.
 type connectionRowControls struct {
-	selectProfile    widget.Clickable
-	rebuildLocalData widget.Clickable
-	deleteLocalData  widget.Clickable
-	editMetadata     widget.Clickable
-	replaceToken     widget.Clickable
-	delete           widget.Clickable
+	selectProfile      widget.Clickable
+	rebuildLocalData   widget.Clickable
+	deleteLocalData    widget.Clickable
+	verifyAndRefreshID widget.Clickable
+	editMetadata       widget.Clickable
+	replaceToken       widget.Clickable
+	delete             widget.Clickable
 }
 
 // deleteDialogState describes the metadata-only saved connection whose deletion awaits confirmation.
@@ -131,6 +146,12 @@ type profileLoadResult struct {
 	status string
 }
 
+// brandIDRefreshResult transfers the outcome of resolving one saved connection's authoritative Faire Brand ID.
+type brandIDRefreshResult struct {
+	label  string
+	status string
+}
+
 // newDesktopUI constructs a DesktopUI without persistent Orders storage for focused UI tests.
 // Production startup uses newDesktopUIWithOrders after successfully opening the process-local store.
 func newDesktopUI(ctx context.Context, cancel context.CancelFunc, window *app.Window, manager *connections.Manager, savedConnections []connections.Connection, startupStatus string) *DesktopUI {
@@ -155,16 +176,28 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 				window.Invalidate()
 			}
 		}),
-		status:                   startupStatus,
-		managementStatus:         "Create a direct-token connection, or select an existing connection to manage it.",
-		selectedTab:              ordersTab,
-		rowControls:              make(map[string]*connectionRowControls),
-		connectionPickerControls: make(map[string]*widget.Clickable),
-		results:                  make(chan profileLoadResult, 1),
-		connectionCleanupResults: make(chan connectionCleanupResult, 1),
-		updateResults:            make(chan updateCheckResult, 1),
-		updateInstallResults:     make(chan updateInstallResult, 1),
-		startupResults:           make(chan startupResult, 1),
+		status:                          startupStatus,
+		managementStatus:                "Create a direct-token connection, or select an existing connection to manage it.",
+		selectedTab:                     ordersTab,
+		rowControls:                     make(map[string]*connectionRowControls),
+		connectionPickerControls:        make(map[string]*widget.Clickable),
+		results:                         make(chan profileLoadResult, 1),
+		brandIDRefreshResults:           make(chan brandIDRefreshResult, 16),
+		connectionCleanupResults:        make(chan connectionCleanupResult, 1),
+		updateResults:                   make(chan updateCheckResult, 1),
+		updateInstallResults:            make(chan updateInstallResult, 1),
+		startupResults:                  make(chan startupResult, 1),
+		sageFulfillmentRequests:         make(chan sageFulfillmentInbound, maxSageFulfillmentRequests),
+		sageFulfillmentAcknowledgements: make(chan sageFulfillmentAcknowledgement, maxSageFulfillmentRequests),
+		sageFulfillmentListenerResults:  make(chan sageFulfillmentListenerResult, 1),
+	}
+	ui.sageFulfillmentStore, _ = loadSageFulfillmentStore()
+	if ui.sageFulfillmentStore == nil {
+		ui.sageFulfillmentStoreError = "Sage fulfillment recovery data is unavailable. The integration remains disabled until this local storage problem is resolved."
+	}
+	ui.sageShipCodeRules, _ = sagepolicy.LoadShipCodeRules()
+	if ui.sageShipCodeRules == nil {
+		ui.sageShipCodeRulesError = "Sage Ship Via policy is invalid. The integration remains disabled until its configuration is corrected."
 	}
 	ui.configureEditors()
 	ui.resetOrdersState()
@@ -178,7 +211,6 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 // The masked token editor is the only UI state that can contain a direct access token.
 func (ui *DesktopUI) configureEditors() {
 	ui.labelEditor.SingleLine = true
-	ui.brandIDEditor.SingleLine = true
 	ui.environmentEditor.SingleLine = true
 	ui.accessTokenEditor.SingleLine = true
 	ui.accessTokenEditor.Mask = '•'

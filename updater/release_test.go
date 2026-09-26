@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -144,9 +143,6 @@ func TestDownloadAssetVerifiesReleaseSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadAsset() error = %v", err)
 	}
-	defer func() {
-		_ = os.Remove(path)
-	}()
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
@@ -157,9 +153,26 @@ func TestDownloadAssetVerifiesReleaseSize(t *testing.T) {
 	if info, err := os.Stat(path); err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("downloaded mode = (%v, %v), want executable file", info, err)
 	}
-	_, err = installer.downloadAsset(context.Background(), Asset{Name: "faire-gui_darwin_arm64", URL: server.URL + "/asset", Size: int64(len(contents) - 1)}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "expected") {
-		t.Fatalf("short size download error = %v, want expected-size validation error", err)
+	streamingServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/asset" {
+			t.Fatalf("request path = %q, want /asset", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(contents[:1]))
+		writer.(http.Flusher).Flush()
+		_, _ = writer.Write([]byte(contents[1:]))
+	}))
+	t.Cleanup(streamingServer.Close)
+	failureDirectory := t.TempDir()
+	_, err = installer.downloadAsset(context.Background(), Asset{Name: "faire-gui_darwin_arm64", URL: streamingServer.URL + "/asset", Size: int64(len(contents) - 1)}, failureDirectory)
+	if err == nil {
+		t.Fatal("downloadAsset() error = nil, want actual-byte-count validation error")
+	}
+	entries, readErr := os.ReadDir(failureDirectory)
+	if readErr != nil {
+		t.Fatalf("ReadDir() error = %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary files = %#v, want cleanup after a failed streamed download", entries)
 	}
 }
 

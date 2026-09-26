@@ -90,8 +90,6 @@ func (ui *DesktopUI) createEditorFields() []layout.FlexChild {
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
 		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
-		fieldSpacer(),
 		layout.Rigid(ui.accessTokenField),
 		fieldSpacer(),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -109,8 +107,6 @@ func (ui *DesktopUI) metadataEditorFields() []layout.FlexChild {
 	return []layout.FlexChild{
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
-		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
 		fieldSpacer(),
 		layout.Rigid(ui.saveCancelButtons("Save metadata")),
 	}
@@ -134,8 +130,6 @@ func (ui *DesktopUI) environmentImportEditorFields() []layout.FlexChild {
 		fieldSpacer(),
 		layout.Rigid(ui.labelField),
 		fieldSpacer(),
-		layout.Rigid(ui.brandIDField),
-		fieldSpacer(),
 		layout.Rigid(ui.environmentField),
 		fieldSpacer(),
 		layout.Rigid(ui.saveCancelButtons("Import direct-token connection")),
@@ -158,11 +152,6 @@ func (ui *DesktopUI) labelField(gtx layout.Context) layout.Dimensions {
 	return inputField(gtx, ui.theme, &ui.labelEditor, "Connection label")
 }
 
-// brandIDField renders the optional non-secret Faire brand ID editor.
-func (ui *DesktopUI) brandIDField(gtx layout.Context) layout.Dimensions {
-	return inputField(gtx, ui.theme, &ui.brandIDEditor, "Faire brand ID (optional)")
-}
-
 // environmentField renders the explicit environment-variable name rather than inspecting the full environment.
 func (ui *DesktopUI) environmentField(gtx layout.Context) layout.Dimensions {
 	return inputField(gtx, ui.theme, &ui.environmentEditor, "Environment variable name, for example API_TOKEN_21C")
@@ -178,9 +167,12 @@ func (ui *DesktopUI) accessTokenField(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutConnectionRow renders non-secret metadata and stable actions for one connection.
-// OAuth rows omit the direct-token replacement control because their credentials must be reauthorized through a future flow.
+// It exposes Brand ID verification here because the value belongs to saved connection metadata; OAuth rows omit only the direct-token replacement control because their credentials must be reauthorized through a future flow.
 func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connections.Connection) layout.Dimensions {
 	controls := ui.rowControlsFor(connection.ID)
+	if controls.verifyAndRefreshID.Clicked(gtx) {
+		ui.requestBrandIDRefresh(connection)
+	}
 	if controls.editMetadata.Clicked(gtx) {
 		ui.beginMetadataEdit(connection)
 	}
@@ -197,6 +189,9 @@ func (ui *DesktopUI) layoutConnectionRow(gtx layout.Context, connection connecti
 				layout.Rigid(material.H5(ui.theme, connection.Label).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 				layout.Rigid(bodyText(ui.theme, connectionDetails(connection), mutedTextColor)),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+				// Keep Brand ID verification on its own row so the repair action remains usable on narrow windows.
+				layout.Rigid(primaryButton(ui.theme, &controls.verifyAndRefreshID, "Verify & refresh Brand ID")),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,

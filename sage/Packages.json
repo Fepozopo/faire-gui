@@ -1,0 +1,211 @@
+[
+	{
+		"PackageId": 0,
+		"DisplayOrder": 0,
+		"DisplayName": "8x5x5",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 8.0,
+		"Width": 5.0,
+		"Height": 5.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 1,
+		"DisplayOrder": 1,
+		"DisplayName": "9x7x5",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 9.0,
+		"Width": 7.0,
+		"Height": 5.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 2,
+		"DisplayOrder": 2,
+		"DisplayName": "11x7x7",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 11.0,
+		"Width": 7.0,
+		"Height": 7.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 3,
+		"DisplayOrder": 3,
+		"DisplayName": "11x9x9",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 11.0,
+		"Width": 9.0,
+		"Height": 9.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 4,
+		"DisplayOrder": 4,
+		"DisplayName": "12x10x6",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 12.0,
+		"Width": 10.0,
+		"Height": 6.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 5,
+		"DisplayOrder": 5,
+		"DisplayName": "12x12x8",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 12.0,
+		"Width": 12.0,
+		"Height": 8.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 6,
+		"DisplayOrder": 6,
+		"DisplayName": "12x12x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 12.0,
+		"Width": 12.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 7,
+		"DisplayOrder": 7,
+		"DisplayName": "18x12x8",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 18.0,
+		"Width": 12.0,
+		"Height": 8.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 8,
+		"DisplayOrder": 8,
+		"DisplayName": "18x12x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 18.0,
+		"Width": 12.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 9,
+		"DisplayOrder": 9,
+		"DisplayName": "21x12x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 21.0,
+		"Width": 12.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 10,
+		"DisplayOrder": 10,
+		"DisplayName": "24x12x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 24.0,
+		"Width": 12.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 11,
+		"DisplayOrder": 11,
+		"DisplayName": "26x18x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 26.0,
+		"Width": 18.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 12,
+		"DisplayOrder": 12,
+		"DisplayName": "30x12x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 30.0,
+		"Width": 12.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 13,
+		"DisplayOrder": 13,
+		"DisplayName": "32x18x12",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 32.0,
+		"Width": 18.0,
+		"Height": 12.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 14,
+		"DisplayOrder": 14,
+		"DisplayName": "30x18x16",
+		"Carrier": null,
+		"PredefinedPackage": null,
+		"Length": 30.0,
+		"Width": 18.0,
+		"Height": 16.0,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 15,
+		"DisplayOrder": 15,
+		"DisplayName": "USPS Flat",
+		"Carrier": "USPS",
+		"PredefinedPackage": "Flat",
+		"Length": null,
+		"Width": null,
+		"Height": null,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 16,
+		"DisplayOrder": 16,
+		"DisplayName": "USPS Small Flat Rate Box",
+		"Carrier": "USPS",
+		"PredefinedPackage": "SmallFlatRateBox",
+		"Length": null,
+		"Width": null,
+		"Height": null,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 17,
+		"DisplayOrder": 17,
+		"DisplayName": "USPS Medium Flat Rate Box",
+		"Carrier": "USPS",
+		"PredefinedPackage": "MediumFlatRateBox",
+		"Length": null,
+		"Width": null,
+		"Height": null,
+		"TareWeight": null
+	},
+	{
+		"PackageId": 18,
+		"DisplayOrder": 18,
+		"DisplayName": "USPS Large Flat Rate Box",
+		"Carrier": "USPS",
+		"PredefinedPackage": "LargeFlatRateBox",
+		"Length": null,
+		"Width": null,
+		"Height": null,
+		"TareWeight": null
+	}
+]

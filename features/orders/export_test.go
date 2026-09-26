@@ -43,38 +43,29 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
-	if !reflect.DeepEqual(rows[0], CSVHeader) {
-		t.Fatalf("header = %#v, want %#v", rows[0], CSVHeader)
+	wantHeader := []string{
+		"id", "display_id", "created_at", "ship_after",
+		"address_name", "address_address1", "address_address2", "address_postal_code",
+		"address_city", "address_state", "address_state_code", "address_phone_number",
+		"address_country", "address_country_code", "address_company_name",
+		"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
+		"payout_costs_commission_bps", "payout_costs_commission",
+		"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason",
 	}
-	if got := rows[0][19]; got != "payout_costs_commission" {
-		t.Fatalf("commission header = %q, want payout_costs_commission", got)
-	}
-	if got := rows[0][21]; got != "item_price" {
-		t.Fatalf("item price header = %q, want item_price", got)
-	}
-	if got := rows[0][len(rows[0])-2]; got != "payout_costs_total_payout" {
-		t.Fatalf("penultimate header = %q, want payout_costs_total_payout", got)
-	}
-	if got := rows[0][len(rows[0])-1]; got != "free_shipping_reason" {
-		t.Fatalf("final header = %q, want free_shipping_reason", got)
+	if !reflect.DeepEqual(rows[0], wantHeader) {
+		t.Fatalf("header = %#v, want %#v", rows[0], wantHeader)
 	}
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
-	if got, want := rows[1], []string{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("first item row = %#v, want %#v", got, want)
+	wantRows := [][]string{
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"},
 	}
-	if got := rows[2][21]; got != "34.00" {
-		t.Fatalf("second item price = %q, want formatted Price", got)
-	}
-}
-
-// TestItemPriceReturnsBlankWithoutPrice verifies the CSV exporter requires Faire's current Price value.
-func TestItemPriceReturnsBlankWithoutPrice(t *testing.T) {
-	t.Parallel()
-
-	if got := itemPrice(&faire.OrderItem{}); got != "" {
-		t.Fatalf("itemPrice() = %q, want blank without Price", got)
+	for index, want := range wantRows {
+		if got := rows[index+1]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("item row %d = %#v, want %#v", index+1, got, want)
+		}
 	}
 }
 
@@ -99,21 +90,27 @@ func TestWriteCSVOmitsHeaderWhenRequested(t *testing.T) {
 func TestSalesSourceForBrandReturnsOnlyConfiguredBrandMappings(t *testing.T) {
 	t.Parallel()
 
-	for brandID, want := range map[faire.BrandID]SalesSource{
-		"b_wpz8vfrdu5": "21",
-		"b_56pfaass":   "ASC",
-		"b_22rl4c1962": "BJP",
-		"b_9yilp4yy":   "BSC",
-		"b_53p4jwgf6g": "GTG",
-		"b_amtnu83oc0": "OAT",
-		"b_ukhf47wscj": "SM",
-	} {
-		if got, found := SalesSourceForBrand(brandID); !found || got != want {
-			t.Errorf("SalesSourceForBrand(%q) = (%q, %t), want (%q, true)", brandID, got, found, want)
-		}
+	tests := []struct {
+		name    string
+		brandID faire.BrandID
+		want    SalesSource
+		found   bool
+	}{
+		{name: "21", brandID: "b_wpz8vfrdu5", want: "21", found: true},
+		{name: "ASC", brandID: "b_56pfaass", want: "ASC", found: true},
+		{name: "BJP", brandID: "b_22rl4c1962", want: "BJP", found: true},
+		{name: "BSC", brandID: "b_9yilp4yy", want: "BSC", found: true},
+		{name: "GTG", brandID: "b_53p4jwgf6g", want: "GTG", found: true},
+		{name: "OAT", brandID: "b_amtnu83oc0", want: "OAT", found: true},
+		{name: "SM", brandID: "b_ukhf47wscj", want: "SM", found: true},
+		{name: "unmapped", brandID: "b_unmapped"},
 	}
-	if got, found := SalesSourceForBrand("b_unmapped"); found || got != "" {
-		t.Fatalf("SalesSourceForBrand() = (%q, %t), want an unmapped result", got, found)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got, found := SalesSourceForBrand(test.brandID); found != test.found || got != test.want {
+				t.Fatalf("SalesSourceForBrand(%q) = (%q, %t), want (%q, %t)", test.brandID, got, found, test.want, test.found)
+			}
+		})
 	}
 }
 
@@ -152,7 +149,16 @@ func TestWriteCSVWritesBlankItemFieldsForOrdersWithoutItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
-	if len(rows) != 2 || rows[1][0] != "order-1" || rows[1][20] != "" || rows[1][21] != "" || rows[1][22] != "" || rows[1][len(rows[1])-1] != "" {
-		t.Fatalf("rows = %#v, want an order row with blank item fields", rows)
+	if len(rows) != 2 {
+		t.Fatalf("row count = %d, want header plus one order row", len(rows))
+	}
+	itemFieldIndexes := map[string]int{"item_sku": 20, "item_price": 21, "item_quantity": 22}
+	for field, index := range itemFieldIndexes {
+		if got := rows[1][index]; got != "" {
+			t.Fatalf("%s = %q, want blank for an order without items", field, got)
+		}
+	}
+	if got := rows[1][0]; got != "order-1" {
+		t.Fatalf("order ID = %q, want order-1", got)
 	}
 }

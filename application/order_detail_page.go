@@ -18,6 +18,7 @@ const orderItemAvailabilityColumnWidth = unit.Dp(256)
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
 // Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links and the empty-shipment form keep their own actions.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
+	ui.handleSageFulfillmentEvents(gtx)
 	if itemAvailabilityVisible(ui.orders.view.orderDetail) {
 		ui.handleItemAvailabilityEvents(gtx)
 	}
@@ -155,6 +156,8 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 	children := []layout.FlexChild{
 		layout.Rigid(material.H4(ui.theme, detail.DisplayID).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		layout.Rigid(ui.layoutSageFulfillmentSession),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		layout.Rigid(detailLine(ui, "Status", detail.Status)),
 		layout.Rigid(detailOriginalOrderIDLine(ui, detail.OriginalOrderID, detail.OriginalOrderDisplayID)),
 		layout.Rigid(detailLine(ui, "Updated", detail.UpdatedAt)),
@@ -269,7 +272,7 @@ func (ui *DesktopUI) handleShipmentFormEvents(gtx layout.Context) {
 		ui.invalidate()
 		return
 	}
-	if confirmShipmentsClicked && shipmentConfirmationAllowed(view) && shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
+	if confirmShipmentsClicked && shipmentConfirmationAllowed(view) && ui.sageFulfillmentShipmentAllowed() && shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && shipmentFormIsValid(view.shipmentForm, view.orderDetail.TotalPayoutMinor) {
 		ui.submitShipmentForm()
 		ui.invalidate()
 	}
@@ -284,12 +287,17 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, bodyText(ui.theme, "Add shipment information to confirm fulfillment.", mutedTextColor)),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentConfirmationAllowed(view) {
-						return layout.Dimensions{}
+					if !shipmentConfirmationAllowed(view) {
+						warning := material.Body1(ui.theme, "Resolve pending item availability changes before confirming shipment.")
+						warning.Color = dangerColor
+						return warning.Layout(gtx)
 					}
-					warning := material.Body1(ui.theme, "Resolve pending item availability changes before confirming shipment.")
-					warning.Color = dangerColor
-					return warning.Layout(gtx)
+					if ui.sageFulfillment != nil && !ui.sageFulfillmentShipmentAllowed() {
+						warning := material.Body1(ui.theme, "Resolve the Sage fulfillment review before confirming shipment.")
+						warning.Color = dangerColor
+						return warning.Layout(gtx)
+					}
+					return layout.Dimensions{}
 				}),
 			)
 		}),
@@ -357,7 +365,7 @@ func layoutShipmentForm(gtx layout.Context, ui *DesktopUI) layout.Dimensions {
 				layout.Rigid(underlinedTextAction(ui.theme, &view.addPackageButton, "Add package")),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting && shipmentConfirmationAllowed(view) {
+					if shipmentFormReadyForConfirmation(view.shipmentForm, view.orderDetail.TotalPayoutMinor) && !view.shipmentSubmitting && shipmentConfirmationAllowed(view) && ui.sageFulfillmentShipmentAllowed() {
 						return primaryButton(ui.theme, &view.confirmShipmentsButton, "Confirm")(gtx)
 					}
 					return disabledShipmentButton(ui.theme, "Confirm")(gtx)

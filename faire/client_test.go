@@ -160,31 +160,49 @@ func TestDownloadPackingSlipPDFBuildsPDFRequest(t *testing.T) {
 	}
 }
 
-// TestMoveToProcessingSendsOptionalExpectedShipDate verifies the processing endpoint receives its exact path, method, and JSON payload.
-func TestMoveToProcessingSendsOptionalExpectedShipDate(t *testing.T) {
-	client := newTestClient(t, func(request *http.Request) *http.Response {
-		if request.Method != http.MethodPut {
-			t.Fatalf("method = %q, want PUT", request.Method)
+// TestMoveToProcessingSerializesOptionalExpectedShipDate verifies the processing endpoint preserves both presence and omission of the optional date field.
+func TestMoveToProcessingSerializesOptionalExpectedShipDate(t *testing.T) {
+	tests := []struct {
+		name    string
+		request MoveOrderToProcessingRequest
+		want    struct {
+			ExpectedShipDate *string `json:"expected_ship_date,omitzero"`
 		}
-		if request.URL.Path != "/orders/order-123/processing" {
-			t.Fatalf("path = %q, want processing endpoint", request.URL.Path)
-		}
-		var payload map[string]string
-		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
-			t.Fatalf("decode processing payload: %v", err)
-		}
-		if payload["expected_ship_date"] != "2026-09-10T00:00:00Z" || len(payload) != 1 {
-			t.Fatalf("payload = %#v, want only expected ship date timestamp", payload)
-		}
-		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
-	})
-
-	order, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{ExpectedShipDate: Ptr("2026-09-10T00:00:00Z")})
-	if err != nil {
-		t.Fatalf("MoveToProcessing() error = %v", err)
+	}{
+		{name: "includes expected ship date", request: MoveOrderToProcessingRequest{ExpectedShipDate: Ptr("2026-09-10T00:00:00Z")}, want: struct {
+			ExpectedShipDate *string `json:"expected_ship_date,omitzero"`
+		}{ExpectedShipDate: Ptr("2026-09-10T00:00:00Z")}},
+		{name: "omits absent expected ship date"},
 	}
-	if order.ID == nil || *order.ID != "order-123" || order.State == nil || *order.State != OrderStateProcessing {
-		t.Fatalf("MoveToProcessing() order = %#v", order)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newTestClient(t, func(request *http.Request) *http.Response {
+				if request.Method != http.MethodPut {
+					t.Fatalf("method = %q, want PUT", request.Method)
+				}
+				if request.URL.Path != "/orders/order-123/processing" {
+					t.Fatalf("path = %q, want processing endpoint", request.URL.Path)
+				}
+				var payload struct {
+					ExpectedShipDate *string `json:"expected_ship_date,omitzero"`
+				}
+				if err := json.UnmarshalRead(request.Body, &payload); err != nil {
+					t.Fatalf("decode processing payload: %v", err)
+				}
+				if (payload.ExpectedShipDate == nil) != (test.want.ExpectedShipDate == nil) || payload.ExpectedShipDate != nil && *payload.ExpectedShipDate != *test.want.ExpectedShipDate {
+					t.Fatalf("payload = %#v, want %#v", payload, test.want)
+				}
+				return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
+			})
+
+			order, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), test.request)
+			if err != nil {
+				t.Fatalf("MoveToProcessing() error = %v", err)
+			}
+			if order.ID == nil || *order.ID != "order-123" || order.State == nil || *order.State != OrderStateProcessing {
+				t.Fatalf("MoveToProcessing() order = %#v", order)
+			}
+		})
 	}
 }
 
@@ -197,19 +215,20 @@ func TestUpdateItemsAvailabilitySerializesVariantMap(t *testing.T) {
 		if request.URL.Path != "/orders/order-123/items/availability" {
 			t.Fatalf("path = %q, want item availability endpoint", request.URL.Path)
 		}
-		var payload map[string]map[string]map[string]any
+		var payload struct {
+			Availabilities map[VariantID]ItemAvailability `json:"availabilities"`
+		}
 		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
 			t.Fatalf("decode availability payload: %v", err)
 		}
-		availabilities := payload["availabilities"]
-		if len(availabilities) != 2 {
-			t.Fatalf("availabilities = %#v, want two variants", availabilities)
+		if len(payload.Availabilities) != 2 {
+			t.Fatalf("availabilities = %#v, want two variants", payload.Availabilities)
 		}
-		if first := availabilities["variant-1"]; len(first) != 1 || first["available_quantity"] != float64(0) {
-			t.Fatalf("variant-1 payload = %#v, want only available_quantity: 0", first)
-		}
-		if second := availabilities["variant-2"]; len(second) != 1 || second["available_quantity"] != float64(0) {
-			t.Fatalf("variant-2 payload = %#v, want only available_quantity: 0", second)
+		for _, variantID := range []VariantID{"variant-1", "variant-2"} {
+			availability, found := payload.Availabilities[variantID]
+			if !found || availability.AvailableQuantity == nil || *availability.AvailableQuantity != 0 || availability.Discontinued != nil || availability.BackorderedUntil != nil {
+				t.Fatalf("availability for %q = %#v, want only available_quantity: 0", variantID, availability)
+			}
 		}
 		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
 	})
@@ -226,24 +245,6 @@ func TestUpdateItemsAvailabilitySerializesVariantMap(t *testing.T) {
 	}
 	if order.ID == nil || *order.ID != "order-123" || order.State == nil || *order.State != OrderStateProcessing {
 		t.Fatalf("UpdateItemsAvailability() order = %#v", order)
-	}
-}
-
-// TestMoveToProcessingOmitsExpectedShipDate verifies the processing endpoint receives no expected date field when the caller preserves a requested date.
-func TestMoveToProcessingOmitsExpectedShipDate(t *testing.T) {
-	client := newTestClient(t, func(request *http.Request) *http.Response {
-		var payload map[string]any
-		if err := json.UnmarshalRead(request.Body, &payload); err != nil {
-			t.Fatalf("decode processing payload: %v", err)
-		}
-		if len(payload) != 0 {
-			t.Fatalf("payload = %#v, want no expected ship date", payload)
-		}
-		return testResponse(request, http.StatusOK, `{"id":"order-123","state":"PROCESSING"}`)
-	})
-
-	if _, err := client.Orders.MoveToProcessing(context.Background(), OrderID("order-123"), MoveOrderToProcessingRequest{}); err != nil {
-		t.Fatalf("MoveToProcessing() error = %v", err)
 	}
 }
 

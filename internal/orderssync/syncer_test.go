@@ -138,16 +138,17 @@ func TestSyncRetainsCompletedWatermarkAfterPartialFailure(t *testing.T) {
 		t.Fatalf("CompleteSync() error = %v", err)
 	}
 	calls := 0
+	wantErr := errors.New("network unavailable")
 	source := SourceFunc(func(_ context.Context, _ *faire.OrderListOptions) (*faire.OrderPage, error) {
 		calls++
 		if calls == 1 {
 			return &faire.OrderPage{Orders: []faire.Order{syncOrder("order-1", now)}, Cursor: faire.Ptr("next")}, nil
 		}
-		return nil, errors.New("network unavailable")
+		return nil, wantErr
 	})
 	syncer := newTestSyncer(t, store, source, now)
-	if _, err := syncer.Sync(ctx, "connection-a"); err == nil {
-		t.Fatal("Sync() succeeded after page failure")
+	if _, err := syncer.Sync(ctx, "connection-a"); !errors.Is(err, wantErr) {
+		t.Fatalf("Sync() error = %v, want wrapped %v", err, wantErr)
 	}
 	state, _, err := store.SyncState(ctx, "connection-a")
 	if err != nil || state.HighWatermarkUpdatedAtUTC == nil || !state.HighWatermarkUpdatedAtUTC.Equal(watermark) {

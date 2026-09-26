@@ -33,7 +33,8 @@ func TestBuildOrderListOptions(t *testing.T) {
 		UpdatedAtMin: "2026-01-02T03:04:05Z",
 		SortBy:       faire.OrderSortByUpdatedAt,
 	}
-	options := BuildOrderListOptions(query, map[faire.OrderState]struct{}{faire.OrderStateNew: {}}, "next-page")
+	includedStates := map[faire.OrderState]struct{}{faire.OrderStateNew: {}}
+	options := BuildOrderListOptions(query, includedStates, "next-page")
 	if options.UpdatedAtMin == nil || *options.UpdatedAtMin != query.UpdatedAtMin {
 		t.Fatalf("UpdatedAtMin = %#v", options.UpdatedAtMin)
 	}
@@ -42,6 +43,18 @@ func TestBuildOrderListOptions(t *testing.T) {
 	}
 	if options.Cursor == nil || *options.Cursor != "next-page" {
 		t.Fatalf("Cursor = %#v", options.Cursor)
+	}
+	wantExcludedStates := []faire.OrderState{
+		faire.OrderStateProcessing,
+		faire.OrderStatePreTransit,
+		faire.OrderStateInTransit,
+		faire.OrderStateDelivered,
+		faire.OrderStateCanceled,
+		faire.OrderStateBackordered,
+		faire.OrderStatePendingRetailerConfirmation,
+	}
+	if !reflect.DeepEqual(options.ExcludedStates, wantExcludedStates) {
+		t.Fatalf("ExcludedStates = %#v, want %#v", options.ExcludedStates, wantExcludedStates)
 	}
 	if options.Limit != nil || options.Page != nil || options.CreatedAtMin != nil || options.ShipAfterMax != nil || options.OriginalOrderID != nil {
 		t.Fatalf("unsupported options were set: %#v", options)
@@ -59,25 +72,36 @@ func TestBuildOrderListOptionsRejectsUnsupportedSort(t *testing.T) {
 	}
 }
 
-// TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback verifies the initial
-// server query uses update-time sorting and the default update boundary.
-func TestNewStateAtUsesUpdateTimeServerSortAnd30DayLookback(t *testing.T) {
+// TestNewStateAtConfiguresServerAndLocalDefaults verifies a new state separates server update sorting from local table sorting.
+func TestNewStateAtConfiguresServerAndLocalDefaults(t *testing.T) {
+	now := time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC)
 	location := time.FixedZone("UTC-05", -5*60*60)
-	state := NewStateAt(time.Date(2026, time.March, 21, 15, 30, 0, 0, time.UTC), location)
+	_, wantUpdatedAtMin := DefaultUpdatedAtMinimum(now, location)
+	state := NewStateAt(now, location)
 	if state.Query.SortBy != faire.OrderSortByUpdatedAt {
 		t.Fatalf("NewStateAt().Query.SortBy = %q, want %q", state.Query.SortBy, faire.OrderSortByUpdatedAt)
 	}
-	if state.Query.UpdatedAtMin != "2026-02-19T00:00:00-05:00" {
-		t.Fatalf("NewStateAt().Query.UpdatedAtMin = %q, want 30-day lookback", state.Query.UpdatedAtMin)
+	if state.Query.UpdatedAtMin != wantUpdatedAtMin {
+		t.Fatalf("NewStateAt().Query.UpdatedAtMin = %q, want %q", state.Query.UpdatedAtMin, wantUpdatedAtMin)
+	}
+	wantTableSort := TableSort{Column: TableSortColumnOrderDate, Direction: TableSortDescending}
+	if state.TableSort != wantTableSort {
+		t.Fatalf("NewStateAt().TableSort = %#v, want %#v", state.TableSort, wantTableSort)
 	}
 }
 
 // TestNewStateIncludesAllOrders verifies the initial Orders screen shows every supported state by default.
 func TestNewStateIncludesAllOrders(t *testing.T) {
 	state := NewState()
-	wantIncluded := make(map[faire.OrderState]struct{}, len(KnownStates()))
-	for _, orderState := range KnownStates() {
-		wantIncluded[orderState] = struct{}{}
+	wantIncluded := map[faire.OrderState]struct{}{
+		faire.OrderStateNew:                         {},
+		faire.OrderStateProcessing:                  {},
+		faire.OrderStatePreTransit:                  {},
+		faire.OrderStateInTransit:                   {},
+		faire.OrderStateDelivered:                   {},
+		faire.OrderStateCanceled:                    {},
+		faire.OrderStateBackordered:                 {},
+		faire.OrderStatePendingRetailerConfirmation: {},
 	}
 	if !reflect.DeepEqual(state.IncludedStates, wantIncluded) {
 		t.Fatalf("NewState().IncludedStates = %#v, want %#v", state.IncludedStates, wantIncluded)

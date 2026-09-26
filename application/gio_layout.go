@@ -161,6 +161,34 @@ func clickableWithPointer(gtx layout.Context, button *widget.Clickable, child la
 	})
 }
 
+// copyIconButton renders a compact, icon-only tracking-number copy control. The explicit drawn icon avoids dependence on an emoji/font glyph that may render differently on Sage workstations.
+func copyIconButton(gtx layout.Context, button *widget.Clickable) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(32))
+	gtx.Constraints.Min = image.Pt(size, size)
+	gtx.Constraints.Max = image.Pt(size, size)
+	return clickableWithPointer(gtx, button, func(gtx layout.Context) layout.Dimensions {
+		return outlinedPanel(gtx, cardBackground, panelBorderColor, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(8)}.Layout(gtx, copyIcon)
+		})
+	})
+}
+
+// copyIcon draws two overlapping document outlines that communicate the standard copy action without requiring a text label.
+func copyIcon(gtx layout.Context) layout.Dimensions {
+	size := gtx.Constraints.Min.X
+	stroke := max(gtx.Dp(unit.Dp(2)), 1)
+	drawOutline := func(x, y, width, height int) {
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x, y, x+width, y+stroke)).Op())
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x, y+height-stroke, x+width, y+height)).Op())
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x, y, x+stroke, y+height)).Op())
+		paint.FillShape(gtx.Ops, mutedTextColor, clip.Rect(image.Rect(x+width-stroke, y, x+width, y+height)).Op())
+	}
+	documentSize := max(size-gtx.Dp(unit.Dp(5)), stroke*2)
+	drawOutline(0, 0, documentSize, documentSize)
+	drawOutline(size-documentSize, size-documentSize, documentSize, documentSize)
+	return layout.Dimensions{Size: image.Pt(size, size)}
+}
+
 // tableFullscreenButton renders the compact expand or minimize control for the Orders table.
 // gtx supplies the current frame, button retains interaction state, fullscreen selects the inverse glyph, and the returned dimensions provide a stable 36dp mouse target.
 func tableFullscreenButton(gtx layout.Context, button *widget.Clickable, fullscreen bool) layout.Dimensions {

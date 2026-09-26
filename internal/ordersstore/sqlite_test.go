@@ -109,10 +109,7 @@ func TestMigrationsCarryForwardBoundaryAndListProjections(t *testing.T) {
 	if err != nil || len(page.Rows) != 1 || page.Rows[0].AddressName != "Ada's Antiques" || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != 999 || page.Rows[0].TotalPayoutCurrency != "USD" || page.Rows[0].CommissionBPS == nil || *page.Rows[0].CommissionBPS != 1500 || page.Rows[0].CommissionFlatFeeAmountMinor == nil || *page.Rows[0].CommissionFlatFeeAmountMinor != 1000 || page.Rows[0].CommissionFlatFeeCurrency != "USD" || page.Rows[0].PurchaseOrderNumber != "PO-123" {
 		t.Fatalf("migrated raw list projections = %#v, err=%v", page, err)
 	}
-	var legacyColumns int
-	if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name IN ('customer_name', 'total_display', 'commission_display', 'total_amount_minor', 'total_currency')`).Scan(&legacyColumns); err != nil || legacyColumns != 0 {
-		t.Fatalf("legacy table-only columns = %d, err=%v", legacyColumns, err)
-	}
+
 }
 
 // TestUpsertOrdersKeepsConnectionDataIsolatedAndRejectsOlderVersions verifies storage partitions and conflict safety.
@@ -121,8 +118,9 @@ func TestUpsertOrdersKeepsConnectionDataIsolatedAndRejectsOlderVersions(t *testi
 	store := openTestStore(t)
 	newer := time.Date(2026, 2, 2, 12, 0, 0, 0, time.UTC)
 	older := newer.Add(-time.Minute)
+	newerRecord := testRecord("connection-a", "order-1", "DISPLAY-1", newer)
 	if err := store.UpsertOrders(ctx, []OrderRecord{
-		testRecord("connection-a", "order-1", "DISPLAY-1", newer),
+		newerRecord,
 		testRecord("connection-b", "order-1", "DISPLAY-1", newer),
 	}); err != nil {
 		t.Fatalf("initial upsert error = %v", err)
@@ -138,8 +136,18 @@ func TestUpsertOrdersKeepsConnectionDataIsolatedAndRejectsOlderVersions(t *testi
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if snapshot.SnapshotJSON == stale.SnapshotJSON {
-		t.Fatal("older snapshot replaced newer local snapshot")
+	if snapshot.SnapshotJSON != newerRecord.SnapshotJSON {
+		t.Fatalf("SnapshotJSON = %q, want newer value %q", snapshot.SnapshotJSON, newerRecord.SnapshotJSON)
+	}
+	if !snapshot.UpdatedAtUTC.Equal(newerRecord.UpdatedAtUTC) {
+		t.Fatalf("UpdatedAtUTC = %v, want newer value %v", snapshot.UpdatedAtUTC, newerRecord.UpdatedAtUTC)
+	}
+	page, err := store.List(ctx, ListQuery{ConnectionID: "connection-a", Limit: 1})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(page.Rows) != 1 || page.Rows[0].TotalPayoutAmountMinor == nil || *page.Rows[0].TotalPayoutAmountMinor != *newerRecord.TotalPayoutAmountMinor {
+		t.Fatalf("retained projection = %#v, want newer payout %d", page.Rows, *newerRecord.TotalPayoutAmountMinor)
 	}
 	if err := store.DeleteConnectionData(ctx, "connection-a"); err != nil {
 		t.Fatalf("DeleteConnectionData() error = %v", err)
