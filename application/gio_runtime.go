@@ -85,7 +85,7 @@ func (ui *DesktopUI) closePendingStartupStores() {
 	}
 }
 
-// runWindow handles Gio window events, begins startup work on its first frame, drains safe background results including Sage fulfillment requests plus shipment and item-availability submissions, and submits complete frames.
+// runWindow handles Gio window events, begins startup work on its first frame, drains background results including Sage fulfillment and local payout exports, and submits complete frames.
 // It releases in-memory Orders presentation data, closes persistent storage, and cancels background work when Gio reports window destruction.
 func (ui *DesktopUI) runWindow() error {
 	defer ui.shutdown()
@@ -112,6 +112,7 @@ func (ui *DesktopUI) runWindow() error {
 			ui.drainItemAvailabilityResults()
 			ui.drainOrderProcessingResults()
 			ui.drainOrderExportResults()
+			ui.drainPayoutResults()
 			ui.drainUpdateResults()
 			ui.drainUpdateInstallResults()
 			ui.Layout(gtx)

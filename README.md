@@ -13,10 +13,11 @@ A native desktop application for working with a Faire brand, built with Go and [
 - Moves selected orders to Processing with an expected ship date and supports fulfillment actions from order details.
 - Supports an opt-in Sage 100 Shipping Data Entry integration for reviewing Faire orders and returning shipment results to Sage.
 - Exports New, Backordered, or selected orders as CSV files, and can download packing slips for selected orders without creating a CSV.
+- Reconciles Faire payout summaries with unpaid Sage invoices and exports matched cash receipts CSVs.
 - Lets users delete or rebuild the connection-scoped local order cache.
 - Checks for compatible application updates on startup or on demand.
 
-Products, Customers, and Payouts are planned navigation surfaces. The current desktop UI provides functional Orders, Brand Profile, Connections, and Settings flows.
+Products and Customers are planned navigation surfaces. The desktop UI provides functional Orders, Payouts, Brand Profile, Connections, and Settings flows.
 
 ## Quick start
 
@@ -95,6 +96,12 @@ The optional Sage integration connects Sage 100 Shipping Data Entry to the runni
 - **Simulate label purchase (test)** exercises the result and Sage writeback flow with deterministic sample data; it does not call Faire or buy a label. Direct Faire label purchasing is not implemented.
 
 The integration requires the Sage script and the GUI to use the same protocol. See [`sage/LaunchFaireFulfillment.vbs`](sage/LaunchFaireFulfillment.vbs), [`sage/FieldMappings.json`](sage/FieldMappings.json), [`sage/ShipCodes.json`](sage/ShipCodes.json), and [`sage/Packages.json`](sage/Packages.json) for the Sage bridge and its mapping/configuration data. The Windows firewall helper is [`scripts/Allow-FaireGuiSageFirewall.ps1`](scripts/Allow-FaireGuiSageFirewall.ps1).
+
+### Payout cash receipts
+
+Open **Payouts**, browse for a Faire payout summary CSV and a Sage invoices export CSV, then enter a check number and comment. **Export cash receipts CSV** writes `cash_re_check_*.csv` to Downloads. Each Faire `Order Number` is matched to a Sage `Customer PO No.` only when its Sage `Balance` is greater than zero. The output uses the Sage invoice number and amount, the Faire payout amount, and their difference as the discount. Duplicate open invoice POs or duplicate matched payouts stop the export rather than producing ambiguous receipts; zero matches create no file. No Faire connection is needed for this local workflow.
+
+On Windows, **Browse** opens the native Windows file picker directly; it does not start PowerShell or a console window.
 
 ### CSV and packing-slip exports
 

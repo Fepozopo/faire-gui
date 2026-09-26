@@ -25,10 +25,12 @@ const (
 	connectionsTab
 	// ordersTab displays the read-only Orders workflow.
 	ordersTab
+	// payoutsTab displays the local Faire-to-Sage cash receipts export.
+	payoutsTab
 )
 
 // DesktopUI owns stable Gio widget state and the non-secret state needed to render the desktop application.
-// Its methods run on Gio's frame goroutine, while startup, profile, order, update, and Sage fulfillment workers publish only safe results through channels.
+// Its methods run on Gio's frame goroutine, while startup, profile, order, payout, update, and Sage fulfillment workers publish results through channels.
 type DesktopUI struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -60,6 +62,7 @@ type DesktopUI struct {
 
 	// orders is the feature-owned Orders component. The shell supplies only immutable connection scope and handles cross-feature status.
 	orders     *ordersController
+	payouts    payoutPageState
 	editorMode connectionEditorMode
 	editing    connections.Connection
 
@@ -73,7 +76,7 @@ type DesktopUI struct {
 	brandsList             widget.List
 	connectionsList        widget.List
 	connectionPickerList   widget.List
-	tabButtons             [3]widget.Clickable
+	tabButtons             [4]widget.Clickable
 	activeConnectionButton widget.Clickable
 	closeConnectionPicker  widget.Clickable
 	addConnectionButton    widget.Clickable
@@ -200,6 +203,8 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 		ui.sageShipCodeRulesError = "Sage Ship Via policy is invalid. The integration remains disabled until its configuration is corrected."
 	}
 	ui.configureEditors()
+	ui.payouts.results = make(chan payoutResult, 1)
+	ui.payouts.list.Axis = layout.Vertical
 	ui.resetOrdersState()
 	ui.brandsList.Axis = layout.Vertical
 	ui.connectionsList.Axis = layout.Vertical
@@ -208,12 +213,16 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 }
 
 // configureEditors applies persistent field behavior once, rather than recreating editor state every frame.
-// The masked token editor is the only UI state that can contain a direct access token.
+// The masked token editor is the only UI state that can contain a direct access token; payout paths and values use single-line editors.
 func (ui *DesktopUI) configureEditors() {
 	ui.labelEditor.SingleLine = true
 	ui.environmentEditor.SingleLine = true
 	ui.accessTokenEditor.SingleLine = true
 	ui.accessTokenEditor.Mask = '•'
+	ui.payouts.summary.SingleLine = true
+	ui.payouts.sage.SingleLine = true
+	ui.payouts.checkNo.SingleLine = true
+	ui.payouts.comment.SingleLine = true
 }
 
 // resetOrdersState creates a fresh default order query, clears the connection-scoped New-order count,

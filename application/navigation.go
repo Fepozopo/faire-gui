@@ -15,7 +15,7 @@ import (
 )
 
 // layoutSidebar renders the persistent application navigation, active-connection switcher, and Settings entry.
-// Brand profile and Connections are available only through Settings, while supported but unimplemented routes remain visually present but non-interactive.
+// Brand profile and Connections are available only through Settings; Products and Customers remain non-interactive.
 func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 	width := gtx.Dp(unit.Dp(220))
 	gtx.Constraints.Min.X = width
@@ -29,7 +29,7 @@ func (ui *DesktopUI) layoutSidebar(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(ui.layoutConnectionSwitcher),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
-				layout.Rigid(ui.layoutUnavailableNavigation),
+				layout.Rigid(ui.layoutPrimaryNavigation),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 				layout.Rigid(ui.layoutSettingsNavigation),
 				layout.Rigid(ui.layoutSettingsSubmenu),
@@ -86,9 +86,9 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 	})
 }
 
-// layoutUnavailableNavigation renders Orders together with supported routes that are not implemented as pages yet.
-// Only API-backed destinations are shown, and the unavailable routes are intentionally non-interactive.
-func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dimensions {
+// layoutPrimaryNavigation renders Orders and Payouts alongside planned, non-interactive routes.
+// It returns the sidebar navigation dimensions for the current frame.
+func (ui *DesktopUI) layoutPrimaryNavigation(gtx layout.Context) layout.Dimensions {
 	labels := []string{"Orders", "Products", "Customers", "Payouts"}
 	children := make([]layout.FlexChild, 0, len(labels)*2)
 	for index, label := range labels {
@@ -96,6 +96,9 @@ func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dime
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if index == 0 {
 				return ui.layoutNavigationItem(gtx, ordersTab, label)
+			}
+			if label == "Payouts" {
+				return ui.layoutNavigationItem(gtx, payoutsTab, label)
 			}
 			style := material.Body1(ui.theme, label)
 			style.Color = color.NRGBA{R: 130, G: 130, B: 130, A: 255}
@@ -203,6 +206,8 @@ func (ui *DesktopUI) layoutActivePage(gtx layout.Context) layout.Dimensions {
 		return ui.layoutConnections(gtx)
 	case brandsTab:
 		return ui.layoutBrands(gtx)
+	case payoutsTab:
+		return ui.layoutPayouts(gtx)
 	default:
 		return ui.layoutOrders(gtx)
 	}
