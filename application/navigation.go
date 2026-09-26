@@ -89,7 +89,7 @@ func (ui *DesktopUI) layoutNavigationItem(gtx layout.Context, route int, label s
 // layoutUnavailableNavigation renders Orders together with supported routes that are not implemented as pages yet.
 // Only API-backed destinations are shown, and the unavailable routes are intentionally non-interactive.
 func (ui *DesktopUI) layoutUnavailableNavigation(gtx layout.Context) layout.Dimensions {
-	labels := []string{"Orders", "Products", "Customers", "Analytics"}
+	labels := []string{"Orders", "Products", "Customers", "Payouts"}
 	children := make([]layout.FlexChild, 0, len(labels)*2)
 	for index, label := range labels {
 		index, label := index, label

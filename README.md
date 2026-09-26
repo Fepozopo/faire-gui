@@ -16,7 +16,7 @@ A native desktop application for working with a Faire brand, built with Go and [
 - Lets users delete or rebuild the connection-scoped local order cache.
 - Checks for compatible application updates on startup or on demand.
 
-Products, Customers, and Analytics are planned navigation surfaces. The current desktop UI provides functional Orders, Brand Profile, Connections, and Settings flows.
+Products, Customers, and Payouts are planned navigation surfaces. The current desktop UI provides functional Orders, Brand Profile, Connections, and Settings flows.
 
 ## Quick start
 
@@ -147,7 +147,7 @@ flowchart TD
 | [`internal/orderssync`](internal/orderssync)   | Faire order pagination, synchronization windows, and checkpoints.                      |
 | [`connections`](connections)                   | Saved connection metadata and operating-system credential access.                      |
 | [`faire`](faire)                               | Typed Faire API client and endpoint services.                                          |
-| [`sage`](sage)                                 | Sage Script Link bridge, field mappings, package catalog, and Ship Via policy data.      |
+| [`sage`](sage)                                 | Sage Script Link bridge, field mappings, package catalog, and Ship Via policy data.    |
 | [`updater`](updater)                           | Release checks and platform-specific update installation.                              |
 
 ### A note about Gio
