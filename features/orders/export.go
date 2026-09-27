@@ -31,7 +31,7 @@ func SalesSourceForBrand(brandID faire.BrandID) (SalesSource, bool) {
 	return source, found
 }
 
-// CSVHeader defines the stable column order for every exported order CSV file, ending with the shipping service.
+// CSVHeader defines the stable column order for every exported order CSV file, ending with the discounted subtotal and shipping service.
 var CSVHeader = []string{
 	"id", "display_id", "created_at", "ship_after",
 	"address_name", "address_address1", "address_address2", "address_postal_code",
@@ -39,10 +39,10 @@ var CSVHeader = []string{
 	"address_country", "address_country_code", "address_company_name",
 	"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 	"payout_costs_commission_bps", "payout_costs_commission",
-	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "ship_via",
+	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "payout_costs_subtotal_after_brand_discounts", "ship_via",
 }
 
-// WriteCSV writes orders as a CSV with an optional CSVHeader row, saleSource, and derived ship_via in every data row.
+// WriteCSV writes orders as a CSV with an optional CSVHeader row, saleSource, discounted subtotal, and derived ship_via in every data row.
 // writer receives CSV bytes, saleSource identifies each row, source supplies orders, includeHeader controls the first row, and it returns the first write or flush error; each item becomes one row while orders without items produce one row with blank item fields.
 func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order, includeHeader bool) error {
 	csvWriter := csv.NewWriter(writer)
@@ -69,7 +69,7 @@ func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order, in
 }
 
 // csvRow returns the CSV values for one order, one order item when present, and the configured brand sales source.
-// It normalizes dates and money values and derives the shipping service from the delivery address and discounted subtotal.
+// It normalizes dates and money values, including the discounted subtotal, and derives the shipping service from the delivery address and subtotal.
 func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []string {
 	return []string{
 		stringValue(order.ID),
@@ -100,6 +100,7 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 		stringValue(order.Notes),
 		payoutTotal(order.PayoutCosts),
 		stringValue(order.FreeShippingReason),
+		payoutSubtotalAfterBrandDiscounts(order.PayoutCosts),
 		shipVia(order),
 	}
 }
@@ -174,6 +175,14 @@ func payoutTotal(costs *faire.PayoutCosts) string {
 		return ""
 	}
 	return fmt.Sprintf("%.2f", float64(*costs.TotalPayout.AmountMinor)/100.0)
+}
+
+// payoutSubtotalAfterBrandDiscounts returns the order's post-discount subtotal in decimal units, or a blank CSV value when unavailable.
+func payoutSubtotalAfterBrandDiscounts(costs *faire.PayoutCosts) string {
+	if costs == nil || costs.SubtotalAfterBrandDiscounts == nil || costs.SubtotalAfterBrandDiscounts.AmountMinor == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", float64(*costs.SubtotalAfterBrandDiscounts.AmountMinor)/100.0)
 }
 
 // itemSKU returns an item's SKU or a blank value for an order without items.

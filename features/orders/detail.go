@@ -11,7 +11,7 @@ import (
 )
 
 // Detail is the display-ready, read-only representation of one locally stored Order.
-// It contains approved text fields, the typed fulfillment state needed to gate shipment creation, navigation identifiers, and the exact total-payout cents needed to validate a new shipment's label cost without exposing a raw API object or serialized snapshot to layout code.
+// It contains approved text fields, the discounted order subtotal, the typed fulfillment state needed to gate shipment creation, navigation identifiers, and the exact total-payout cents needed to validate a new shipment's label cost without exposing a raw API object or serialized snapshot to layout code.
 type Detail struct {
 	OrderID                faire.OrderID
 	State                  faire.OrderState
@@ -34,6 +34,7 @@ type Detail struct {
 	Shipments              []DetailShipment
 	ShippingAddress        DetailAddress
 	Commission             string
+	SubtotalAfterDiscounts string
 	TotalPayout            string
 	TotalPayoutMinor       *int64
 	IsFreeShipping         string
@@ -86,7 +87,7 @@ type DetailAddress struct {
 	PhoneNumber string
 }
 
-// PresentDetail converts order and its local synchronization time into safe display-ready detail values, including lineage, scheduling, sales-representative, and free-shipping data.
+// PresentDetail converts order and its local synchronization time into safe display-ready detail values, including lineage, scheduling, discounted subtotal, sales-representative, and free-shipping data.
 // It returns a Detail containing only approved presentation fields.
 func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 	detail := Detail{
@@ -109,6 +110,7 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		Shipments:              presentDetailShipments(order.Shipments),
 		ShippingAddress:        presentDetailAddress(order.Address),
 		Commission:             formatCommissionAmount(order.PayoutCosts),
+		SubtotalAfterDiscounts: "—",
 		IsFreeShipping:         detailBoolean(order.IsFreeShipping),
 		FreeShippingReason:     detailFreeShippingReason(order.FreeShippingReason),
 		PendingCancellation:    detailBoolean(order.HasPendingRetailerCancellationRequest),
@@ -121,6 +123,9 @@ func PresentDetail(order faire.Order, syncedAt time.Time) Detail {
 		detail.Customer = safeDetailText(displayCustomer(order.Customer))
 	} else {
 		detail.Customer = "—"
+	}
+	if costs := order.PayoutCosts; costs != nil && costs.SubtotalAfterBrandDiscounts != nil {
+		detail.SubtotalAfterDiscounts = FormatTotal(costs.SubtotalAfterBrandDiscounts.AmountMinor, stringValue(costs.SubtotalAfterBrandDiscounts.Currency))
 	}
 	if order.PayoutCosts != nil && order.PayoutCosts.TotalPayout != nil && order.PayoutCosts.TotalPayout.AmountMinor != nil && order.PayoutCosts.TotalPayout.Currency != nil {
 		amountMinor := *order.PayoutCosts.TotalPayout.AmountMinor

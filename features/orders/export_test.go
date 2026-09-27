@@ -9,7 +9,7 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item, free-shipping reason, shipping service, and the specified column order.
+// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item, discounted subtotal, shipping service, and the specified column order.
 func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	t.Parallel()
 
@@ -26,7 +26,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 			{IncludesFreeShipping: faire.Ptr(true), DiscountPercentage: faire.Ptr(10.5)},
 			{IncludesFreeShipping: faire.Ptr(false), DiscountPercentage: faire.Ptr(5.0)},
 		},
-		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), Commission: &faire.Money{AmountMinor: faire.Ptr(int64(425))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(7650))}},
+		PayoutCosts:  &faire.PayoutCosts{CommissionBPS: faire.Ptr(int64(1500)), Commission: &faire.Money{AmountMinor: faire.Ptr(int64(425))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(7650))}, SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(8845))}},
 		Source:       faire.Ptr("FAIRE_MARKETPLACE"),
 		SalesRepName: faire.Ptr("Sam"),
 		Notes:        faire.Ptr("Leave at loading bay"),
@@ -50,7 +50,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		"address_country", "address_country_code", "address_company_name",
 		"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 		"payout_costs_commission_bps", "payout_costs_commission",
-		"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "ship_via",
+		"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "payout_costs_subtotal_after_brand_discounts", "ship_via",
 	}
 	if !reflect.DeepEqual(rows[0], wantHeader) {
 		t.Fatalf("header = %#v, want %#v", rows[0], wantHeader)
@@ -59,8 +59,8 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
 	wantRows := [][]string{
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "FAIRE - UPS"},
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "FAIRE - UPS"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - UPS"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - UPS"},
 	}
 	for index, want := range wantRows {
 		if got := rows[index+1]; !reflect.DeepEqual(got, want) {
@@ -91,19 +91,20 @@ func TestWriteCSVSelectsShipVia(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		address *faire.Address
-		costs   *faire.PayoutCosts
-		want    string
+		name         string
+		address      *faire.Address
+		costs        *faire.PayoutCosts
+		wantSubtotal string
+		want         string
 	}{
-		{name: "Alaska code overrides cheap subtotal", address: &faire.Address{StateCode: faire.Ptr("ak")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}}, want: "FAIRE - USPS"},
-		{name: "Hawaii name overrides expensive subtotal", address: &faire.Address{State: faire.Ptr("Hawaii")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, want: "FAIRE - USPS"},
+		{name: "Alaska code overrides cheap subtotal", address: &faire.Address{StateCode: faire.Ptr("ak")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}}, wantSubtotal: "49.99", want: "FAIRE - USPS"},
+		{name: "Hawaii name overrides expensive subtotal", address: &faire.Address{State: faire.Ptr("Hawaii")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, wantSubtotal: "50.00", want: "FAIRE - USPS"},
 		{name: "Alaska name", address: &faire.Address{State: faire.Ptr("Alaska")}, want: "FAIRE - USPS"},
 		{name: "Hawaii code", address: &faire.Address{StateCode: faire.Ptr("HI")}, want: "FAIRE - USPS"},
-		{name: "below fifty after discounts despite larger payout", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(6000))}}, want: "FAIRE - CHEAP"},
-		{name: "exactly fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, want: "FAIRE - UPS"},
-		{name: "above fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5001))}}, want: "FAIRE - UPS"},
-		{name: "zero subtotal", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(0))}}, want: "FAIRE - CHEAP"},
+		{name: "below fifty after discounts despite larger payout", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(6000))}}, wantSubtotal: "49.99", want: "FAIRE - CHEAP"},
+		{name: "exactly fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, wantSubtotal: "50.00", want: "FAIRE - UPS"},
+		{name: "above fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5001))}}, wantSubtotal: "50.01", want: "FAIRE - UPS"},
+		{name: "zero subtotal", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(0))}}, wantSubtotal: "0.00", want: "FAIRE - CHEAP"},
 		{name: "missing subtotal", costs: &faire.PayoutCosts{}, want: "FAIRE - UPS"},
 		{name: "missing amount", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{}}, want: "FAIRE - UPS"},
 		{name: "missing address and costs", want: "FAIRE - UPS"},
@@ -119,8 +120,11 @@ func TestWriteCSVSelectsShipVia(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadAll(%s) error = %v", test.name, err)
 			}
-			if len(rows) != 2 || rows[0][len(rows[0])-1] != "ship_via" {
-				t.Fatalf("WriteCSV(%s) rows = %#v, want a header with ship_via and one data row", test.name, rows)
+			if len(rows) != 2 || len(rows[0]) != len(rows[1]) || rows[0][len(rows[0])-2] != "payout_costs_subtotal_after_brand_discounts" || rows[0][len(rows[0])-1] != "ship_via" {
+				t.Fatalf("WriteCSV(%s) rows = %#v, want a header with discounted subtotal before ship_via and one data row", test.name, rows)
+			}
+			if got := rows[1][len(rows[1])-2]; got != test.wantSubtotal {
+				t.Fatalf("WriteCSV(%s) subtotal = %q, want %q", test.name, got, test.wantSubtotal)
 			}
 			if got := rows[1][len(rows[1])-1]; got != test.want {
 				t.Fatalf("WriteCSV(%s) ship_via = %q, want %q", test.name, got, test.want)

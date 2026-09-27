@@ -150,7 +150,7 @@ func (ui *DesktopUI) layoutItemAvailabilityHeaderActions(gtx layout.Context) lay
 	)
 }
 
-// layoutOrderDetailContent lays out approved values from detail, with a clickable original-order ID, updated and local-sync timestamps preceding the order's creation date, free-shipping reason following its eligibility, and shipments between order notes and items.
+// layoutOrderDetailContent lays out approved values from detail, with a clickable original-order ID, updated and local-sync timestamps preceding the order's creation date, discounted subtotal beside payout, free-shipping reason following its eligibility, and shipments between order notes and items.
 // It uses ui for themed controls and returns the rendered content dimensions; each order item is a separate card for scanability.
 func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
 	children := []layout.FlexChild{
@@ -168,6 +168,7 @@ func layoutOrderDetailContent(gtx layout.Context, ui *DesktopUI, detail orders.D
 		layout.Rigid(detailLine(ui, "Expected ship date", detail.ExpectedShipDate)),
 		layout.Rigid(detailLine(ui, "Customer", detail.Customer)),
 		layout.Rigid(detailLine(ui, "Commission", detail.Commission)),
+		layout.Rigid(detailLine(ui, "Order subtotal after discounts", detail.SubtotalAfterDiscounts)),
 		layout.Rigid(detailLine(ui, "Total payout", detail.TotalPayout)),
 		layout.Rigid(detailLine(ui, "Source", detail.Source)),
 		layout.Rigid(detailLine(ui, "Purchase order", detail.PurchaseOrderNumber)),

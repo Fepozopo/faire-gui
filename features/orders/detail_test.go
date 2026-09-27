@@ -7,7 +7,7 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestPresentDetailMapsApprovedNestedOrderData verifies locally stored detail data is transformed into typed display values.
+// TestPresentDetailMapsApprovedNestedOrderData verifies locally stored detail data, including the discounted subtotal, is transformed into typed display values.
 func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 	orderID := faire.OrderID("order-1")
 	originalOrderID := faire.OrderID("bo_original-order-1")
@@ -20,7 +20,7 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 	updatedAt := "2026-01-03T04:05:06Z"
 	firstName, lastName := "Ada", "Lovelace"
 	name, address1, city := "Ada Lovelace", "1 Computing Lane", "London"
-	quantity, itemPrice, commission, payout := int64(2), int64(1234), int64(250), int64(999)
+	quantity, itemPrice, commission, payout, subtotal := int64(2), int64(1234), int64(250), int64(999), int64(4999)
 	currency := "USD"
 	product, variant, sku, variantID := "Widget", "Large", "SKU-1", faire.VariantID("variant-1")
 	customizationType, customizationValue := "Message", "Hello\x00 world"
@@ -35,10 +35,10 @@ func TestPresentDetailMapsApprovedNestedOrderData(t *testing.T) {
 		Items:       []faire.OrderItem{{ProductName: &product, VariantName: &variant, SKU: &sku, VariantID: &variantID, Quantity: &quantity, Price: &faire.Money{AmountMinor: &itemPrice, Currency: &currency}, Customizations: []faire.Customization{{Type: &customizationType, Value: &customizationValue}}}},
 		Shipments:   []faire.Shipment{{Carrier: &carrier, TrackingCode: &tracking}},
 		Address:     &faire.Address{Name: &name, Address1: &address1, City: &city},
-		PayoutCosts: &faire.PayoutCosts{Commission: &faire.Money{AmountMinor: &commission, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}},
+		PayoutCosts: &faire.PayoutCosts{Commission: &faire.Money{AmountMinor: &commission, Currency: &currency}, TotalPayout: &faire.Money{AmountMinor: &payout, Currency: &currency}, SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: &subtotal, Currency: &currency}},
 	}
 	detail := PresentDetail(order, time.Date(2026, 1, 4, 5, 6, 0, 0, time.UTC))
-	if detail.OrderID != orderID || detail.State != state || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Commission != "$2.50" || detail.TotalPayout != "$9.99" || detail.TotalPayoutMinor == nil || *detail.TotalPayoutMinor != payout {
+	if detail.OrderID != orderID || detail.State != state || detail.DisplayID != displayID || detail.Status != "Processing" || detail.Customer != "Ada Lovelace" || detail.Commission != "$2.50" || detail.SubtotalAfterDiscounts != "$49.99" || detail.TotalPayout != "$9.99" || detail.TotalPayoutMinor == nil || *detail.TotalPayoutMinor != payout {
 		t.Fatalf("detail = %#v", detail)
 	}
 	if detail.ShippingAddress.Address1 != address1 || len(detail.Items) != 1 || detail.Items[0].Quantity != "2" || detail.Items[0].Price != "$12.34" || detail.Items[0].VariantID != variantID || detail.Items[0].OrderedQuantity != quantity || !detail.Items[0].AvailabilityEligible || detail.Items[0].Customizations[0].Value != "Hello world" || len(detail.Shipments) != 1 || detail.Shipments[0].TrackingCode != tracking {
@@ -56,6 +56,30 @@ func TestPresentDetailMarksItemsWithoutActionableAvailabilityDataIneligible(t *t
 	detail := PresentDetail(faire.Order{Items: []faire.OrderItem{{VariantID: &variantID}, {Quantity: &zero}}}, time.Time{})
 	if len(detail.Items) != 2 || detail.Items[0].AvailabilityEligible || detail.Items[1].AvailabilityEligible {
 		t.Fatalf("detail items = %#v, want ineligible items", detail.Items)
+	}
+}
+
+// TestPresentDetailFormatsDiscountedSubtotal verifies currency formatting and missing money data on the order details page.
+func TestPresentDetailFormatsDiscountedSubtotal(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		subtotal *faire.Money
+		want     string
+	}{
+		{name: "CAD", subtotal: &faire.Money{AmountMinor: faire.Ptr(int64(5010)), Currency: faire.Ptr("CAD")}, want: "CAD 50.10"},
+		{name: "zero", subtotal: &faire.Money{AmountMinor: faire.Ptr(int64(0)), Currency: faire.Ptr("USD")}, want: "$0.00"},
+		{name: "missing currency", subtotal: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}, want: "—"},
+		{name: "missing amount", subtotal: &faire.Money{Currency: faire.Ptr("USD")}, want: "—"},
+		{name: "missing subtotal", want: "—"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			order := faire.Order{PayoutCosts: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: test.subtotal}}
+			if got := PresentDetail(order, time.Time{}).SubtotalAfterDiscounts; got != test.want {
+				t.Fatalf("PresentDetail(%s) subtotal = %q, want %q", test.name, got, test.want)
+			}
+		})
 	}
 }
 
@@ -87,11 +111,11 @@ func TestOfficialTrackingURLUsesOnlyAllowlistedCarrierTrackers(t *testing.T) {
 	}
 }
 
-// TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safe placeholders, including a non-navigable original-order ID.
+// TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safe placeholders, including the subtotal and a non-navigable original-order ID.
 func TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates(t *testing.T) {
 	unknown := faire.OrderState("ON_HOLD")
 	detail := PresentDetail(faire.Order{State: &unknown}, time.Time{})
-	if detail.DisplayID != "—" || detail.Status != "On Hold" || detail.OriginalOrderID != "" || detail.OriginalOrderDisplayID != "—" || detail.Customer != "—" || detail.ShippingAddress.Address1 != "—" || detail.SyncedAt != "—" {
+	if detail.DisplayID != "—" || detail.Status != "On Hold" || detail.OriginalOrderID != "" || detail.OriginalOrderDisplayID != "—" || detail.Customer != "—" || detail.SubtotalAfterDiscounts != "—" || detail.ShippingAddress.Address1 != "—" || detail.SyncedAt != "—" {
 		t.Fatalf("detail = %#v", detail)
 	}
 }
