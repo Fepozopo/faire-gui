@@ -31,7 +31,7 @@ func SalesSourceForBrand(brandID faire.BrandID) (SalesSource, bool) {
 	return source, found
 }
 
-// CSVHeader defines the stable column order for every exported order CSV file, ending with Faire's free-shipping reason.
+// CSVHeader defines the stable column order for every exported order CSV file, ending with the shipping service.
 var CSVHeader = []string{
 	"id", "display_id", "created_at", "ship_after",
 	"address_name", "address_address1", "address_address2", "address_postal_code",
@@ -39,10 +39,10 @@ var CSVHeader = []string{
 	"address_country", "address_country_code", "address_company_name",
 	"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 	"payout_costs_commission_bps", "payout_costs_commission",
-	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason",
+	"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "ship_via",
 }
 
-// WriteCSV writes orders as a CSV with an optional CSVHeader row and saleSource in every data row.
+// WriteCSV writes orders as a CSV with an optional CSVHeader row, saleSource, and derived ship_via in every data row.
 // writer receives CSV bytes, saleSource identifies each row, source supplies orders, includeHeader controls the first row, and it returns the first write or flush error; each item becomes one row while orders without items produce one row with blank item fields.
 func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order, includeHeader bool) error {
 	csvWriter := csv.NewWriter(writer)
@@ -69,7 +69,7 @@ func WriteCSV(writer io.Writer, saleSource SalesSource, source []faire.Order, in
 }
 
 // csvRow returns the CSV values for one order, one order item when present, and the configured brand sales source.
-// It normalizes dates and money values to the established CSV contract.
+// It normalizes dates and money values and derives the shipping service from the delivery address and discounted subtotal.
 func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []string {
 	return []string{
 		stringValue(order.ID),
@@ -100,7 +100,26 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 		stringValue(order.Notes),
 		payoutTotal(order.PayoutCosts),
 		stringValue(order.FreeShippingReason),
+		shipVia(order),
 	}
+}
+
+const cheapShippingCutoffMinor int64 = 50 * 100
+
+// shipVia returns the CSV shipping service for an order, prioritizing Alaska and Hawaii over the discounted subtotal.
+// Missing subtotal amounts do not qualify for the under-$50 service.
+func shipVia(order faire.Order) string {
+	if address := order.Address; address != nil {
+		stateCode := strings.ToUpper(strings.TrimSpace(stringValue(address.StateCode)))
+		state := strings.ToUpper(strings.TrimSpace(stringValue(address.State)))
+		if stateCode == "AK" || stateCode == "HI" || state == "ALASKA" || state == "HAWAII" {
+			return "FAIRE - USPS"
+		}
+	}
+	if costs := order.PayoutCosts; costs != nil && costs.SubtotalAfterBrandDiscounts != nil && costs.SubtotalAfterBrandDiscounts.AmountMinor != nil && *costs.SubtotalAfterBrandDiscounts.AmountMinor < cheapShippingCutoffMinor {
+		return "FAIRE - CHEAP"
+	}
+	return "FAIRE - UPS"
 }
 
 // addressValue returns a requested address field while keeping missing addresses blank.

@@ -9,7 +9,7 @@ import (
 	"github.com/Fepozopo/faire-gui/faire"
 )
 
-// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item, free-shipping reason, and the specified column order.
+// TestWriteCSVUsesStableHeaderAndOneRowPerItem verifies exports preserve every item, free-shipping reason, shipping service, and the specified column order.
 func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 	t.Parallel()
 
@@ -50,7 +50,7 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		"address_country", "address_country_code", "address_company_name",
 		"is_free_shipping", "brand_discounts_includes_free_shipping", "brand_discounts_discount_percentage",
 		"payout_costs_commission_bps", "payout_costs_commission",
-		"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason",
+		"item_sku", "item_price", "item_quantity", "sale_source", "sales_rep_name", "notes", "payout_costs_total_payout", "free_shipping_reason", "ship_via",
 	}
 	if !reflect.DeepEqual(rows[0], wantHeader) {
 		t.Fatalf("header = %#v, want %#v", rows[0], wantHeader)
@@ -59,8 +59,8 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
 	wantRows := [][]string{
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"},
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "FAIRE - UPS"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "FAIRE - UPS"},
 	}
 	for index, want := range wantRows {
 		if got := rows[index+1]; !reflect.DeepEqual(got, want) {
@@ -83,6 +83,49 @@ func TestWriteCSVOmitsHeaderWhenRequested(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0][0] != "order-1" {
 		t.Fatalf("rows = %#v, want one headerless order row", rows)
+	}
+}
+
+// TestWriteCSVSelectsShipVia verifies state precedence and the discounted-subtotal cutoff in exported rows.
+func TestWriteCSVSelectsShipVia(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		address *faire.Address
+		costs   *faire.PayoutCosts
+		want    string
+	}{
+		{name: "Alaska code overrides cheap subtotal", address: &faire.Address{StateCode: faire.Ptr("ak")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}}, want: "FAIRE - USPS"},
+		{name: "Hawaii name overrides expensive subtotal", address: &faire.Address{State: faire.Ptr("Hawaii")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, want: "FAIRE - USPS"},
+		{name: "Alaska name", address: &faire.Address{State: faire.Ptr("Alaska")}, want: "FAIRE - USPS"},
+		{name: "Hawaii code", address: &faire.Address{StateCode: faire.Ptr("HI")}, want: "FAIRE - USPS"},
+		{name: "below fifty after discounts despite larger payout", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(6000))}}, want: "FAIRE - CHEAP"},
+		{name: "exactly fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, want: "FAIRE - UPS"},
+		{name: "above fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5001))}}, want: "FAIRE - UPS"},
+		{name: "zero subtotal", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(0))}}, want: "FAIRE - CHEAP"},
+		{name: "missing subtotal", costs: &faire.PayoutCosts{}, want: "FAIRE - UPS"},
+		{name: "missing amount", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{}}, want: "FAIRE - UPS"},
+		{name: "missing address and costs", want: "FAIRE - UPS"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			order := faire.Order{Address: test.address, PayoutCosts: test.costs}
+			if err := WriteCSV(&output, "ASC", []faire.Order{order}, true); err != nil {
+				t.Fatalf("WriteCSV(%s) error = %v", test.name, err)
+			}
+			rows, err := csv.NewReader(&output).ReadAll()
+			if err != nil {
+				t.Fatalf("ReadAll(%s) error = %v", test.name, err)
+			}
+			if len(rows) != 2 || rows[0][len(rows[0])-1] != "ship_via" {
+				t.Fatalf("WriteCSV(%s) rows = %#v, want a header with ship_via and one data row", test.name, rows)
+			}
+			if got := rows[1][len(rows[1])-1]; got != test.want {
+				t.Fatalf("WriteCSV(%s) ship_via = %q, want %q", test.name, got, test.want)
+			}
+		})
 	}
 }
 
