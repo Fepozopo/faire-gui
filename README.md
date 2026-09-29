@@ -88,7 +88,7 @@ Refreshing an individual order detail or looking up an order by display ID updat
 
 The optional Sage integration connects Sage 100 Shipping Data Entry to the running Faire GUI. A Sage Script Link script sends the active shipment and order details to the GUI, which finds the saved Faire connection from the Sage sales source and opens the matching order for review.
 
-- The integration is disabled by default and must be enabled in **Settings** on the Windows user account running the GUI.
+- The integration is disabled by default and must be enabled in **Settings** on the Windows user account running the GUI. The per-user `faire-gui/settings.json` file is created only when a setting changes; if it is absent, the integration stays disabled.
 - Sage sends requests to the GUI over HTTP at `RMT01:18080`. The listener accepts requests only from the approved Sage workstation (`BSDC01`); the network firewall should also restrict this port to that workstation.
 - The GUI can preselect safely matched Sage backordered items as unavailable. The user must explicitly confirm any Faire availability update.
 - After a shipment is completed in Faire, the GUI returns typed tracking, package-item, and freight results. The Sage script validates the request and document identifiers, writes the result through Sage's business objects, then acknowledges whether writeback succeeded.
