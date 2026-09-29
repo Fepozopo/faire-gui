@@ -10,34 +10,33 @@ import (
 	"strings"
 )
 
-var header = []string{"CustomerNo", "DepositType", "CheckNo", "InvoiceAmount", "InvoiceNo", "DiscountAmount", "AmountPosted", "Comment"}
-
-// WriteCSV writes one cash-receipt row per payout whose order number uniquely matches an open Sage invoice.
-// It reads the two CSVs, uses checkNo and comment for every output row, and returns the match count or a validation error.
+// WriteCSV writes headerless cash-receipt rows for payouts whose order numbers uniquely match open Sage invoices.
+// It reads the two CSVs, uses checkNo and comment for every output row, and returns the match count,
+// the formatted total amount posted, or a validation error. On error or no matches, the total is empty.
 // A non-positive Sage balance is already settled and is excluded; duplicate open PO numbers are rejected rather than guessing.
-func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (int, error) {
+func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (int, string, error) {
 	if strings.TrimSpace(checkNo) == "" {
-		return 0, fmt.Errorf("check number is required")
+		return 0, "", fmt.Errorf("check number is required")
 	}
 	payoutReader := csv.NewReader(summary)
 	payouts, err := payoutReader.ReadAll()
 	if err != nil {
-		return 0, fmt.Errorf("read Faire payout summary: %w", err)
+		return 0, "", fmt.Errorf("read Faire payout summary: %w", err)
 	}
 	sageReader := csv.NewReader(sage)
 	// Sage leaves commas in Comment unquoted; they add fields after every field used for matching.
 	sageReader.FieldsPerRecord = -1
 	invoices, err := sageReader.ReadAll()
 	if err != nil {
-		return 0, fmt.Errorf("read Sage invoices: %w", err)
+		return 0, "", fmt.Errorf("read Sage invoices: %w", err)
 	}
 	payoutColumns, err := columns(payouts, "Faire payout summary", "Order Number", "Payout Amount")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	sageColumns, err := columns(invoices, "Sage invoices", "Customer PO No.", "Invoice No.", "Amount", "Balance")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	wanted := make(map[string]bool, len(payouts)-1)
@@ -48,7 +47,7 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 	for rowNo, row := range invoices[1:] {
 		balance, err := cents(row[sageColumns["Balance"]])
 		if err != nil {
-			return 0, fmt.Errorf("Sage row %d balance: %w", rowNo+2, err)
+			return 0, "", fmt.Errorf("Sage row %d balance: %w", rowNo+2, err)
 		}
 		if balance <= 0 {
 			continue
@@ -58,12 +57,13 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 			continue
 		}
 		if _, exists := open[po]; exists {
-			return 0, fmt.Errorf("more than one open Sage invoice has PO %q", po)
+			return 0, "", fmt.Errorf("more than one open Sage invoice has PO %q", po)
 		}
 		open[po] = row
 	}
 
 	rows := make([][]string, 0, len(payouts))
+	var totalPosted int64
 	seen := make(map[string]bool)
 	for rowNo, payout := range payouts[1:] {
 		order := strings.TrimSpace(payout[payoutColumns["Order Number"]])
@@ -72,34 +72,38 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 			continue
 		}
 		if seen[order] {
-			return 0, fmt.Errorf("more than one Faire payout has order %q", order)
+			return 0, "", fmt.Errorf("more than one Faire payout has order %q", order)
 		}
 		seen[order] = true
 		amount, err := cents(invoice[sageColumns["Amount"]])
 		if err != nil {
-			return 0, fmt.Errorf("Sage invoice for order %q amount: %w", order, err)
+			return 0, "", fmt.Errorf("Sage invoice for order %q amount: %w", order, err)
 		}
 		posted, err := cents(payout[payoutColumns["Payout Amount"]])
 		if err != nil {
-			return 0, fmt.Errorf("Faire row %d payout amount: %w", rowNo+2, err)
+			return 0, "", fmt.Errorf("Faire row %d payout amount: %w", rowNo+2, err)
 		}
 		invoiceNo := strings.TrimSpace(invoice[sageColumns["Invoice No."]])
 		if invoiceNo == "" {
-			return 0, fmt.Errorf("Sage invoice for order %q has no invoice number", order)
+			return 0, "", fmt.Errorf("Sage invoice for order %q has no invoice number", order)
 		}
-		rows = append(rows, []string{"0090671", "C", checkNo, money(amount), invoiceNo, money(amount - posted), money(posted), comment})
+		// The receipt's invoice amount is the Sage amount minus the discount, not the original Sage amount.
+		discount := amount - posted
+		netInvoice := amount - discount
+		if posted > 0 && totalPosted > math.MaxInt64-posted || posted < 0 && totalPosted < math.MinInt64-posted {
+			return 0, "", fmt.Errorf("total amount posted exceeds supported range")
+		}
+		totalPosted += posted
+		rows = append(rows, []string{"0090671", "C", checkNo, money(netInvoice), invoiceNo, money(discount), money(posted), comment})
 	}
 	if len(rows) == 0 {
-		return 0, nil
+		return 0, "", nil
 	}
 	writer := csv.NewWriter(out)
-	if err := writer.Write(header); err != nil {
-		return 0, fmt.Errorf("write cash receipts header: %w", err)
-	}
 	if err := writer.WriteAll(rows); err != nil {
-		return 0, fmt.Errorf("write cash receipts rows: %w", err)
+		return 0, "", fmt.Errorf("write cash receipts rows: %w", err)
 	}
-	return len(rows), nil
+	return len(rows), money(totalPosted), nil
 }
 
 // columns validates a CSV's named fields and required row width, returning field indexes for each requested name.

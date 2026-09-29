@@ -148,7 +148,7 @@ func (ui *DesktopUI) exportPayouts() {
 	ui.workers.Add(1)
 	go func() {
 		defer ui.workers.Done()
-		filename, count, err := writePayoutCSV(summary, sage, checkNo, comment)
+		filename, count, total, err := writePayoutCSV(summary, sage, checkNo, comment)
 		result := payoutResult{}
 		switch {
 		case err != nil:
@@ -156,7 +156,7 @@ func (ui *DesktopUI) exportPayouts() {
 		case count == 0:
 			result.status = "No Faire payouts matched open Sage invoices; no file was created."
 		default:
-			result.status = fmt.Sprintf("Exported %d matched payouts to Downloads as %s.", count, filename)
+			result.status = fmt.Sprintf("Exported %d matched payouts to Downloads as %s. Total amount posted: $%s.", count, filename, total)
 		}
 		select {
 		case page.results <- result:
@@ -167,52 +167,54 @@ func (ui *DesktopUI) exportPayouts() {
 }
 
 // writePayoutCSV reconciles the two named CSVs and writes a complete cash-receipts file to Downloads.
-// It returns the generated filename and match count, leaving no output file when there are no matches or an error occurs.
-func writePayoutCSV(summaryPath, sagePath, checkNo, comment string) (string, int, error) {
+// It returns the generated filename, match count, and formatted total posted, leaving no output file
+// and returning an empty total when there are no matches or an error occurs.
+func writePayoutCSV(summaryPath, sagePath, checkNo, comment string) (string, int, string, error) {
 	directory, err := downloadsDirectory()
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	return writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, comment)
 }
 
 // writePayoutCSVToDirectory writes a reconciled CSV to a specified directory for isolated filesystem tests.
-// It returns the filename and count, leaving the directory unchanged when validation fails or no invoices match.
-func writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, comment string) (string, int, error) {
+// It returns the filename, match count, and formatted total posted, leaving no output file
+// and returning an empty total when validation fails or no invoices match.
+func writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, comment string) (string, int, string, error) {
 	summary, err := os.Open(summaryPath)
 	if err != nil {
-		return "", 0, fmt.Errorf("open Faire summary: %w", err)
+		return "", 0, "", fmt.Errorf("open Faire summary: %w", err)
 	}
 	defer summary.Close()
 	sage, err := os.Open(sagePath)
 	if err != nil {
-		return "", 0, fmt.Errorf("open Sage export: %w", err)
+		return "", 0, "", fmt.Errorf("open Sage export: %w", err)
 	}
 	defer sage.Close()
 	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	temporary, err := os.CreateTemp(directory, ".cash-re-check-*.csv")
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	defer os.Remove(temporary.Name())
-	count, writeErr := payouts.WriteCSV(temporary, summary, sage, checkNo, comment)
+	count, total, writeErr := payouts.WriteCSV(temporary, summary, sage, checkNo, comment)
 	closeErr := temporary.Close()
 	if writeErr != nil {
-		return "", 0, writeErr
+		return "", 0, "", writeErr
 	}
 	if closeErr != nil {
-		return "", 0, closeErr
+		return "", 0, "", closeErr
 	}
 	if count == 0 {
-		return "", 0, nil
+		return "", 0, "", nil
 	}
 	filename := fmt.Sprintf("cash_re_check_%d.csv", time.Now().UnixNano())
 	if err := os.Rename(temporary.Name(), filepath.Join(directory, filename)); err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
-	return filename, count, nil
+	return filename, count, total, nil
 }
 
 // drainPayoutResults applies completed worker results to persistent editors and status on the Gio frame goroutine.
