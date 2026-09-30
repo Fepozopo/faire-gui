@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestWriteCSVMatchesOnlyOpenInvoices verifies headerless output, matching, net amounts, discounts, rounding, and the posted total.
+// TestWriteCSVMatchesOnlyOpenInvoices verifies headerless output, matching, the shared batch total, per-row payouts, discounts, and rounding.
 func TestWriteCSVMatchesOnlyOpenInvoices(t *testing.T) {
 	t.Parallel()
 	summary := "Order Number,Payout Amount\nPAID,30.00\nOPEN,363.00\nSECOND,2.05\nUNKNOWN,10.00\n"
@@ -23,8 +23,8 @@ func TestWriteCSVMatchesOnlyOpenInvoices(t *testing.T) {
 		t.Fatalf("read output for open invoice: %v", err)
 	}
 	want := [][]string{
-		{"0090671", "C", "CHECK01", "363.00", "0108501", "27.00", "363.00", "user, note"},
-		{"0090671", "C", "CHECK01", "2.05", "0108502", "0.95", "2.05", "user, note"},
+		{"0090671", "C", "CHECK01", "365.05", "0108501", "27.00", "363.00", "user, note"},
+		{"0090671", "C", "CHECK01", "365.05", "0108502", "0.95", "2.05", "user, note"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows for matched open invoice = %q, want %q", got, want)

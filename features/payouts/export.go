@@ -11,8 +11,9 @@ import (
 )
 
 // WriteCSV writes headerless cash-receipt rows for payouts whose order numbers uniquely match open Sage invoices.
-// It reads the two CSVs, uses checkNo and comment for every output row, and returns the match count,
-// the formatted total amount posted, or a validation error. On error or no matches, the total is empty.
+// It reads the two CSVs, uses checkNo and comment for every output row, and repeats the total posted
+// in the fourth column of every row. It returns the match count, formatted total, or a validation error.
+// On error or no matches, the total is empty.
 // A non-positive Sage balance is already settled and is excluded; duplicate open PO numbers are rejected rather than guessing.
 func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (int, string, error) {
 	if strings.TrimSpace(checkNo) == "" {
@@ -87,23 +88,26 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 		if invoiceNo == "" {
 			return 0, "", fmt.Errorf("Sage invoice for order %q has no invoice number", order)
 		}
-		// The receipt's invoice amount is the Sage amount minus the discount, not the original Sage amount.
+		// Keep each matched payout in the seventh column; the fourth column is the batch total.
 		discount := amount - posted
-		netInvoice := amount - discount
 		if posted > 0 && totalPosted > math.MaxInt64-posted || posted < 0 && totalPosted < math.MinInt64-posted {
 			return 0, "", fmt.Errorf("total amount posted exceeds supported range")
 		}
 		totalPosted += posted
-		rows = append(rows, []string{"0090671", "C", checkNo, money(netInvoice), invoiceNo, money(discount), money(posted), comment})
+		rows = append(rows, []string{"0090671", "C", checkNo, "", invoiceNo, money(discount), money(posted), comment})
 	}
 	if len(rows) == 0 {
 		return 0, "", nil
+	}
+	total := money(totalPosted)
+	for _, row := range rows {
+		row[3] = total
 	}
 	writer := csv.NewWriter(out)
 	if err := writer.WriteAll(rows); err != nil {
 		return 0, "", fmt.Errorf("write cash receipts rows: %w", err)
 	}
-	return len(rows), money(totalPosted), nil
+	return len(rows), total, nil
 }
 
 // columns validates a CSV's named fields and required row width, returning field indexes for each requested name.

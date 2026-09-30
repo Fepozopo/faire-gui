@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestWritePayoutCSVToDirectory verifies headerless exports persist net amounts and return their total, while empty matches do not.
+// TestWritePayoutCSVToDirectory verifies headerless exports persist the batch total and per-row amounts, while empty matches do not.
 func TestWritePayoutCSVToDirectory(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -48,7 +48,7 @@ func TestWritePayoutCSVToDirectory(t *testing.T) {
 	}
 }
 
-// TestExportPayoutsShowsTotal verifies the status below the export form reports the sum of matched net invoices.
+// TestExportPayoutsShowsTotal verifies the export status and every CSV row report the same matched payout total.
 func TestExportPayoutsShowsTotal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -69,5 +69,21 @@ func TestExportPayoutsShowsTotal(t *testing.T) {
 	ui.drainPayoutResults()
 	if !strings.Contains(ui.payouts.status, "Exported 2 matched payouts") || !strings.Contains(ui.payouts.status, "Total amount posted: $365.05.") {
 		t.Fatalf("payout export status = %q, want two matched payouts and total amount posted $365.05", ui.payouts.status)
+	}
+	files, err := os.ReadDir(filepath.Join(home, "Downloads"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("Downloads after export = %v, error = %v; want one CSV", files, err)
+	}
+	file, err := os.Open(filepath.Join(home, "Downloads", files[0].Name()))
+	if err != nil {
+		t.Fatalf("open exported CSV %q: %v", files[0].Name(), err)
+	}
+	defer file.Close()
+	rows, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		t.Fatalf("read exported CSV %q: %v", files[0].Name(), err)
+	}
+	if len(rows) != 2 || rows[0][3] != "365.05" || rows[1][3] != "365.05" {
+		t.Fatalf("exported rows = %q, want two rows with status total 365.05 in column four", rows)
 	}
 }
