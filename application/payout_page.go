@@ -20,12 +20,12 @@ import (
 // payoutPageState retains the input fields, buttons, and status for the local cash-receipts workflow.
 // File selection and export run off the frame goroutine, with completed results applied only on the UI thread.
 type payoutPageState struct {
-	list                              widget.List
-	summary, sage, checkNo, comment   widget.Editor
-	browseSummary, browseSage, export widget.Clickable
-	busy                              bool
-	status                            string
-	results                           chan payoutResult
+	list                                         widget.List
+	summary, sage, description, checkNo, comment widget.Editor
+	browseSummary, browseSage, export            widget.Clickable
+	busy                                         bool
+	status                                       string
+	results                                      chan payoutResult
 }
 
 // payoutResult carries either a file picker selection or the completed export status back to Gio.
@@ -36,7 +36,8 @@ type payoutResult struct {
 }
 
 // layoutPayouts renders the form for choosing Faire and Sage files and exporting matched cash receipts.
-// It accepts the current Gio context and returns the layout dimensions of the scrollable form.
+// It accepts the current Gio context and returns the scrollable form dimensions, including required
+// deposit description and check number editors and an optional comment editor.
 func (ui *DesktopUI) layoutPayouts(gtx layout.Context) layout.Dimensions {
 	page := &ui.payouts
 	if !page.busy {
@@ -65,10 +66,16 @@ func (ui *DesktopUI) layoutPayouts(gtx layout.Context) layout.Dimensions {
 			}),
 			fieldSpacer(),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return ui.payoutTextField(gtx, "Check number", &page.checkNo)
+				return ui.payoutTextField(gtx, "Deposit description (required)", &page.description)
 			}),
 			fieldSpacer(),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return ui.payoutTextField(gtx, "Comment", &page.comment) }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return ui.payoutTextField(gtx, "Check number (required)", &page.checkNo)
+			}),
+			fieldSpacer(),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return ui.payoutTextField(gtx, "Comment (optional)", &page.comment)
+			}),
 			fieldSpacer(),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if page.busy {
@@ -134,13 +141,15 @@ func (ui *DesktopUI) choosePayoutFile(field string) {
 }
 
 // exportPayouts validates inputs and starts a background local-only export to Downloads.
+// Both file paths, deposit description, and check number are required; only the comment is optional.
 // It snapshots editor values before starting the worker so subsequent edits cannot change an in-progress export.
 func (ui *DesktopUI) exportPayouts() {
 	page := &ui.payouts
 	summary, sage := strings.TrimSpace(page.summary.Text()), strings.TrimSpace(page.sage.Text())
+	description := strings.TrimSpace(page.description.Text())
 	checkNo, comment := strings.TrimSpace(page.checkNo.Text()), page.comment.Text()
-	if summary == "" || sage == "" || checkNo == "" {
-		page.status = "Select both CSV files and enter a check number."
+	if summary == "" || sage == "" || description == "" || checkNo == "" {
+		page.status = "Select both CSV files and enter a deposit description and check number."
 		return
 	}
 	page.busy = true
@@ -148,7 +157,7 @@ func (ui *DesktopUI) exportPayouts() {
 	ui.workers.Add(1)
 	go func() {
 		defer ui.workers.Done()
-		filename, count, total, err := writePayoutCSV(summary, sage, checkNo, comment)
+		filename, count, total, err := writePayoutCSV(summary, sage, description, checkNo, comment)
 		result := payoutResult{}
 		switch {
 		case err != nil:
@@ -167,20 +176,23 @@ func (ui *DesktopUI) exportPayouts() {
 }
 
 // writePayoutCSV reconciles the two named CSVs and writes a complete cash-receipts file to Downloads.
-// It returns the generated filename, match count, and formatted total posted, leaving no output file
+// It uses today's local date and the supplied description, check number, and optional comment for all rows.
+// It returns the generated filename, match count, and total for display only, leaving no output file
 // and returning an empty total when there are no matches or an error occurs.
-func writePayoutCSV(summaryPath, sagePath, checkNo, comment string) (string, int, string, error) {
+func writePayoutCSV(summaryPath, sagePath, description, checkNo, comment string) (string, int, string, error) {
+	depositDate := time.Now()
 	directory, err := downloadsDirectory()
 	if err != nil {
 		return "", 0, "", err
 	}
-	return writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, comment)
+	return writePayoutCSVToDirectory(directory, summaryPath, sagePath, depositDate, description, checkNo, comment)
 }
 
-// writePayoutCSVToDirectory writes a reconciled CSV to a specified directory for isolated filesystem tests.
-// It returns the filename, match count, and formatted total posted, leaving no output file
+// writePayoutCSVToDirectory reconciles summaryPath and sagePath into faire_cache_receipts_<timestamp>.csv in directory.
+// depositDate, description, checkNo, and optional comment supply the receipt fields; an explicit date permits isolated tests.
+// It returns the filename, match count, and total for display only, leaving no output file
 // and returning an empty total when validation fails or no invoices match.
-func writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, comment string) (string, int, string, error) {
+func writePayoutCSVToDirectory(directory, summaryPath, sagePath string, depositDate time.Time, description, checkNo, comment string) (string, int, string, error) {
 	summary, err := os.Open(summaryPath)
 	if err != nil {
 		return "", 0, "", fmt.Errorf("open Faire summary: %w", err)
@@ -194,12 +206,12 @@ func writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, commen
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", 0, "", err
 	}
-	temporary, err := os.CreateTemp(directory, ".cash-re-check-*.csv")
+	temporary, err := os.CreateTemp(directory, ".faire-cache-receipts-*.csv")
 	if err != nil {
 		return "", 0, "", err
 	}
 	defer os.Remove(temporary.Name())
-	count, total, writeErr := payouts.WriteCSV(temporary, summary, sage, checkNo, comment)
+	count, total, writeErr := payouts.WriteCSV(temporary, summary, sage, depositDate, description, checkNo, comment)
 	closeErr := temporary.Close()
 	if writeErr != nil {
 		return "", 0, "", writeErr
@@ -210,7 +222,7 @@ func writePayoutCSVToDirectory(directory, summaryPath, sagePath, checkNo, commen
 	if count == 0 {
 		return "", 0, "", nil
 	}
-	filename := fmt.Sprintf("cash_re_check_%d.csv", time.Now().UnixNano())
+	filename := fmt.Sprintf("faire_cache_receipts_%d.csv", time.Now().UnixNano())
 	if err := os.Rename(temporary.Name(), filepath.Join(directory, filename)); err != nil {
 		return "", 0, "", err
 	}

@@ -213,7 +213,8 @@ func newDesktopUIWithOrders(ctx context.Context, cancel context.CancelFunc, wind
 }
 
 // configureEditors applies persistent field behavior once, rather than recreating editor state every frame.
-// The masked token editor is the only UI state that can contain a direct access token; payout paths and values use single-line editors.
+// The masked token editor is the only UI state that can contain a direct access token.
+// Gio single-line editors keep payout paths, deposit descriptions, check numbers, and comments on one line.
 func (ui *DesktopUI) configureEditors() {
 	ui.labelEditor.SingleLine = true
 	ui.environmentEditor.SingleLine = true
@@ -221,6 +222,7 @@ func (ui *DesktopUI) configureEditors() {
 	ui.accessTokenEditor.Mask = '•'
 	ui.payouts.summary.SingleLine = true
 	ui.payouts.sage.SingleLine = true
+	ui.payouts.description.SingleLine = true
 	ui.payouts.checkNo.SingleLine = true
 	ui.payouts.comment.SingleLine = true
 }

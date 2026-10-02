@@ -99,7 +99,9 @@ The integration requires the Sage script and the GUI to use the same protocol. S
 
 ### Payout cash receipts
 
-Open **Payouts**, browse for a Faire payout summary CSV and a Sage invoices export CSV, then enter a check number and comment. **Export cash receipts CSV** writes `cash_re_check_*.csv` to Downloads. Each Faire `Order Number` is matched to a Sage `Customer PO No.` only when its Sage `Balance` is greater than zero. The output uses the Sage invoice number and amount, the Faire payout amount, and their difference as the discount. Duplicate open invoice POs or duplicate matched payouts stop the export rather than producing ambiguous receipts; zero matches create no file. No Faire connection is needed for this local workflow.
+Open **Payouts**, browse for a Faire payout summary CSV and a Sage invoices export CSV, then enter a required deposit description and check number. Only the comment is optional. **Export cash receipts CSV** writes `faire_cache_receipts_<timestamp>.csv` to Downloads. Each Faire `Order Number` is matched to a Sage `Customer PO No.` only when its Sage `Balance` is greater than zero. The output uses the Sage invoice number and amount, the Faire payout amount, and their difference as the discount. Duplicate open invoice POs or duplicate matched payouts stop the export rather than producing ambiguous receipts; zero matches create no file. No Faire connection is needed for this local workflow.
+
+The headerless CSV columns are: batch number (`FAIRE`), deposit number, deposit date, deposit description, deposit amount, customer number (`0090671`), check number, invoice number, discount amount, and comment. Deposit dates use today's local date as `YYYYMMDD`. Deposit numbers use the three-digit day of year followed by a two-character sequence, restarting at `00` for each export, advancing through `99`, then `AA`, `AB`, …, `ZZ`. More than 776 matched invoices fail the export without creating a CSV. The batch total appears only in the GUI status, not in the CSV.
 
 On Windows, **Browse** opens the native Windows file picker directly; it does not start PowerShell or a console window.
 

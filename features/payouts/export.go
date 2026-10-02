@@ -3,19 +3,40 @@ package payouts
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// WriteCSV writes headerless cash-receipt rows for payouts whose order numbers uniquely match open Sage invoices.
-// It reads the two CSVs, uses checkNo and comment for every output row, and repeats the total posted
-// in the fourth column of every row. It returns the match count, formatted total, or a validation error.
-// On error or no matches, the total is empty.
-// A non-positive Sage balance is already settled and is excluded; duplicate open PO numbers are rejected rather than guessing.
-func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (int, string, error) {
+const (
+	customerNumber          = "0090671"
+	depositDateLayout       = "20060102"
+	numericDepositSequences = 100
+	depositAlphabetSize     = 26
+	maxDepositRows          = numericDepositSequences + depositAlphabetSize*depositAlphabetSize
+)
+
+// ErrDepositSequenceExhausted indicates more matched invoices than five-character deposit numbers permit.
+var ErrDepositSequenceExhausted = errors.New("deposit number sequence exceeds ZZ; at most 776 matched invoices are allowed per export")
+
+// WriteCSV writes headerless cash-receipt rows to out for payouts uniquely matching open Sage invoices.
+// summary and sage supply the source CSVs. depositDate supplies the calendar date and day-of-year prefix;
+// description and checkNo are required shared values, while comment is optional.
+// Rows contain batch, deposit number/date/description/amount, customer, check, invoice, discount, and comment.
+// Each export starts at sequence 00, advances through 99 and AA–ZZ, and rejects more than 776 matches.
+// It returns the match count and formatted total for display only; errors and no matches return an empty total.
+// Validation finishes before output is written. Settled invoices are excluded and duplicate open POs are rejected.
+func WriteCSV(out io.Writer, summary, sage io.Reader, depositDate time.Time, description, checkNo, comment string) (int, string, error) {
+	if depositDate.IsZero() {
+		return 0, "", fmt.Errorf("deposit date is required")
+	}
+	if strings.TrimSpace(description) == "" {
+		return 0, "", fmt.Errorf("deposit description is required")
+	}
 	if strings.TrimSpace(checkNo) == "" {
 		return 0, "", fmt.Errorf("check number is required")
 	}
@@ -64,6 +85,8 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 	}
 
 	rows := make([][]string, 0, len(payouts))
+	dayPrefix := fmt.Sprintf("%03d", depositDate.YearDay())
+	date := depositDate.Format(depositDateLayout)
 	var totalPosted int64
 	seen := make(map[string]bool)
 	for rowNo, payout := range payouts[1:] {
@@ -88,26 +111,37 @@ func WriteCSV(out io.Writer, summary, sage io.Reader, checkNo, comment string) (
 		if invoiceNo == "" {
 			return 0, "", fmt.Errorf("Sage invoice for order %q has no invoice number", order)
 		}
-		// Keep each matched payout in the seventh column; the fourth column is the batch total.
+		if len(rows) == maxDepositRows {
+			return 0, "", ErrDepositSequenceExhausted
+		}
+		// Retain the total for the GUI, but export only the individual deposit amounts.
 		discount := amount - posted
 		if posted > 0 && totalPosted > math.MaxInt64-posted || posted < 0 && totalPosted < math.MinInt64-posted {
 			return 0, "", fmt.Errorf("total amount posted exceeds supported range")
 		}
 		totalPosted += posted
-		rows = append(rows, []string{"0090671", "C", checkNo, "", invoiceNo, money(discount), money(posted), comment})
+		depositNo := dayPrefix + depositSequence(len(rows))
+		rows = append(rows, []string{"FAIRE", depositNo, date, description, money(posted), customerNumber, checkNo, invoiceNo, money(discount), comment})
 	}
 	if len(rows) == 0 {
 		return 0, "", nil
 	}
 	total := money(totalPosted)
-	for _, row := range rows {
-		row[3] = total
-	}
 	writer := csv.NewWriter(out)
 	if err := writer.WriteAll(rows); err != nil {
 		return 0, "", fmt.Errorf("write cash receipts rows: %w", err)
 	}
 	return len(rows), total, nil
+}
+
+// depositSequence returns the two-character suffix for a zero-based matched-row index below maxDepositRows.
+// Numeric suffixes 00–99 precede letter pairs AA–ZZ to preserve the five-character deposit-number limit.
+func depositSequence(index int) string {
+	if index < numericDepositSequences {
+		return fmt.Sprintf("%02d", index)
+	}
+	index -= numericDepositSequences
+	return string([]byte{'A' + byte(index/depositAlphabetSize), 'A' + byte(index%depositAlphabetSize)})
 }
 
 // columns validates a CSV's named fields and required row width, returning field indexes for each requested name.
