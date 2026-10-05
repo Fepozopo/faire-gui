@@ -27,7 +27,7 @@ func TestWritePayoutCSVToDirectory(t *testing.T) {
 	}
 	output := filepath.Join(dir, "output")
 	date := time.Date(2024, time.February, 29, 0, 0, 0, 0, time.UTC)
-	filename, count, total, err := writePayoutCSVToDirectory(output, summary, sage, date, "Deposit", "CHECK01", "Comment")
+	filename, count, total, err := writePayoutCSVToDirectory(output, filepath.Join(dir, "settings.json"), summary, sage, date, "Deposit", "CHECK01", "Comment")
 	if err != nil || count != 1 || total != "363.00" || filename == "" {
 		t.Fatalf("writePayoutCSVToDirectory(matched) = (%q, %d, %q, %v), want filename, 1, 363.00, nil", filename, count, total, err)
 	}
@@ -47,7 +47,7 @@ func TestWritePayoutCSVToDirectory(t *testing.T) {
 	if err := os.WriteFile(sage, []byte("Customer PO No.,Invoice No.,Amount,Balance\nORDER1,0108501,390,0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	filename, count, total, err = writePayoutCSVToDirectory(output, summary, sage, date, "Deposit", "CHECK01", "Comment")
+	filename, count, total, err = writePayoutCSVToDirectory(output, filepath.Join(dir, "settings.json"), summary, sage, date, "Deposit", "CHECK01", "Comment")
 	if err != nil || filename != "" || count != 0 || total != "" {
 		t.Fatalf("writePayoutCSVToDirectory(settled) = (%q, %d, %q, %v), want empty filename, 0, empty total, nil", filename, count, total, err)
 	}
@@ -91,6 +91,8 @@ func TestExportPayoutsRequiresFields(t *testing.T) {
 func TestExportPayoutsShowsTotal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("AppData", filepath.Join(home, "config"))
 	summary := filepath.Join(home, "faire.csv")
 	sage := filepath.Join(home, "sage.csv")
 	if err := os.WriteFile(summary, []byte("Order Number,Payout Amount\nA,363\nB,2.05\n"), 0o600); err != nil {

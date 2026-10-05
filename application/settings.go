@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/Fepozopo/faire-gui/features/payouts"
 )
 
 const (
@@ -15,10 +19,21 @@ const (
 	settingsVersion = 1
 )
 
-// applicationSettings groups persisted preferences so future settings can share the same document.
+// settingsMu serializes in-process read/modify/write operations so exports and preference changes preserve each other.
+var settingsMu sync.Mutex
+
+// applicationSettings groups persisted preferences and the daily payout checkpoint in one document.
 type applicationSettings struct {
 	Version         int                     `json:"version"`
 	SageFulfillment sageFulfillmentSettings `json:"sageFulfillment"`
+	PayoutSequence  payoutSequenceSettings  `json:"payoutSequence,omitzero"`
+}
+
+// payoutSequenceSettings stores the full local calendar date and next zero-based deposit suffix offset.
+// A missing checkpoint starts at 00; using the year prevents annual day-of-year collisions.
+type payoutSequenceSettings struct {
+	Date         string `json:"date"`
+	NextSequence int    `json:"nextSequence"`
 }
 
 // sageFulfillmentSettings stores the user's opt-in choice for the Sage HTTP listener.
@@ -53,8 +68,8 @@ func loadSageFulfillmentSettingsFile(path string) (bool, error) {
 	return settings.SageFulfillment.Enabled, nil
 }
 
-// loadSettingsFile reads shared preferences, returning disabled defaults when path does not exist.
-// Invalid documents fail closed rather than allowing a later save to overwrite other preferences.
+// loadSettingsFile reads shared preferences and the payout checkpoint, returning zero defaults for a missing path.
+// Invalid documents or checkpoints fail closed rather than being overwritten or silently reusing deposit numbers.
 func loadSettingsFile(path string) (applicationSettings, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -73,6 +88,15 @@ func loadSettingsFile(path string) (applicationSettings, error) {
 	if settings.Version != settingsVersion {
 		return applicationSettings{}, fmt.Errorf("unsupported settings version %d", settings.Version)
 	}
+	sequence := settings.PayoutSequence
+	if sequence.NextSequence < 0 || sequence.NextSequence > payouts.MaxDepositSequences || sequence.Date == "" && sequence.NextSequence != 0 {
+		return applicationSettings{}, fmt.Errorf("invalid payout checkpoint: %w", payouts.ErrInvalidDepositSequence)
+	}
+	if sequence.Date != "" {
+		if _, err := time.Parse(time.DateOnly, sequence.Date); err != nil {
+			return applicationSettings{}, fmt.Errorf("invalid payout checkpoint date: %w", err)
+		}
+	}
 	return settings, nil
 }
 
@@ -85,13 +109,22 @@ func saveSageFulfillmentSettings(enabled bool) error {
 	return saveSageFulfillmentSettingsFile(path, enabled)
 }
 
-// saveSageFulfillmentSettingsFile updates only the Sage preference and atomically replaces path with owner-only permissions.
+// saveSageFulfillmentSettingsFile updates only the Sage preference, preserving the payout checkpoint.
+// It serializes updates and atomically replaces path with owner-only permissions, returning any load or save error.
 func saveSageFulfillmentSettingsFile(path string, enabled bool) error {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
 	settings, err := loadSettingsFile(path)
 	if err != nil {
 		return err
 	}
 	settings.SageFulfillment.Enabled = enabled
+	return saveSettingsFile(path, settings)
+}
+
+// saveSettingsFile atomically replaces path with settings using owner-only permissions, returning filesystem or encoding errors.
+// Callers must hold settingsMu across loading, modifying, and saving to prevent lost in-process updates.
+func saveSettingsFile(path string, settings applicationSettings) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create settings directory: %w", err)
 	}

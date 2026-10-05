@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/Fepozopo/faire-gui/features/payouts"
 )
 
 // TestLoadSageFulfillmentSettingsFileDefaultsDisabled verifies startup creates nothing and ignores the retired Sage settings document.
@@ -76,6 +79,40 @@ func TestSaveSageFulfillmentSettingsFileRoundTripsEnabledState(t *testing.T) {
 			want := map[string]any{"version": float64(1), "sageFulfillment": map[string]any{"enabled": test.enabled}}
 			if !reflect.DeepEqual(document, want) {
 				t.Fatalf("settings.json for enabled=%t = %v, want %v", test.enabled, document, want)
+			}
+		})
+	}
+}
+
+// TestLoadSettingsFileRejectsInvalidPayoutCheckpoint verifies corrupt counters cannot silently reuse deposit numbers.
+func TestLoadSettingsFileRejectsInvalidPayoutCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, checkpoint string
+		wantError        error
+	}{
+		{name: "negative", checkpoint: `{"date":"2025-01-01","nextSequence":-1}`, wantError: payouts.ErrInvalidDepositSequence},
+		{name: "beyond daily capacity", checkpoint: `{"date":"2025-01-01","nextSequence":1297}`, wantError: payouts.ErrInvalidDepositSequence},
+		{name: "missing date", checkpoint: `{"nextSequence":32}`, wantError: payouts.ErrInvalidDepositSequence},
+		{name: "invalid date", checkpoint: `{"date":"2025-02-30","nextSequence":32}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "settings.json")
+			content := `{"version":1,"payoutSequence":` + tc.checkpoint + `}`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write settings %q: %v", content, err)
+			}
+			_, err := loadSettingsFile(path)
+			if tc.wantError != nil {
+				if !errors.Is(err, tc.wantError) {
+					t.Fatalf("loadSettingsFile(%s) error = %v; want %v", tc.checkpoint, err, tc.wantError)
+				}
+			} else {
+				var parseErr *time.ParseError
+				if !errors.As(err, &parseErr) {
+					t.Fatalf("loadSettingsFile(%s) error = %v; want time.ParseError", tc.checkpoint, err)
+				}
 			}
 		})
 	}

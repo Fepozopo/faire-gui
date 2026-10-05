@@ -176,23 +176,40 @@ func (ui *DesktopUI) exportPayouts() {
 }
 
 // writePayoutCSV reconciles the two named CSVs and writes a complete cash-receipts file to Downloads.
-// It uses today's local date and the supplied description, check number, and optional comment for all rows.
-// It returns the generated filename, match count, and total for display only, leaving no output file
-// and returning an empty total when there are no matches or an error occurs.
+// It uses today's local date and the supplied receipt fields, continuing the persisted daily sequence across restarts.
+// It returns the generated filename, match count, and display-only total; errors and no matches return zero values.
+// Failed exports remove any output; if removal also fails, the error identifies the file that must not be imported.
 func writePayoutCSV(summaryPath, sagePath, description, checkNo, comment string) (string, int, string, error) {
 	depositDate := time.Now()
 	directory, err := downloadsDirectory()
 	if err != nil {
 		return "", 0, "", err
 	}
-	return writePayoutCSVToDirectory(directory, summaryPath, sagePath, depositDate, description, checkNo, comment)
+	settingsFile, err := settingsPath()
+	if err != nil {
+		return "", 0, "", err
+	}
+	return writePayoutCSVToDirectory(directory, settingsFile, summaryPath, sagePath, depositDate, description, checkNo, comment)
 }
 
 // writePayoutCSVToDirectory reconciles summaryPath and sagePath into faire_cache_receipts_<timestamp>.csv in directory.
-// depositDate, description, checkNo, and optional comment supply the receipt fields; an explicit date permits isolated tests.
-// It returns the filename, match count, and total for display only, leaving no output file
-// and returning an empty total when validation fails or no invoices match.
-func writePayoutCSVToDirectory(directory, summaryPath, sagePath string, depositDate time.Time, description, checkNo, comment string) (string, int, string, error) {
+// settingsFile stores the daily sequence; depositDate and the supplied receipt fields determine the output values.
+// Explicit paths and date permit isolated tests. Only successfully published, nonempty exports advance the checkpoint.
+// It returns the filename, match count, and display-only total; failures return zero values and remove the output.
+// If rollback removal also fails, the error identifies the file that must not be imported.
+func writePayoutCSVToDirectory(directory, settingsFile, summaryPath, sagePath string, depositDate time.Time, description, checkNo, comment string) (string, int, string, error) {
+	// Keep the read/modify/write cycle serialized with other exports and Sage preference updates.
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	settings, err := loadSettingsFile(settingsFile)
+	if err != nil {
+		return "", 0, "", err
+	}
+	date := depositDate.Format(time.DateOnly)
+	startSequence := 0
+	if settings.PayoutSequence.Date == date {
+		startSequence = settings.PayoutSequence.NextSequence
+	}
 	summary, err := os.Open(summaryPath)
 	if err != nil {
 		return "", 0, "", fmt.Errorf("open Faire summary: %w", err)
@@ -211,7 +228,7 @@ func writePayoutCSVToDirectory(directory, summaryPath, sagePath string, depositD
 		return "", 0, "", err
 	}
 	defer os.Remove(temporary.Name())
-	count, total, writeErr := payouts.WriteCSV(temporary, summary, sage, depositDate, description, checkNo, comment)
+	count, total, writeErr := payouts.WriteCSV(temporary, summary, sage, depositDate, startSequence, description, checkNo, comment)
 	closeErr := temporary.Close()
 	if writeErr != nil {
 		return "", 0, "", writeErr
@@ -223,8 +240,17 @@ func writePayoutCSVToDirectory(directory, summaryPath, sagePath string, depositD
 		return "", 0, "", nil
 	}
 	filename := fmt.Sprintf("faire_cache_receipts_%d.csv", time.Now().UnixNano())
-	if err := os.Rename(temporary.Name(), filepath.Join(directory, filename)); err != nil {
+	outputPath := filepath.Join(directory, filename)
+	if err := os.Rename(temporary.Name(), outputPath); err != nil {
 		return "", 0, "", err
+	}
+	settings.PayoutSequence = payoutSequenceSettings{Date: date, NextSequence: startSequence + count}
+	if err := saveSettingsFile(settingsFile, settings); err != nil {
+		// An untracked receipt file would reuse deposit numbers on retry, so do not leave it available for import.
+		if removeErr := os.Remove(outputPath); removeErr != nil {
+			return "", 0, "", fmt.Errorf("save payout checkpoint: %w; could not remove %s: %v; do not import this file", err, outputPath, removeErr)
+		}
+		return "", 0, "", fmt.Errorf("save payout checkpoint: %w", err)
 	}
 	return filename, count, total, nil
 }
