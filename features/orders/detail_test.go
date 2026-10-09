@@ -111,6 +111,45 @@ func TestOfficialTrackingURLUsesOnlyAllowlistedCarrierTrackers(t *testing.T) {
 	}
 }
 
+// TestPresentDetailShippingLabels verifies only available HTTPS labels reach the public detail model, without rewriting signed URLs or depending on shipping type.
+func TestPresentDetailShippingLabels(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		shipments []faire.Shipment
+		want      []string
+	}{
+		{name: "nil shipments"},
+		{name: "empty shipments", shipments: []faire.Shipment{}},
+		{name: "missing label", shipments: []faire.Shipment{{ShippingType: faire.Ptr(faire.ShippingTypeShipWithFaire)}}, want: []string{""}},
+		{name: "empty label", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("")}}, want: []string{""}},
+		{name: "blank label", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr(" \t\n")}}, want: []string{""}},
+		{name: "available label", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("https://cdn.faire.com/shipping-labels/label.pdf")}}, want: []string{"https://cdn.faire.com/shipping-labels/label.pdf"}},
+		{name: "signed URL and own shipping", shipments: []faire.Shipment{{ShippingType: faire.Ptr(faire.ShippingTypeShipOnYourOwn), ShippingLabelURL: faire.Ptr(" https://labels.example.com/download?token=a%2Fb&part=2&part=1 ")}}, want: []string{"https://labels.example.com/download?token=a%2Fb&part=2&part=1"}},
+		{name: "HTTP label", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("http://cdn.faire.com/label.pdf")}}, want: []string{""}},
+		{name: "local file", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("file:///tmp/label.pdf")}}, want: []string{""}},
+		{name: "relative label", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("/label.pdf")}}, want: []string{""}},
+		{name: "missing host", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("https:///label.pdf")}}, want: []string{""}},
+		{name: "malformed URL", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("https://cdn.faire.com/%invalid")}}, want: []string{""}},
+		{name: "embedded credentials", shipments: []faire.Shipment{{ShippingLabelURL: faire.Ptr("https://user:secret@cdn.faire.com/label.pdf")}}, want: []string{""}},
+		{name: "multiple shipments", shipments: []faire.Shipment{{}, {ShippingLabelURL: faire.Ptr("https://cdn.faire.com/second.pdf")}}, want: []string{"", "https://cdn.faire.com/second.pdf"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			detail := PresentDetail(faire.Order{Shipments: test.shipments}, time.Time{})
+			if len(detail.Shipments) != len(test.want) {
+				t.Fatalf("PresentDetail(%#v) returned %d shipments, want %d", test.shipments, len(detail.Shipments), len(test.want))
+			}
+			for index, want := range test.want {
+				if got := detail.Shipments[index].ShippingLabelURL; got != want {
+					t.Fatalf("shipment %d for input %#v: label URL = %q, want %q", index, test.shipments[index], got, want)
+				}
+			}
+		})
+	}
+}
+
 // TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates verifies empty stored snapshots render safe placeholders, including the subtotal and a non-navigable original-order ID.
 func TestPresentDetailHandlesMissingOptionalFieldsAndUnknownStates(t *testing.T) {
 	unknown := faire.OrderState("ON_HOLD")

@@ -82,6 +82,7 @@ Refreshing an individual order detail or looking up an order by display ID updat
 - Select one or more orders and use **Edit ship date** to move them to Processing with a date chosen in the calendar. Orders that already have a requested ship date keep their existing requested and expected dates.
 - Before an order has a shipment, its detail view can mark eligible variants out of stock. The update is sent as one confirmed batch, with a clear warning before submission.
 - Before an order has a shipment, its detail view can add one or more packages with a supported carrier, tracking number, and label cost. Tracking links are opened only for supported official carrier sites.
+- Existing shipments show **Reprint label** when Faire supplies a valid HTTPS shipping-label URL. The button opens the existing label in your browser for printing; it does not purchase or create another label. Use **Refresh order** to retrieve updated shipment information.
 - Order details can link to an original order when one exists, and every successful remote change is written back to that order’s local snapshot.
 
 ### Sage 100 fulfillment

@@ -16,7 +16,7 @@ import (
 const orderItemAvailabilityColumnWidth = unit.Dp(256)
 
 // layoutOrderDetail renders the typed local-first Order detail screen without accepting raw snapshots or Faire API values.
-// Its detail panel scrolls independently so the header controls remain available for long orders, while original-order and official-carrier tracking links and the empty-shipment form keep their own actions.
+// Its detail panel scrolls independently so the header controls remain available for long orders, while original-order links, shipment tracking and label actions, and the empty-shipment form retain independent controls.
 func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 	ui.handleSageFulfillmentEvents(gtx)
 	if itemAvailabilityVisible(ui.orders.view.orderDetail) {
@@ -29,11 +29,7 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 		ui.openOrder(originalOrderID)
 		ui.invalidate()
 	}
-	for index, shipment := range ui.orders.view.orderDetail.Shipments {
-		if shipment.TrackingURL != "" && ui.shipmentTrackingControlFor(ui.orders.view.orderDetail.OrderID, index).Clicked(gtx) {
-			ui.openTrackingURL(shipment.TrackingURL)
-		}
-	}
+	ui.handleExistingShipmentEvents(gtx)
 	if ui.orders.view.backToOrdersButton.Clicked(gtx) {
 		ui.orders.view.orderDetailOpen = false
 		ui.invalidate()
@@ -74,6 +70,20 @@ func (ui *DesktopUI) layoutOrderDetail(gtx layout.Context) layout.Dimensions {
 			})
 		}),
 	)
+}
+
+// handleExistingShipmentEvents consumes tracking and reprint clicks for the currently displayed order before rendering this frame.
+// gtx supplies Gio input; only available destinations can open the browser, and the handler returns no value because actions update the detail status directly.
+func (ui *DesktopUI) handleExistingShipmentEvents(gtx layout.Context) {
+	detail := ui.orders.view.orderDetail
+	for index, shipment := range detail.Shipments {
+		if shipment.TrackingURL != "" && ui.shipmentTrackingControlFor(detail.OrderID, index).Clicked(gtx) {
+			ui.openTrackingURL(shipment.TrackingURL)
+		}
+		if shipment.ShippingLabelURL != "" && ui.shipmentLabelControlFor(detail.OrderID, index).Clicked(gtx) {
+			ui.openShippingLabel(shipment.ShippingLabelURL)
+		}
+	}
 }
 
 // handleItemAvailabilityEvents applies the header and item-card availability events before their controls render for this frame.
@@ -415,19 +425,32 @@ func shipmentPanel(gtx layout.Context, child layout.Widget) layout.Dimensions {
 	})
 }
 
-// layoutExistingShipments renders persisted shipment values within the same neutral section used for new shipment entry.
-// Carrier identifiers are uppercased for consistent visual treatment with the documented API values.
+// layoutExistingShipments renders detail's persisted shipments with optional right-aligned reprint actions using ui's themed controls.
+// gtx supplies layout constraints and the returned dimensions cover all rows; carrier identifiers are uppercased, and missing label URLs deliberately produce no button.
 func layoutExistingShipments(gtx layout.Context, ui *DesktopUI, detail orders.Detail) layout.Dimensions {
-	children := make([]layout.FlexChild, 0, len(detail.Shipments)*4)
+	children := make([]layout.FlexChild, 0, len(detail.Shipments)*2)
 	for index, shipment := range detail.Shipments {
 		if index > 0 {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
 		}
-		children = append(children,
-			layout.Rigid(detailLine(ui, "Shipment", strings.ToUpper(shipment.Carrier)+" · "+shipment.ShippingType)),
-			layout.Rigid(detailTrackingLine(ui, detail.OrderID, index, shipment)),
-			layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)),
-		)
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			row := []layout.FlexChild{
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(detailLine(ui, "Shipment", strings.ToUpper(shipment.Carrier)+" · "+shipment.ShippingType)),
+						layout.Rigid(detailTrackingLine(ui, detail.OrderID, index, shipment)),
+						layout.Rigid(detailLine(ui, "Maker cost", shipment.MakerCost)),
+					)
+				}),
+			}
+			if shipment.ShippingLabelURL != "" {
+				row = append(row,
+					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+					layout.Rigid(primaryButton(ui.theme, ui.shipmentLabelControlFor(detail.OrderID, index), "Reprint label")),
+				)
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, row...)
+		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }

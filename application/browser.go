@@ -16,6 +16,17 @@ func (ui *DesktopUI) openTrackingURL(trackingURL string) {
 	ui.invalidate()
 }
 
+// openShippingLabel opens the existing label at labelURL for printing in the user's browser or PDF viewer.
+// labelURL comes from the validated Orders presenter; it returns no value and reports browser-launch success or a safe failure in the detail status without purchasing a new label.
+func (ui *DesktopUI) openShippingLabel(labelURL string) {
+	if err := ui.openBrowserURL(labelURL); err != nil {
+		ui.orders.view.orderDetailStatus = "Could not open the shipping label. Try again or refresh the order."
+	} else {
+		ui.orders.view.orderDetailStatus = "Shipping label opened in your browser. Print it from the browser or PDF viewer."
+	}
+	ui.invalidate()
+}
+
 // openBrowserURL validates an HTTPS URL and delegates it to the operating system's default browser.
 // rawURL must be an absolute HTTPS URL; it returns an error when validation fails or the OS cannot start its browser-opening command.
 func openBrowserURL(rawURL string) error {

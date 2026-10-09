@@ -973,12 +973,24 @@ func (ui *DesktopUI) orderDetailControlFor(id faire.OrderID) *widget.Clickable {
 // shipmentTrackingControlFor returns the persistent clickable for one tracking link in an order detail view.
 // Its state survives immediate-mode redraws, including orders with multiple shipments that have the same carrier or tracking code.
 func (ui *DesktopUI) shipmentTrackingControlFor(orderID faire.OrderID, shipmentIndex int) *widget.Clickable {
-	key := shipmentTrackingControlKey{orderID: orderID, shipmentIndex: shipmentIndex}
+	key := shipmentControlKey{orderID: orderID, shipmentIndex: shipmentIndex}
 	if control, found := ui.orders.view.trackingControls[key]; found {
 		return control
 	}
 	control := new(widget.Clickable)
 	ui.orders.view.trackingControls[key] = control
+	return control
+}
+
+// shipmentLabelControlFor returns the persistent reprint clickable for shipmentIndex within orderID.
+// Separate label and tracking controls preserve independent gestures when either action is clicked across redraws.
+func (ui *DesktopUI) shipmentLabelControlFor(orderID faire.OrderID, shipmentIndex int) *widget.Clickable {
+	key := shipmentControlKey{orderID: orderID, shipmentIndex: shipmentIndex}
+	if control, found := ui.orders.view.labelControls[key]; found {
+		return control
+	}
+	control := new(widget.Clickable)
+	ui.orders.view.labelControls[key] = control
 	return control
 }
 

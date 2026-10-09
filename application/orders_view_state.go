@@ -8,9 +8,9 @@ import (
 	"github.com/Fepozopo/faire-gui/features/orders"
 )
 
-// shipmentTrackingControlKey uniquely identifies one shipment link within an order detail view.
-// Its order ID and stable shipment position ensure each immediate-mode link retains independent click state.
-type shipmentTrackingControlKey struct {
+// shipmentControlKey identifies a shipment within an order detail view's tracking or label controls.
+// Its order ID and stable shipment position keep each immediate-mode action independent across shipments and orders.
+type shipmentControlKey struct {
 	orderID       faire.OrderID
 	shipmentIndex int
 }
@@ -137,7 +137,8 @@ type ordersViewState struct {
 	searchButton                widget.Clickable
 	rowControls                 map[faire.OrderID]*widget.Clickable
 	detailControls              map[faire.OrderID]*widget.Clickable
-	trackingControls            map[shipmentTrackingControlKey]*widget.Clickable
+	trackingControls            map[shipmentControlKey]*widget.Clickable
+	labelControls               map[shipmentControlKey]*widget.Clickable
 	availabilityControls        map[faire.VariantID]*widget.Clickable
 	stateControls               map[faire.OrderState]*widget.Clickable
 }
@@ -150,7 +151,8 @@ func newOrdersViewState() ordersViewState {
 		pendingUnavailable:   make(map[faire.VariantID]struct{}),
 		rowControls:          make(map[faire.OrderID]*widget.Clickable),
 		detailControls:       make(map[faire.OrderID]*widget.Clickable),
-		trackingControls:     make(map[shipmentTrackingControlKey]*widget.Clickable),
+		trackingControls:     make(map[shipmentControlKey]*widget.Clickable),
+		labelControls:        make(map[shipmentControlKey]*widget.Clickable),
 		availabilityControls: make(map[faire.VariantID]*widget.Clickable),
 		stateControls:        make(map[faire.OrderState]*widget.Clickable),
 		carrierMenuPackage:   -1,

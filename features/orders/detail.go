@@ -63,15 +63,16 @@ type DetailCustomization struct {
 	Value string
 }
 
-// DetailShipment is the display-ready shipping and tracking information for one order shipment.
-// TrackingURL is an allowlisted official-carrier destination and is empty when the carrier or tracking code cannot be safely resolved.
+// DetailShipment is the display-ready shipping, tracking, and label information for one order shipment.
+// TrackingURL is an allowlisted official-carrier destination; ShippingLabelURL is an API-provided absolute HTTPS destination. Both are empty when unavailable or invalid.
 type DetailShipment struct {
-	Carrier      string
-	TrackingCode string
-	TrackingURL  string
-	ShippingType string
-	MakerCost    string
-	Status       string
+	Carrier          string
+	TrackingCode     string
+	TrackingURL      string
+	ShippingLabelURL string
+	ShippingType     string
+	MakerCost        string
+	Status           string
 }
 
 // DetailAddress is the approved shipping-address representation for the detail screen.
@@ -195,7 +196,7 @@ func presentDetailCustomizations(customizations []faire.Customization) []DetailC
 	return presented
 }
 
-// presentDetailShipments maps approved shipment and tracking data from the stored snapshot.
+// presentDetailShipments returns approved display values and validated tracking and label destinations for the supplied stored shipments.
 func presentDetailShipments(shipments []faire.Shipment) []DetailShipment {
 	presented := make([]DetailShipment, len(shipments))
 	for index, shipment := range shipments {
@@ -208,18 +209,29 @@ func presentDetailShipments(shipments []faire.Shipment) []DetailShipment {
 			shippingType = titleFromIdentifier(string(*shipment.ShippingType))
 		}
 		presented[index] = DetailShipment{
-			Carrier:      safeDetailText(optionalText(shipment.Carrier)),
-			TrackingCode: safeDetailText(optionalText(shipment.TrackingCode)),
-			TrackingURL:  officialTrackingURL(optionalTextValue(shipment.Carrier), optionalTextValue(shipment.TrackingCode)),
-			ShippingType: shippingType,
-			MakerCost:    cost,
-			Status:       formatDate(shipment.UpdatedAt),
+			Carrier:          safeDetailText(optionalText(shipment.Carrier)),
+			TrackingCode:     safeDetailText(optionalText(shipment.TrackingCode)),
+			TrackingURL:      officialTrackingURL(optionalTextValue(shipment.Carrier), optionalTextValue(shipment.TrackingCode)),
+			ShippingLabelURL: shippingLabelURL(optionalTextValue(shipment.ShippingLabelURL)),
+			ShippingType:     shippingType,
+			MakerCost:        cost,
+			Status:           formatDate(shipment.UpdatedAt),
 		}
 	}
 	return presented
 }
 
-// presentDetailAddress maps the approved stored shipping-address fields with safe placeholders.
+// shippingLabelURL returns rawURL trimmed of surrounding whitespace when it is an absolute HTTPS label destination, or an empty string otherwise.
+// Keep the original URL bytes after trimming because rewriting query parameters could invalidate a signed label link; the API does not guarantee a particular host or file extension.
+func shippingLabelURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Hostname() == "" || parsedURL.User != nil {
+		return ""
+	}
+	return rawURL
+}
+
 // officialTrackingURL returns the HTTPS URL for an allowlisted carrier's official tracker.
 // It removes control characters and safely escapes the tracking code; unsupported carriers and empty values deliberately return an empty URL so the UI does not forward shipment data to a third party.
 func officialTrackingURL(carrier, trackingCode string) string {
@@ -250,6 +262,7 @@ func officialTrackingURL(carrier, trackingCode string) string {
 }
 
 // presentDetailAddress maps the approved stored shipping-address fields with safe placeholders.
+// presentDetailAddress returns approved shipping-address fields from address, using safe placeholders for missing values or a nil address.
 func presentDetailAddress(address *faire.Address) DetailAddress {
 	if address == nil {
 		return DetailAddress{Name: "—", CompanyName: "—", Address1: "—", Address2: "—", City: "—", State: "—", PostalCode: "—", Country: "—", PhoneNumber: "—"}
