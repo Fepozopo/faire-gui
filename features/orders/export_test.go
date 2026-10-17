@@ -59,8 +59,8 @@ func TestWriteCSVUsesStableHeaderAndOneRowPerItem(t *testing.T) {
 		t.Fatalf("row count = %d, want header plus two items", len(rows))
 	}
 	wantRows := [][]string{
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - UPS"},
-		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - UPS"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-1", "12.00", "2", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - CHEAP"},
+		{"order-1", "ABCD123456", "20260102", "20260104", "Ada Retailer", "1 Main St", "", "", "London", "", "", "", "", "", "", "true", "true,false", "10.5,5", "15.00", "4.25", "SKU-2", "34.00", "1", "ASC", "Sam", "Leave at loading bay", "76.50", "FREE_SHIPPING_THRESHOLD", "88.45", "FAIRE - CHEAP"},
 	}
 	for index, want := range wantRows {
 		if got := rows[index+1]; !reflect.DeepEqual(got, want) {
@@ -86,7 +86,7 @@ func TestWriteCSVOmitsHeaderWhenRequested(t *testing.T) {
 	}
 }
 
-// TestWriteCSVSelectsShipVia verifies state precedence and the discounted-subtotal cutoff in exported rows.
+// TestWriteCSVSelectsShipVia verifies state precedence, the inclusive $100 discounted-subtotal limit, and missing-amount fallbacks in exported rows.
 func TestWriteCSVSelectsShipVia(t *testing.T) {
 	t.Parallel()
 
@@ -98,12 +98,13 @@ func TestWriteCSVSelectsShipVia(t *testing.T) {
 		want         string
 	}{
 		{name: "Alaska code overrides cheap subtotal", address: &faire.Address{StateCode: faire.Ptr("ak")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}}, wantSubtotal: "49.99", want: "FAIRE - USPS"},
-		{name: "Hawaii name overrides expensive subtotal", address: &faire.Address{State: faire.Ptr("Hawaii")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, wantSubtotal: "50.00", want: "FAIRE - USPS"},
+		{name: "Hawaii name overrides expensive subtotal", address: &faire.Address{State: faire.Ptr("Hawaii")}, costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(10001))}}, wantSubtotal: "100.01", want: "FAIRE - USPS"},
 		{name: "Alaska name", address: &faire.Address{State: faire.Ptr("Alaska")}, want: "FAIRE - USPS"},
 		{name: "Hawaii code", address: &faire.Address{StateCode: faire.Ptr("HI")}, want: "FAIRE - USPS"},
-		{name: "below fifty after discounts despite larger payout", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(4999))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(6000))}}, wantSubtotal: "49.99", want: "FAIRE - CHEAP"},
-		{name: "exactly fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, wantSubtotal: "50.00", want: "FAIRE - UPS"},
-		{name: "above fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5001))}}, wantSubtotal: "50.01", want: "FAIRE - UPS"},
+		{name: "below one hundred after discounts despite larger payout", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(9999))}, TotalPayout: &faire.Money{AmountMinor: faire.Ptr(int64(12000))}}, wantSubtotal: "99.99", want: "FAIRE - CHEAP"},
+		{name: "exactly fifty", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(5000))}}, wantSubtotal: "50.00", want: "FAIRE - CHEAP"},
+		{name: "exactly one hundred", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(10000))}}, wantSubtotal: "100.00", want: "FAIRE - CHEAP"},
+		{name: "above one hundred", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(10001))}}, wantSubtotal: "100.01", want: "FAIRE - UPS"},
 		{name: "zero subtotal", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{AmountMinor: faire.Ptr(int64(0))}}, wantSubtotal: "0.00", want: "FAIRE - CHEAP"},
 		{name: "missing subtotal", costs: &faire.PayoutCosts{}, want: "FAIRE - UPS"},
 		{name: "missing amount", costs: &faire.PayoutCosts{SubtotalAfterBrandDiscounts: &faire.Money{}}, want: "FAIRE - UPS"},

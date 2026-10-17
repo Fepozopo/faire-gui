@@ -105,10 +105,11 @@ func csvRow(order faire.Order, item *faire.OrderItem, saleSource SalesSource) []
 	}
 }
 
-const cheapShippingCutoffMinor int64 = 50 * 100
+// cheapShippingCutoffMinor is the inclusive discounted-subtotal limit in cents.
+const cheapShippingCutoffMinor int64 = 100 * 100
 
 // shipVia returns the CSV shipping service for an order, prioritizing Alaska and Hawaii over the discounted subtotal.
-// Missing subtotal amounts do not qualify for the under-$50 service.
+// Discounted subtotals of $100 or less qualify for FAIRE - CHEAP; missing amounts default to FAIRE - UPS.
 func shipVia(order faire.Order) string {
 	if address := order.Address; address != nil {
 		stateCode := strings.ToUpper(strings.TrimSpace(stringValue(address.StateCode)))
@@ -117,7 +118,7 @@ func shipVia(order faire.Order) string {
 			return "FAIRE - USPS"
 		}
 	}
-	if costs := order.PayoutCosts; costs != nil && costs.SubtotalAfterBrandDiscounts != nil && costs.SubtotalAfterBrandDiscounts.AmountMinor != nil && *costs.SubtotalAfterBrandDiscounts.AmountMinor < cheapShippingCutoffMinor {
+	if costs := order.PayoutCosts; costs != nil && costs.SubtotalAfterBrandDiscounts != nil && costs.SubtotalAfterBrandDiscounts.AmountMinor != nil && *costs.SubtotalAfterBrandDiscounts.AmountMinor <= cheapShippingCutoffMinor {
 		return "FAIRE - CHEAP"
 	}
 	return "FAIRE - UPS"
